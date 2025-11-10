@@ -1,0 +1,7 @@
+- document_split.py 切分文档，转化成向量数据库
+- file_processor.py 用于筛选需要处理的文件（剔除那些无关紧要的非代码文件）
+- file_tree_generator.py 生成文件树，后续给ai来分析项目结构
+- knowledge_base_loader.py 用于加载向量知识库
+- prompts.py 统一存放提示词并构建调用所需的 Prompt
+- setup_respository.py 判断路径类型（git下载到本地/本地路径）
+- vector_store_creator.py 为我的项目代码创建向量知识库
