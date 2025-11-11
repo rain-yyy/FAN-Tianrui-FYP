@@ -1,0 +1,129 @@
+{
+  "title": "DeepWiki-Open Documentation",
+  "description": "Comprehensive documentation for the DeepWiki-Open project, detailing system architecture, features, and usage.",
+  "lastIndexed": "2025-11-11",
+  "toc": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "files": ["README.md"],
+      "children": []
+    },
+    {
+      "id": "system-architecture",
+      "title": "System Architecture",
+      "files": ["api/README.md", "README.md"],
+      "children": [
+        {
+          "id": "core-backend-services",
+          "title": "Core Backend Services",
+          "files": ["api/main.py", "api/api.py", "api/data_pipeline.py"],
+          "children": []
+        },
+        {
+          "id": "frontend-architecture",
+          "title": "Frontend Architecture",
+          "files": ["src/app/page.tsx", "src/components/Mermaid.tsx"],
+          "children": []
+        },
+        {
+          "id": "data-processing-pipeline",
+          "title": "Data Processing Pipeline",
+          "files": ["api/data_pipeline.py"],
+          "children": []
+        },
+        {
+          "id": "model-selection-system",
+          "title": "Provider-Based Model Selection System",
+          "files": ["README.md"],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "features",
+      "title": "Features",
+      "files": ["README.md"],
+      "children": [
+        {
+          "id": "instant-documentation",
+          "title": "Instant Documentation",
+          "files": [],
+          "children": []
+        },
+        {
+          "id": "private-repo-support",
+          "title": "Private Repository Support",
+          "files": [],
+          "children": []
+        },
+        {
+          "id": "smart-analysis",
+          "title": "Smart Analysis",
+          "files": [],
+          "children": []
+        },
+        {
+          "id": "ask-feature",
+          "title": "Ask Feature",
+          "files": [],
+          "children": []
+        },
+        {
+          "id": "deep-research",
+          "title": "DeepResearch Feature",
+          "files": [],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "data-models",
+      "title": "Data Models",
+      "files": ["api/config/embedder.json", "api/config/generator.json", "api/config/repo.json"],
+      "children": []
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "files": [".env", "docker-compose.yml"],
+      "children": []
+    },
+    {
+      "id": "deployment",
+      "title": "Deployment",
+      "files": ["Dockerfile", "docker-compose.yml"],
+      "children": []
+    },
+    {
+      "id": "observability",
+      "title": "Observability",
+      "files": ["api/logging_config.py"],
+      "children": []
+    },
+    {
+      "id": "security-and-governance",
+      "title": "Security and Governance",
+      "files": ["README.md"],
+      "children": []
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "files": ["README.md"],
+      "children": []
+    },
+    {
+      "id": "contributing",
+      "title": "Contributing",
+      "files": ["README.md"],
+      "children": []
+    },
+    {
+      "id": "license",
+      "title": "License",
+      "files": ["LICENSE"],
+      "children": []
+    }
+  ]
+}
