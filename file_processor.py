@@ -3,29 +3,6 @@ import json
 import fnmatch
 from pathlib import Path
 
-DEFAULT_CODE_EXTENSIONS = {
-    "py", "pyi", "ipynb",
-    "js", "ts", "tsx", "jsx",
-    "java", "kt", "kts", "go",
-    "rs", "cpp", "cc", "cxx", "c", "h", "hpp",
-    "swift", "rb", "php",
-    "cs", "scala",
-    "sh", "bash", "zsh",
-    "ps1",
-    "sql",
-    "r", "jl",
-}
-
-DEFAULT_TEXT_EXTENSIONS = {
-    "md", "mdx", "markdown",
-    "rst", "txt", "log",
-    "tex",
-    "yaml", "yml", "toml", "ini", "cfg",
-    "json", "jsonc",
-    "csv", "tsv",
-    "env", "sample", "example",
-    "adoc",
-}
 
 SPECIAL_CODE_FILENAMES = {
     "dockerfile",
@@ -57,6 +34,14 @@ def load_config(config_path: str) -> dict:
 
     with open(config_path, 'r') as f:
         return json.load(f)
+
+
+CONFIG_PATH = Path(__file__).parent / "config/repo_config.json"
+CONFIG = load_config(CONFIG_PATH)
+
+DEFAULT_CODE_EXTENSIONS = CONFIG.get("file_categories", {}).get("code_extensions", [])
+
+DEFAULT_TEXT_EXTENSIONS = CONFIG.get("file_categories", {}).get("text_extensions", [])
 
 def is_binary(file_path: str) -> bool:
     """简单检查文件是否为二进制"""
@@ -133,18 +118,16 @@ def find_relevant_files(repo_path: str, config: dict) -> list[str]:
     return relevant_files
 
 
-def split_code_and_text_files(
-    file_paths: list[str], config: dict
-) -> tuple[list[str], list[str]]:
+def split_code_and_text_files(file_paths: list[str], config: dict) -> tuple[list[str], list[str]]:
     categories = config.get("file_categories", {})
 
     code_exts = {
         ext.lower().lstrip(".")
-        for ext in categories.get("code_extensions", DEFAULT_CODE_EXTENSIONS)
+        for ext in DEFAULT_CODE_EXTENSIONS
     }
     text_exts = {
         ext.lower().lstrip(".")
-        for ext in categories.get("text_extensions", DEFAULT_TEXT_EXTENSIONS)
+        for ext in DEFAULT_TEXT_EXTENSIONS
     }
 
     code_files: list[str] = []

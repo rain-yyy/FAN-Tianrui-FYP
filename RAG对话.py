@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, Iterable, List, Mapping
+from typing import Dict, Iterable, List, Mapping, TYPE_CHECKING
 
 from dotenv import load_dotenv
 from langchain_core.documents import Document
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from knowledge_base_loader import load_knowledge_base
+from prompts import get_rag_chat_prompt
+
+if TYPE_CHECKING:
+    from langchain_community.vectorstores import FAISS
+else:  # pragma: no cover - runtime fallback for type checking convenience
+    FAISS = object  # type: ignore[assignment]
 
 load_dotenv()
 
@@ -20,6 +25,7 @@ CATEGORY_TOP_K: Dict[str, int] = {
     "code": 5,
     "text": 2,
 }
+RAG_PROMPT = get_rag_chat_prompt()
 
 
 def _ensure_openai_key() -> None:
@@ -65,7 +71,7 @@ def _resolve_category_path(root_path: str, category: str) -> str:
 
 def _load_vector_stores(
     root_path: str, categories: Iterable[str]
-) -> Dict[str, "FAISS"]:
+) -> Dict[str, FAISS]:
     stores: Dict[str, "FAISS"] = {}
     for category in categories:
         category_path = _resolve_category_path(root_path, category)
@@ -162,7 +168,7 @@ def interactive_chat(
 
 
 def _answer_with_stores(
-    stores: Mapping[str, "FAISS"],
+    stores: Mapping[str, FAISS],
     question: str,
     *,
     category_top_k: Mapping[str, int],
@@ -184,23 +190,9 @@ def _answer_with_stores(
         print("Warning: No relevant context retrieved. The answer may be limited.")
 
     llm = ChatOpenAI(model=DEFAULT_MODEL, temperature=0.1)
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                "你是一名熟悉软件项目的智能助手。请仅依据提供的上下文回答用户问题，无法确定时请明确说明。",
-            ),
-            (
-                "human",
-                "以下是检索到的仓库上下文（可能为空）：\n{context}\n\n"
-                "问题：{question}\n\n"
-                "请给出简洁、准确的中文回答。",
-            ),
-        ]
-    )
 
     print("Calling AI model to generate answer...")
-    chain = prompt | llm
+    chain = RAG_PROMPT | llm
     response = chain.invoke({"context": context or "无检索结果。", "question": question})
     answer_text = getattr(response, "content", response)
 
