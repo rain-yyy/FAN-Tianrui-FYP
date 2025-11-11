@@ -124,6 +124,30 @@
     },
     "repository": {
       "max_size_mb": 50000
+    },
+    "file_categories": {
+      "code_extensions": [
+        "py", "pyi", "ipynb",
+        "js", "jsx", "ts", "tsx",
+        "java", "kt", "kts", "go",
+        "cpp", "cc", "cxx", "c", "h", "hpp",
+        "rs", "swift", "rb", "php",
+        "cs", "scala",
+        "sh", "bash", "zsh",
+        "ps1",
+        "sql",
+        "r", "jl"
+      ],
+      "text_extensions": [
+        "md", "mdx", "markdown",
+        "rst", "txt", "log",
+        "tex",
+        "yaml", "yml", "toml", "ini", "cfg",
+        "json", "jsonc",
+        "csv", "tsv",
+        "env", "sample", "example",
+        "adoc"
+      ]
     }
   }
   

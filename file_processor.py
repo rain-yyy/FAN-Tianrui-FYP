@@ -1,6 +1,52 @@
 import os
 import json
 import fnmatch
+from pathlib import Path
+
+DEFAULT_CODE_EXTENSIONS = {
+    "py", "pyi", "ipynb",
+    "js", "ts", "tsx", "jsx",
+    "java", "kt", "kts", "go",
+    "rs", "cpp", "cc", "cxx", "c", "h", "hpp",
+    "swift", "rb", "php",
+    "cs", "scala",
+    "sh", "bash", "zsh",
+    "ps1",
+    "sql",
+    "r", "jl",
+}
+
+DEFAULT_TEXT_EXTENSIONS = {
+    "md", "mdx", "markdown",
+    "rst", "txt", "log",
+    "tex",
+    "yaml", "yml", "toml", "ini", "cfg",
+    "json", "jsonc",
+    "csv", "tsv",
+    "env", "sample", "example",
+    "adoc",
+}
+
+SPECIAL_CODE_FILENAMES = {
+    "dockerfile",
+    "makefile",
+    "cmakelists.txt",
+    "build.gradle",
+    "gradlew",
+    "gradlew.bat",
+    "package.json",
+    "pnpm-workspace.yaml",
+    "requirements.txt",
+}
+
+SPECIAL_TEXT_FILENAMES = {
+    "license",
+    "license.txt",
+    "changelog",
+    "changelog.md",
+    "readme",
+    "readme.md",
+}
 
 def load_config(config_path: str) -> dict:
     """
@@ -26,36 +72,97 @@ def find_relevant_files(repo_path: str, config: dict) -> list[str]:
     """
     遍历仓库，根据配置过滤文件。
     """
-    relevant_files = []
-    include_patterns = config.get("include_patterns", [])
-    ignore_patterns = config.get("ignore_patterns", [])
+    relevant_files: list[str] = []
+    filters = config.get("file_filters", {})
+    excluded_dirs = [
+        pattern.strip().lstrip("./")
+        for pattern in filters.get("excluded_dirs", [])
+        if pattern and pattern.strip()
+    ]
+    excluded_files = [
+        pattern.strip().lstrip("./")
+        for pattern in filters.get("excluded_files", [])
+        if pattern and pattern.strip()
+    ]
+    include_patterns = [p for p in config.get("include_patterns", []) if p]
+
+    repo_path = os.path.abspath(repo_path)
+
+    def _matches_any(path_fragment: str, patterns: list[str]) -> bool:
+        normalized = path_fragment.replace("\\", "/")
+        for pattern in patterns:
+            if fnmatch.fnmatch(normalized, pattern):
+                return True
+        return False
 
     for root, dirs, files in os.walk(repo_path):
-        # 过滤掉需要忽略的目录
-        # 注意：这里需要修改dirs列表来阻止os.walk进入这些目录
-        dirs[:] = [d for d in dirs if not any(
-            fnmatch.fnmatch(os.path.join(root, d), pattern) for pattern in ignore_patterns
-        )]
-        
+        rel_root = os.path.relpath(root, repo_path).replace("\\", "/")
+        if rel_root == ".":
+            rel_root = ""
+
+        dirs[:] = [
+            d
+            for d in dirs
+            if not _matches_any(
+                os.path.join(rel_root, d).replace("\\", "/").lstrip("./"),
+                excluded_dirs,
+            )
+            and not _matches_any(d, excluded_dirs)
+        ]
+
         for filename in files:
             file_path = os.path.join(root, filename)
-            
-            # 1. 检查是否匹配忽略规则
-            if any(fnmatch.fnmatch(file_path, pattern) for pattern in ignore_patterns):
+            rel_file_path = os.path.relpath(file_path, repo_path).replace("\\", "/")
+
+            if _matches_any(rel_file_path, excluded_files) or _matches_any(
+                filename, excluded_files
+            ):
                 continue
 
-            # 2. 检查是否匹配包含规则 (如果include_patterns存在)
-            if include_patterns and not any(fnmatch.fnmatch(filename, pattern) for pattern in include_patterns):
+            if include_patterns and not any(
+                fnmatch.fnmatch(filename, pattern) for pattern in include_patterns
+            ):
                 continue
 
-            # 3. 检查是否为二进制文件
             if is_binary(file_path):
                 continue
-            
+
             relevant_files.append(file_path)
-            
+
     print(f"Found {len(relevant_files)} relevant files.")
     return relevant_files
+
+
+def split_code_and_text_files(
+    file_paths: list[str], config: dict
+) -> tuple[list[str], list[str]]:
+    categories = config.get("file_categories", {})
+
+    code_exts = {
+        ext.lower().lstrip(".")
+        for ext in categories.get("code_extensions", DEFAULT_CODE_EXTENSIONS)
+    }
+    text_exts = {
+        ext.lower().lstrip(".")
+        for ext in categories.get("text_extensions", DEFAULT_TEXT_EXTENSIONS)
+    }
+
+    code_files: list[str] = []
+    text_files: list[str] = []
+
+    for path in file_paths:
+        suffix = Path(path).suffix.lower().lstrip(".")
+        filename = Path(path).name.lower()
+
+        if suffix in code_exts or filename in SPECIAL_CODE_FILENAMES:
+            code_files.append(path)
+        elif suffix in text_exts or filename in SPECIAL_TEXT_FILENAMES:
+            text_files.append(path)
+        else:
+            # 默认将剩余的文本类文件归入文本向量库，避免遗漏核心描述信息
+            text_files.append(path)
+
+    return code_files, text_files
 
 def generate_file_tree(repo_path: str, config_path: str) -> str:
     """

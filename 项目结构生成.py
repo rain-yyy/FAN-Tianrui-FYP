@@ -7,6 +7,7 @@ from file_processor import (
     generate_file_tree,
     load_config,
     find_relevant_files,
+    split_code_and_text_files,
 )
 from document_splitter import load_and_split_docs
 from vector_store_creator import create_and_save_vector_store
@@ -52,16 +53,31 @@ def run_structure_generation(
     # 构建向量知识库
     print("\n开始构建向量知识库...")
     relevant_files = find_relevant_files(repo_path, config)
-    docs = load_and_split_docs(relevant_files)
+    code_files, text_files = split_code_and_text_files(relevant_files, config)
 
-    vector_store_path = VECTOR_STORE_PATH.expanduser().resolve()
-    vector_store_path.parent.mkdir(parents=True, exist_ok=True)
+    vector_store_root = VECTOR_STORE_PATH.expanduser().resolve()
+    vector_store_root.mkdir(parents=True, exist_ok=True)
 
-    if docs:
-        create_and_save_vector_store(docs, str(vector_store_path))
-        print(f"向量知识库已保存至：{vector_store_path}")
-    else:
-        print("未找到可用于构建向量知识库的文档，跳过向量库生成。")
+    categories = {
+        "code": code_files,
+        "text": text_files,
+    }
+
+    for category, files in categories.items():
+        print(f"\n[{category}] 准备处理 {len(files)} 个文件。")
+        if not files:
+            print(f"[{category}] 未找到可用于构建向量库的文件，跳过。")
+            continue
+
+        docs = load_and_split_docs(files)
+        if not docs:
+            print(f"[{category}] 文档块为空，跳过向量库生成。")
+            continue
+
+        target_dir = vector_store_root / category
+        target_dir.mkdir(parents=True, exist_ok=True)
+        create_and_save_vector_store(docs, str(target_dir))
+        print(f"[{category}] 向量知识库已保存至：{target_dir}")
 
     return wiki_structure
 
