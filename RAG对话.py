@@ -8,7 +8,7 @@ from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 
 from knowledge_base_loader import load_knowledge_base
-from prompts import get_rag_chat_prompt
+from prompts.prompts import get_rag_chat_prompt
 
 if TYPE_CHECKING:
     from langchain_community.vectorstores import FAISS
