@@ -3,6 +3,7 @@ import json
 import fnmatch
 from pathlib import Path
 
+# TODO: 只处理中文，英文，符号，数字，其他语言的内容直接忽略
 
 SPECIAL_CODE_FILENAMES = {
     "dockerfile",
