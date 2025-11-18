@@ -9,7 +9,7 @@ from typing import Any, Dict
 import dotenv
 from langchain_openai import ChatOpenAI
 
-from prompts import get_structure_prompt
+from prompts.prompts import get_structure_prompt
 
 dotenv.load_dotenv()
 

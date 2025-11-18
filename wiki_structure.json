@@ -1,45 +1,71 @@
 {
-  "title": "DeepWiki-Open Documentation",
-  "description": "Comprehensive documentation for the DeepWiki-Open project, detailing system architecture, core services, and usage instructions.",
-  "lastIndexed": "2025-11-11",
+  "title": "DeepWiki Technical Documentation",
+  "description": "Comprehensive documentation for the DeepWiki project, detailing system architecture, backend services, and usage instructions.",
+  "lastIndexed": "2025-11-18",
   "toc": [
     {
       "id": "overview",
       "title": "Overview",
-      "files": []
+      "files": [
+        "README.md"
+      ]
     },
     {
       "id": "system-architecture",
       "title": "System Architecture",
+      "files": [
+        "README.md"
+      ]
+    },
+    {
+      "id": "core-backend-services",
+      "title": "Core Backend Services",
       "children": [
         {
-          "id": "core-backend-services",
-          "title": "Core Backend Services",
+          "id": "api-layer",
+          "title": "API Layer",
           "files": [
-            "api/main.py",
             "api/api.py",
-            "api/requirements.txt"
+            "api/config.py"
           ]
         },
         {
-          "id": "frontend-architecture",
-          "title": "Frontend Architecture",
+          "id": "data-processing",
+          "title": "Data Processing Pipeline",
           "files": [
-            "src/app/page.tsx",
-            "src/components/Mermaid.tsx",
-            "src/public/file.svg"
+            "api/data_pipeline.py",
+            "api/rag.py"
           ]
         }
       ],
-      "files": []
+      "files": [
+        "api/README.md",
+        "api/main.py",
+        "api/api.py"
+      ]
     },
     {
-      "id": "document-processing-pipeline",
-      "title": "Document Processing Pipeline",
+      "id": "document-processing",
+      "title": "Document Processing",
+      "children": [
+        {
+          "id": "embedding-models",
+          "title": "Embedding Models",
+          "files": [
+            "api/config/embedder.json",
+            "api/config/generator.json"
+          ]
+        },
+        {
+          "id": "model-selection",
+          "title": "Model Selection",
+          "files": [
+            "README.md"
+          ]
+        }
+      ],
       "files": [
-        "api/data_pipeline.py",
-        "api/rag.py",
-        "api/config/generator.json"
+        "README.md"
       ]
     },
     {
@@ -47,55 +73,78 @@
       "title": "Data Models",
       "files": [
         "src/types/repoinfo.tsx",
-        "src/types/wiki/wikipage.tsx",
-        "src/types/wiki/wikistructure.tsx"
+        "src/types/wiki/wikipage.tsx"
       ]
     },
     {
       "id": "observability",
       "title": "Observability",
       "files": [
-        "api/logging_config.py",
-        "api/config/logging.json"
+        "api/logging_config.py"
       ]
     },
     {
       "id": "infrastructure",
       "title": "Infrastructure",
+      "children": [
+        {
+          "id": "docker-setup",
+          "title": "Docker Setup",
+          "files": [
+            "README.md"
+          ]
+        },
+        {
+          "id": "environment-variables",
+          "title": "Environment Variables",
+          "files": [
+            "README.md"
+          ]
+        }
+      ],
       "files": [
         "docker-compose.yml",
-        "Dockerfile",
-        "run.sh"
-      ]
-    },
-    {
-      "id": "api-reference",
-      "title": "API Reference",
-      "files": [
-        "api/README.md"
-      ]
-    },
-    {
-      "id": "configuration",
-      "title": "Configuration",
-      "files": [
-        ".env",
-        "api/config/embedder.json",
-        "api/config/repo.json"
-      ]
-    },
-    {
-      "id": "deployment",
-      "title": "Deployment",
-      "files": [
-        "README.md",
-        "Ollama-instruction.md"
+        "Dockerfile"
       ]
     },
     {
       "id": "security-and-governance",
       "title": "Security and Governance",
-      "files": []
+      "children": [
+        {
+          "id": "authorization-mode",
+          "title": "Authorization Mode",
+          "files": [
+            "README.md"
+          ]
+        }
+      ],
+      "files": [
+        "README.md"
+      ]
+    },
+    {
+      "id": "critical-workflows",
+      "title": "Critical Workflows",
+      "children": [
+        {
+          "id": "repository-cloning",
+          "title": "Repository Cloning",
+          "files": [
+            "README.md"
+          ]
+        },
+        {
+          "id": "wiki-generation",
+          "title": "Wiki Generation",
+          "files": [
+            "README.md"
+          ]
+        }
+      ],
+      "files": [
+        "README.md"
+      ]
     },
     {
       "id": "troubleshooting",

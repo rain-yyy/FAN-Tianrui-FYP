@@ -3,3 +3,5 @@ vector_store/
 debug_outputs/
 __pycache__/
 TODO
+wiki_section_json/
+wiki_pages/

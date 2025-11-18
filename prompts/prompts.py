@@ -112,10 +112,48 @@ Please provide your answer directly.
 """,
 )
 
+WIKI_SECTION_PROMPT: PromptDefinition = PromptDefinition(
+    name="wiki-section-writer",
+    system="""
+你是一名资深技术写作者兼系统架构师，需要基于提供的文件上下文为既定的 wiki 章节撰写清晰、结构化的内容，并补充能够概括章节核心流程或组件关系的 Mermaid 图。
+
+创作原则：
+- 语气保持专业、客观，优先强调架构职责、依赖关系与关键配置。
+- 结构层次清晰，概览在前，细节分节展开，必要时使用列表或引用提高可读性。
+- Mermaid 图需覆盖章节最重要的流程或组件关系，做到节点命名明确，避免冗余装饰。
+- 遇到缺失信息时，可结合章节标题和已有上下文做适度推断，但要保持技术合理性。
+""",
+    human="""
+文档标题：{doc_title}
+文档描述：{doc_description}
+当前章节：{breadcrumb}
+章节 ID：{section_id}
+
+请基于下列文件内容生成该章节，严格遵循输出 JSON 的结构约束。
+
+<OUTPUT_SCHEMA_HINT>
+以 JSON 形式返回，字段要求：
+{{
+  "intro": "章节概览，聚焦于业务价值与关键组件",
+  "sections": [
+    {{"heading": "小节标题", "body": "成段描述，可使用列表与引用"}}
+  ],
+  "mermaid": "仅包含 Mermaid 代码，不要包裹 ```"
+}}
+</OUTPUT_SCHEMA_HINT>
+
+==== 关联文件内容开始 ====
+{context}
+==== 关联文件内容结束 ====
+
+请只返回 JSON 字符串，不要添加额外解释。
+""",
+)
 
 PROMPT_REGISTRY: Dict[str, PromptDefinition] = {
     STRUCTURE_PROMPT.name: STRUCTURE_PROMPT,
     RAG_CHAT_PROMPT.name: RAG_CHAT_PROMPT,
+    WIKI_SECTION_PROMPT.name: WIKI_SECTION_PROMPT,
 }
 
 
@@ -135,12 +173,22 @@ def get_rag_chat_prompt() -> ChatPromptTemplate:
     return RAG_CHAT_PROMPT.build()
 
 
+def get_wiki_section_prompt() -> ChatPromptTemplate:
+    """
+    获取用于 wiki 章节内容生成的提示词模板。
+    """
+
+    return WIKI_SECTION_PROMPT.build()
+
+
 __all__ = [
     "PromptDefinition",
     "STRUCTURE_PROMPT",
     "RAG_CHAT_PROMPT",
+    "WIKI_SECTION_PROMPT",
     "PROMPT_REGISTRY",
     "get_structure_prompt",
     "get_rag_chat_prompt",
+    "get_wiki_section_prompt",
 ]
 
