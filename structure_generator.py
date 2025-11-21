@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from datetime import datetime
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 import dotenv
 from langchain_openai import ChatOpenAI
@@ -12,13 +14,74 @@ from langchain_openai import ChatOpenAI
 from prompts.prompts import get_structure_prompt
 
 dotenv.load_dotenv()
-
 openai_key = os.getenv("OPENAI_API_KEY")
 
+REPO_MAPPER_DIR = Path(__file__).resolve().parent / "RepoMapper"
 
-def generate_wiki_structure(repo_path: str, file_tree: str) -> Dict[str, Any]:
+
+def _build_repo_map_context(repo_path: str, target_subdir: str = "src") -> str:
     """
-    调用 LLM 生成分层 Wiki 目录并解析 JSON 响应。
+    调用 RepoMapper，生成用于提示词的代码骨架摘要。
+    """
+    repo_mapper_dir = REPO_MAPPER_DIR
+    if not repo_mapper_dir.exists():
+        print(f"Repo map directory missing: {repo_mapper_dir}")
+        return ""
+
+    repo_mapper_path = str(repo_mapper_dir)
+    if repo_mapper_path not in sys.path:
+        sys.path.insert(0, repo_mapper_path)
+
+    try:
+        from RepoMapper.repomap import find_src_files
+        from RepoMapper.repomap_class import RepoMap
+    except ImportError as exc:
+        print(f"Repo map dependencies missing, skip context: {exc}")
+        return ""
+
+    repo_root = Path(repo_path).resolve()
+    search_root = repo_root / target_subdir
+    if not search_root.exists():
+        search_root = repo_root
+
+    try:
+        candidate_files = find_src_files(str(search_root))
+    except Exception as exc:  # noqa: BLE001 - 依赖库内部异常需吞掉
+        print(f"Repo map file discovery failed: {exc}")
+        return ""
+
+    if not candidate_files:
+        print("Repo map: no files discovered, skip context.")
+        return ""
+
+    resolved_files = [str(Path(path).resolve()) for path in candidate_files]
+
+    try:
+        repo_map = RepoMap(
+            map_tokens=8192,
+            root=str(repo_root),
+            verbose=False,
+        )
+        map_content, _ = repo_map.get_repo_map(
+            chat_files=[],
+            other_files=resolved_files,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Repo map generation failed: {exc}")
+        return ""
+
+    if not map_content:
+        print("Repo map returned empty content.")
+        return ""
+
+    return map_content.strip()
+
+
+def generate_wiki_structure(
+    repo_path: str, file_tree: str, repo_map: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    调用 gpt 4o mini 生成分层 Wiki 目录并解析 JSON 响应。
     """
     print("Generating wiki structure with AI...")
 
@@ -36,6 +99,12 @@ def generate_wiki_structure(repo_path: str, file_tree: str) -> Dict[str, Any]:
     prompt = get_structure_prompt()
     current_date = datetime.utcnow().date().isoformat()
 
+    # 2.1 准备 RepoMap 语境
+    if repo_map is None:
+        print("Building repo map context...")
+        repo_map = _build_repo_map_context(repo_path)
+        print(repo_map)
+
     # 3. 构建执行链
     chain = prompt | llm
 
@@ -46,6 +115,7 @@ def generate_wiki_structure(repo_path: str, file_tree: str) -> Dict[str, Any]:
             "file_tree": file_tree,
             "readme_content": readme_content,
             "current_date": current_date,
+            "repo_map": repo_map or "",
         }
     )
 

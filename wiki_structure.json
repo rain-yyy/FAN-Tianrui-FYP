@@ -1,79 +1,61 @@
 {
   "title": "DeepWiki Technical Documentation",
-  "description": "Comprehensive documentation for the DeepWiki project, detailing system architecture, backend services, and usage instructions.",
-  "lastIndexed": "2025-11-18",
+  "description": "Comprehensive documentation for the DeepWiki project, detailing system architecture, core services, and deployment.",
+  "lastIndexed": "2025-11-21",
   "toc": [
     {
       "id": "overview",
       "title": "Overview",
       "files": [
-        "README.md"
+        "README.md",
+        "Dockerfile",
+        "docker-compose.yml",
+        "api/main.py",
+        "src/app/page.tsx"
       ]
     },
     {
       "id": "system-architecture",
       "title": "System Architecture",
-      "files": [
-        "README.md"
-      ]
-    },
-    {
-      "id": "core-backend-services",
-      "title": "Core Backend Services",
       "children": [
         {
-          "id": "api-layer",
-          "title": "API Layer",
+          "id": "core-backend-services",
+          "title": "Core Backend Services",
           "files": [
             "api/api.py",
-            "api/config.py"
+            "api/rag.py",
+            "api/data_pipeline.py",
+            "api/config/config.py"
           ]
         },
         {
-          "id": "data-processing",
-          "title": "Data Processing Pipeline",
+          "id": "frontend-architecture",
+          "title": "Frontend Architecture",
           "files": [
-            "api/data_pipeline.py",
-            "api/rag.py"
+            "src/app/layout.tsx",
+            "src/components/Ask.tsx",
+            "src/components/Mermaid.tsx"
           ]
         }
       ],
-      "files": [
-        "api/README.md",
-        "api/main.py",
-        "api/api.py"
-      ]
+      "files": []
     },
     {
-      "id": "document-processing",
-      "title": "Document Processing",
-      "children": [
-        {
-          "id": "embedding-models",
-          "title": "Embedding Models",
-          "files": [
-            "api/config/embedder.json",
-            "api/config/generator.json"
-          ]
-        },
-        {
-          "id": "model-selection",
-          "title": "Model Selection",
-          "files": [
-            "README.md"
-          ]
-        }
-      ],
+      "id": "document-processing-pipeline",
+      "title": "Document Processing Pipeline",
       "files": [
-        "README.md"
+        "api/data_pipeline.py",
+        "api/azureai_client.py",
+        "api/google_embedder_client.py"
       ]
     },
     {
       "id": "data-models",
       "title": "Data Models",
       "files": [
-        "src/types/repoinfo.tsx",
-        "src/types/wiki/wikipage.tsx"
+        "src/types/wiki/wikistructure.tsx",
+        "src/types/wiki/wikipage.tsx",
+        "src/types/repoinfo.tsx"
       ]
     },
     {
@@ -86,86 +68,51 @@
     {
       "id": "infrastructure",
       "title": "Infrastructure",
+      "files": [
+        "Dockerfile",
+        "docker-compose.yml"
+      ]
+    },
+    {
+      "id": "deployment",
+      "title": "Deployment",
+      "files": [
+        "README.md",
+        "run.sh",
+        ".env"
+      ]
+    },
+    {
+      "id": "api-layer",
+      "title": "API Layer",
+      "files": [
+        "api/api.py",
+        "api/auth/validate/route.ts",
+        "api/chat/stream/route.ts"
+      ]
+    },
+    {
+      "id": "features",
+      "title": "Features",
       "children": [
         {
-          "id": "docker-setup",
-          "title": "Docker Setup",
+          "id": "ask-feature",
+          "title": "Ask Feature",
           "files": [
-            "README.md"
+            "src/components/Ask.tsx",
+            "src/utils/websocketClient.ts"
           ]
         },
         {
-          "id": "environment-variables",
-          "title": "Environment Variables",
+          "id": "deep-research-feature",
+          "title": "DeepResearch Feature",
           "files": [
-            "README.md"
+            "src/components/ProcessedProjects.tsx",
+            "src/hooks/useProcessedProjects.ts"
           ]
         }
       ],
-      "files": [
-        "docker-compose.yml",
-        "Dockerfile"
-      ]
-    },
-    {
-      "id": "security-and-governance",
-      "title": "Security and Governance",
-      "children": [
-        {
-          "id": "authorization-mode",
-          "title": "Authorization Mode",
-          "files": [
-            "README.md"
-          ]
-        }
-      ],
-      "files": [
-        "README.md"
-      ]
-    },
-    {
-      "id": "critical-workflows",
-      "title": "Critical Workflows",
-      "children": [
-        {
-          "id": "repository-cloning",
-          "title": "Repository Cloning",
-          "files": [
-            "README.md"
-          ]
-        },
-        {
-          "id": "wiki-generation",
-          "title": "Wiki Generation",
-          "files": [
-            "README.md"
-          ]
-        }
-      ],
-      "files": [
-        "README.md"
-      ]
-    },
-    {
-      "id": "troubleshooting",
-      "title": "Troubleshooting",
-      "files": [
-        "README.md"
-      ]
-    },
-    {
-      "id": "contributing",
-      "title": "Contributing",
-      "files": [
-        "README.md"
-      ]
-    },
-    {
-      "id": "license",
-      "title": "License",
-      "files": [
-        "LICENSE"
-      ]
+      "files": []
     }
   ]
 }

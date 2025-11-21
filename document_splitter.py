@@ -12,8 +12,7 @@ def load_and_split_docs(file_paths: list[str]) -> list[Document]:
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=2000,
         chunk_overlap=200,
-        # 可以为不同语言定义分隔符
-        # separators=["\n\n", "\n", " ", ""]
+
     )
 
     for file_path in file_paths:

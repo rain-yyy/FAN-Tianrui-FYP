@@ -8,9 +8,6 @@ from langchain_core.prompts import ChatPromptTemplate
 
 @dataclass(frozen=True)
 class PromptDefinition:
-    """
-    统一存放所有提示词的简单数据结构，方便集中管理与复用。
-    """
 
     name: str
     system: str
@@ -28,34 +25,41 @@ class PromptDefinition:
 STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
     name="structure-navigation",
     system="""
-You are a senior technical documentation writer and software architect. Based on the provided repository context, design a multi-level technical documentation table of contents (sidebar navigation).
+            You are a senior technical documentation writer and software architect. Based on the provided repository context, design a multi-level technical documentation table of contents (sidebar navigation).
 
-Goals to achieve:
-- Align the structure with the look and feel of DeepWiki's System Architecture page, including top-level sections and nested entries.
-- Ensure the table of contents guides readers from high-level overview to detailed components (e.g., Overview, System Architecture, Core Backend Services, Document Processing Pipeline, Data Models, Observability, Infrastructure, etc.).
-- Name nodes clearly, professionally, and semantically; avoid duplicate or ambiguous titles at the same level.
+            Goals to achieve:
+            - Align the structure with the look and feel of DeepWiki's System Architecture page, including top-level sections and nested entries.
+            - Ensure the table of contents guides readers from high-level overview to detailed components (e.g., Overview, System Architecture, Core Backend Services, Document Processing Pipeline, Data Models, Observability, Infrastructure, Deployment, etc.).
+            - Name nodes clearly, professionally, and semantically; avoid duplicate or ambiguous titles at the same level.
 
-Output format (strictly follow):
-- Return a single valid JSON string.
-- The JSON root object must contain the keys: `title`, `description`, `lastIndexed`, `toc`.
-- `lastIndexed` must use the provided `current_date` without modifying the format.
-- `toc` is an array of objects; each object must include at least `id` and `title`, with optional `children`.
-- Each node must provide a `files` array listing 3-8 relative paths that are most relevant when drafting the section; return an empty array if uncertain.
-- If `children` exists it must be an array, and each child must follow the same structure recursively.
+            Output format (strictly follow):
+            - Return a single valid JSON string.
+            - The JSON root object must contain the keys: `title`, `description`, `lastIndexed`, `toc`.
+            - `lastIndexed` must use the provided `current_date` without modifying the format.
+            - `toc` is an array of objects; each object must include at least `id` and `title`, with optional `children`.
+            - Each node must provide a `files` array listing all relative paths that are most relevant for drafting the section.
+            - **CRITICAL FOR `files` ARRAY**: Do NOT just list "README.md". You MUST analyze the <FILE_TREE> and <REPO_MAP> to find the actual source code files (e.g., `main.py`, `app.tsx`, `config.yaml`, controllers, models) that implement the functionality described in that section.
+            - If `children` exists it must be an array, and each child must follow the same structure recursively.
 
-Mandatory constraints:
-- Output exactly one valid JSON string without extra commentary or markers.
-- Use kebab-case for every `id`; ensure they are meaningful and stable (suitable for URLs/anchors).
-- `title` must be human-readable with leading capital letters.
-- If a node has no children, omit the `children` field or set it to an empty array.
-- Remove sections for unsupported functionality in the repository; add sections when you discover specific features (AI, pipelines, CI/CD, etc.).
-- Populate `lastIndexed` with the provided `current_date`.
+            Mandatory constraints:
+            - Output exactly one valid JSON string without extra commentary or markers.
+            - Use kebab-case for every `id`; ensure they are meaningful and stable (suitable for URLs/anchors).
+            - `title` must be human-readable with leading capital letters.
+            - If a node has no children, omit the `children` field or set it to an empty array.
+            - Remove sections for unsupported functionality in the repository; add sections when you discover specific features (AI, pipelines, CI/CD, etc.).
+            - Populate `lastIndexed` with the provided `current_date`.
 
-Focus on the following when designing the table of contents:
-- Core backend services, API layer, document and knowledge base processing flows.
-- Data models, configuration, deployment, observability, security, and governance modules.
-- Highlight critical workflows (e.g., from repository commit to documentation generation) with dedicated sections.
-""",
+            Detailed Strategy for File Selection:
+            - **Overview**: Must include entry points (e.g., `main.py`, `index.js`), key configuration (`package.json`, `docker-compose.yml`), and `README.md`.
+            - **Architecture/Services**: Look for distinct modules in the file tree. If there is an `api` folder, list its key files. If there is a `models` folder, map it to "Data Models".
+            - **Repo Map Usage**: Use the provided Repo Map to identify which files contain the most important classes and function definitions. High-importance files MUST be referenced in their respective sections.
+            - **Sparse README Handling**: If the README is short or missing, rely ENTIRELY on the file tree and naming conventions to structure the documentation.
+
+            Focus on the following when designing the table of contents:
+            - Core backend services, API layer, document and knowledge base processing flows.
+            - Data models, configuration, deployment, observability, security, and governance modules.
+            - Highlight critical workflows (e.g., from repository commit to documentation generation) with dedicated sections.
+            """,
     human="""
             The repository context is provided below. Analyze it thoroughly and return a JSON table of contents that satisfies all requirements (respond with the JSON string directly):
 
@@ -70,6 +74,10 @@ Focus on the following when designing the table of contents:
             <README>
             {readme_content}
             </README>
+
+            <REPO_MAP>
+            {repo_map}
+            </REPO_MAP>
           """,
 )
 
