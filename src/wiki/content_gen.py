@@ -8,8 +8,8 @@ from typing import Any, Dict, Iterable, List, Sequence
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from deepseek_client import DeepseekClient, DeepseekAPIError
-from prompts.prompts import get_wiki_section_prompt
+from src.deepseek_client import DeepseekClient, DeepseekAPIError
+from src.prompts import get_wiki_section_prompt
 
 
 @dataclass(slots=True)

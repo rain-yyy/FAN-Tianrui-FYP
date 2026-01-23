@@ -1,22 +1,13 @@
-from importlib.abc import ExecutionLoader
-import os
 import tempfile
 from git import Repo, GitCommandError
-import json
-import fnmatch
 
 
 def setup_repository(repo_url_or_path: str) -> str:
     """
-    如果提供的是本地地址，则验证并返回该路径(绝对路径)
-    如果提供的是远程地址，则克隆到本地，并返回本地路径
+    将远程地址克隆到本地，并返回本地路径
     """
 
     print(f"Setting up repository for: {repo_url_or_path}")
-
-    if os.path.isdir(repo_url_or_path): 
-        print(f"Repository already exists at: {repo_url_or_path}")
-        return os.path.abspath(repo_url_or_path)
 
     try:
         # 创建一个临时安全的目录来存放克隆的仓库   

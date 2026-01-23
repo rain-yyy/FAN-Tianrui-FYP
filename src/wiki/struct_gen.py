@@ -9,14 +9,14 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import dotenv
+from src.config import PROJECT_ROOT
 from langchain_openai import ChatOpenAI
-
-from prompts.prompts import get_structure_prompt
+from src.prompts import get_structure_prompt
 
 dotenv.load_dotenv()
 openai_key = os.getenv("OPENAI_API_KEY")
 
-REPO_MAPPER_DIR = Path(__file__).resolve().parent / "RepoMapper"
+REPO_MAPPER_DIR = PROJECT_ROOT / "RepoMapper"
 
 
 def _build_repo_map_context(repo_path: str, target_subdir: str = "src") -> str:

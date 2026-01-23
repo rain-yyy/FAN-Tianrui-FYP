@@ -1,7 +1,7 @@
 import os
 import json
 import fnmatch
-from pathlib import Path
+from src.config import CONFIG, load_config
 
 # TODO: 只处理中文，英文，符号，数字，其他语言的内容直接忽略
 
@@ -26,22 +26,7 @@ SPECIAL_TEXT_FILENAMES = {
     "readme.md",
 }
 
-def load_config(config_path: str) -> dict:
-    """
-    加载配置文件
-    """
-
-    print(f"Loading configuration from: {config_path}")
-
-    with open(config_path, 'r') as f:
-        return json.load(f)
-
-
-CONFIG_PATH = Path(__file__).parent / "config/repo_config.json"
-CONFIG = load_config(CONFIG_PATH)
-
 DEFAULT_CODE_EXTENSIONS = CONFIG.get("file_categories", {}).get("code_extensions", [])
-
 DEFAULT_TEXT_EXTENSIONS = CONFIG.get("file_categories", {}).get("text_extensions", [])
 
 def is_binary(file_path: str) -> bool:

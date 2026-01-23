@@ -2,26 +2,24 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Dict, Any
-from setup_repository import setup_repository
-from file_processor import generate_file_tree, load_config
-from structure_generator import generate_wiki_structure
-from wiki_content_generator import WikiContentGenerator
-from deepseek_client import DeepseekClient
-
+from scripts.setup_repository import setup_repository
+from src.config import CONFIG_PATH, load_config, PROJECT_ROOT
+from src.ingestion.file_processor import generate_file_tree
+from src.wiki.struct_gen import generate_wiki_structure
+from src.wiki.content_gen import WikiContentGenerator
+from src.deepseek_client import DeepseekClient
 
 
 # 支持 Git URL（如 https://github.com/user/repo.git）或本地路径
 REPOSITORY: str = "https://github.com/AsyncFuncAI/deepwiki-open.git"
-# 默认读取当前项目下的 repo_config.json，可按需修改
-CONFIG_PATH: Path = Path(__file__).parent / "config/repo_config.json"
 # 结构输出文件
-OUTPUT_PATH: Path = Path(__file__).parent / "wiki_structure.json"
+OUTPUT_PATH: Path = PROJECT_ROOT / "wiki_structure.json"
 # 生成完成后是否打印结果
 PRINT_RESULT: bool = True
 # AI 生成的 wiki 章节 Markdown 输出目录
-WIKI_CONTENT_OUTPUT: Path = Path(__file__).parent / "wiki_pages"
+WIKI_CONTENT_OUTPUT: Path = PROJECT_ROOT / "wiki_pages"
 # 每个章节的 JSON 输出目录，便于调试
-WIKI_SECTION_JSON_OUTPUT: Path = Path(__file__).parent / "wiki_section_json"
+WIKI_SECTION_JSON_OUTPUT: Path = PROJECT_ROOT / "wiki_section_json"
 # DeepSeek 模型，可按需调整
 DEEPSEEK_MODEL: str = "deepseek-chat"
 
