@@ -1,8 +1,22 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environments
 .env
+
+# Python
+**/__pycache__/
+
+# RepoMapper artifacts
+.repomap.tags.cache.v*
+
+# Project specific generated outputs
 vector_store/
 debug_outputs/
-__pycache__/
-TODO
 wiki_section_json/
 wiki_pages/
-__pycache__/
+wiki_structure.json
+
+# Misc
+TODO
