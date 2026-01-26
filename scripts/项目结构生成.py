@@ -16,9 +16,7 @@ REPOSITORY: str = "https://github.com/AsyncFuncAI/deepwiki-open.git"
 OUTPUT_PATH: Path = PROJECT_ROOT / "wiki_structure.json"
 # 生成完成后是否打印结果
 PRINT_RESULT: bool = True
-# AI 生成的 wiki 章节 Markdown 输出目录
-WIKI_CONTENT_OUTPUT: Path = PROJECT_ROOT / "wiki_pages"
-# 每个章节的 JSON 输出目录，便于调试
+# 每个章节的 JSON 输出目录
 WIKI_SECTION_JSON_OUTPUT: Path = PROJECT_ROOT / "wiki_section_json"
 # DeepSeek 模型，可按需调整
 DEEPSEEK_MODEL: str = "deepseek-chat"
@@ -54,16 +52,14 @@ def run_structure_generation(
 def run_wiki_content_generation(
     repo_path: str,
     wiki_structure: Dict[str, Any],
-    output_dir: Path,
     json_output_dir: Path,
 ) -> list[Path]:
     """
-    调用 AI 客户端，根据 wiki 目录逐条生成内容与 Mermaid 图，并写入 Markdown。
+    调用 AI 客户端，根据 wiki 目录逐条生成内容与 Mermaid 图，并写入 JSON。
     """
     client = get_ai_client("qwen")
     generator = WikiContentGenerator(
         repo_root=repo_path,
-        output_dir=output_dir,
         json_output_dir=json_output_dir,
         client=client,
     )
@@ -92,10 +88,9 @@ def main() -> None:
     generated_files = run_wiki_content_generation(
         repo_path=repo_path,
         wiki_structure=wiki_structure,
-        output_dir=WIKI_CONTENT_OUTPUT,
         json_output_dir=WIKI_SECTION_JSON_OUTPUT,
     )
-    print(f"内容生成完成，共生成 {len(generated_files)} 个章节。")
+    print(f"内容生成完成，共生成 {len(generated_files)} 个 JSON 章节文件。")
 
 
 if __name__ == "__main__":

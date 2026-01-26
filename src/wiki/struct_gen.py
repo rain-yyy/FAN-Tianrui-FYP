@@ -123,10 +123,10 @@ def generate_wiki_structure(
     print("AI response received.")
 
     # 4.1 将原始响应保存到文件，方便调试
-    debug_dir = os.path.join(os.getcwd(), "debug_outputs")
+    debug_dir = os.path.join(os.getcwd(), "wiki_structure_raw")
     os.makedirs(debug_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    debug_path = os.path.join(debug_dir, f"wiki_structure_raw_{timestamp}.json")
+    debug_path = os.path.join(debug_dir, f"{timestamp}.json")
     with open(debug_path, "w", encoding="utf-8") as f:
         f.write(ai_message_content)
     print(f"Raw AI response saved to: {debug_path}")

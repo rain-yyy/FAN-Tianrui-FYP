@@ -15,7 +15,7 @@ Thumbs.db
 vector_store/
 debug_outputs/
 wiki_section_json/
-wiki_pages/
+wiki_structure_raw/
 wiki_structure.json
 
 # Misc

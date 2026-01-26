@@ -37,21 +37,15 @@ class WikiContentGenerator:
         self,
         *,
         repo_root: str | Path,
-        output_dir: str | Path,
-        json_output_dir: str | Path | None = None,
+        json_output_dir: str | Path,
+        output_dir: str | Path | None = None,  # 保留以兼容旧代码，但不再使用
         client: BaseAIClient | None = None,
         prompt_template: ChatPromptTemplate | None = None,
         max_file_chars: int = 4000,
         max_section_chars: int = 16000,
     ) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
-        self.output_dir = Path(output_dir).expanduser().resolve()
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.json_output_dir = (
-            Path(json_output_dir).expanduser().resolve()
-            if json_output_dir
-            else self.output_dir
-        )
+        self.json_output_dir = Path(json_output_dir).expanduser().resolve()
         self.json_output_dir.mkdir(parents=True, exist_ok=True)
 
         self.client = client or get_ai_client("qwen")
@@ -61,7 +55,7 @@ class WikiContentGenerator:
 
     def generate(self, structure: Dict[str, Any]) -> List[Path]:
         """
-        根据 wiki 目录结构依次生成内容，返回所有成功写入的 Markdown 文件路径。
+        根据 wiki 目录结构依次生成内容，返回所有成功写入的 JSON 文件路径。
         """
         toc = structure.get("toc") or []
         sections = list(self._flatten_sections(toc))
@@ -83,7 +77,7 @@ class WikiContentGenerator:
         section: WikiSection,
     ) -> Path | None:
         """
-        为单个章节构建上下文、调用 LLM，并将结果写入 Markdown。
+        为单个章节构建上下文、调用 LLM，并将结果写入 JSON。
         """
         context = self._collect_file_context(section.files)
         if not context:
@@ -103,8 +97,7 @@ class WikiContentGenerator:
 
         raw_response = self.client.chat(messages, max_tokens=1800)
         parsed = self._parse_llm_response(raw_response)
-        self._write_section_json(section, parsed)
-        return self._write_markdown(section, parsed)
+        return self._write_section_json(section, parsed)
 
     def _collect_file_context(self, files: Iterable[str]) -> str:
         """
@@ -200,7 +193,7 @@ class WikiContentGenerator:
         target_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        print(f"[DEBUG] 已写入章节 JSON：{section.id} -> {target_path}")
+        print(f"[INFO] 已写入章节 JSON：{section.id} -> {target_path}")
         return target_path
 
     def _parse_llm_response(self, response: str) -> Dict[str, Any]:
@@ -234,46 +227,6 @@ class WikiContentGenerator:
         if candidate.count("{") == candidate.count("}"):
             return candidate
         return None
-
-    def _write_markdown(self, section: WikiSection, data: Dict[str, Any]) -> Path:
-        """
-        将生成结果转换为 Markdown 文件，包含章节正文与 Mermaid 代码块。
-        """
-        filename = self._safe_filename(section.id) + ".md"
-        target_path = self.output_dir / filename
-
-        intro = data.get("intro") or data.get("summary") or ""
-        mermaid = data.get("mermaid", "").strip()
-        sections = data.get("sections") or []
-
-        lines: List[str] = [
-            f"# {section.title}",
-            "",
-            f"> 导航：{section.display_path()}",
-            "",
-        ]
-        if intro:
-            lines.append(intro.strip())
-            lines.append("")
-
-        for block in sections:
-            heading = block.get("heading") or block.get("title")
-            body = block.get("body") or block.get("content")
-            if heading:
-                lines.append(f"## {heading.strip()}")
-            if body:
-                lines.append(body.strip())
-            lines.append("")
-
-        if mermaid:
-            lines.append("```mermaid")
-            lines.append(mermaid)
-            lines.append("```")
-            lines.append("")
-
-        target_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-        print(f"[INFO] 已生成章节：{section.id} -> {target_path}")
-        return target_path
 
     @staticmethod
     def _safe_filename(name: str) -> str:
