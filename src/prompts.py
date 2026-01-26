@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
-
-from langchain_core.prompts import ChatPromptTemplate
+from typing import Dict, List, Any
 
 
 @dataclass(frozen=True)
@@ -13,13 +11,23 @@ class PromptDefinition:
     system: str
     human: str
 
-    def build(self) -> ChatPromptTemplate:
+    def build(self):
+        from langchain_core.prompts import ChatPromptTemplate
         return ChatPromptTemplate.from_messages(
             [
                 ("system", self.system.strip()),
                 ("human", self.human.strip()),
             ]
         )
+
+    def format_messages(self, **kwargs) -> List[Dict[str, str]]:
+        """
+        格式化提示词为模型调用的消息列表。
+        """
+        return [
+            {"role": "system", "content": self.system.strip().format(**kwargs)},
+            {"role": "user", "content": self.human.strip().format(**kwargs)},
+        ]
 
 
 STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(

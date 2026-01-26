@@ -7,7 +7,7 @@ from src.config import CONFIG_PATH, load_config, PROJECT_ROOT
 from src.ingestion.file_processor import generate_file_tree
 from src.wiki.struct_gen import generate_wiki_structure
 from src.wiki.content_gen import WikiContentGenerator
-from src.deepseek_client import DeepseekClient
+from src.ai_client_factory import get_ai_client
 
 
 # 支持 Git URL（如 https://github.com/user/repo.git）或本地路径
@@ -58,9 +58,9 @@ def run_wiki_content_generation(
     json_output_dir: Path,
 ) -> list[Path]:
     """
-    调用 DeepSeek，根据 wiki 目录逐条生成内容与 Mermaid 图，并写入 Markdown。
+    调用 AI 客户端，根据 wiki 目录逐条生成内容与 Mermaid 图，并写入 Markdown。
     """
-    client = DeepseekClient()
+    client = get_ai_client("qwen")
     generator = WikiContentGenerator(
         repo_root=repo_path,
         output_dir=output_dir,
@@ -88,14 +88,14 @@ def main() -> None:
 
         pprint.pprint(wiki_structure)
 
-    # print("\n开始生成 wiki 内容与架构图...")
-    # generated_files = run_wiki_content_generation(
-    #     repo_path=repo_path,
-    #     wiki_structure=wiki_structure,
-    #     output_dir=WIKI_CONTENT_OUTPUT,
-    #     json_output_dir=WIKI_SECTION_JSON_OUTPUT,
-    # )
-    # print(f"内容生成完成，共生成 {len(generated_files)} 个章节。")
+    print("\n开始生成 wiki 内容与架构图...")
+    generated_files = run_wiki_content_generation(
+        repo_path=repo_path,
+        wiki_structure=wiki_structure,
+        output_dir=WIKI_CONTENT_OUTPUT,
+        json_output_dir=WIKI_SECTION_JSON_OUTPUT,
+    )
+    print(f"内容生成完成，共生成 {len(generated_files)} 个章节。")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,8 @@ from typing import Any, Dict, Iterable, List, Sequence
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from src.deepseek_client import DeepseekClient, DeepseekAPIError
+from src.ai_client_base import BaseAIClient
+from src.ai_client_factory import get_ai_client
 from src.prompts import get_wiki_section_prompt
 
 
@@ -29,7 +30,7 @@ class WikiSection:
 
 class WikiContentGenerator:
     """
-    将 wiki 目录树与仓库文件上下文交给 DeepSeek，生成每个节点对应的内容与 Mermaid 架构图。
+    将 wiki 目录树与仓库文件上下文交给 AI 模型，生成每个节点对应的内容与 Mermaid 架构图。
     """
 
     def __init__(
@@ -38,7 +39,7 @@ class WikiContentGenerator:
         repo_root: str | Path,
         output_dir: str | Path,
         json_output_dir: str | Path | None = None,
-        client: DeepseekClient | None = None,
+        client: BaseAIClient | None = None,
         prompt_template: ChatPromptTemplate | None = None,
         max_file_chars: int = 4000,
         max_section_chars: int = 16000,
@@ -53,7 +54,7 @@ class WikiContentGenerator:
         )
         self.json_output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.client = client or DeepseekClient()
+        self.client = client or get_ai_client("qwen")
         self.prompt_template = prompt_template or get_wiki_section_prompt()
         self.max_file_chars = max_file_chars
         self.max_section_chars = max_section_chars
@@ -69,7 +70,7 @@ class WikiContentGenerator:
         for section in sections:
             try:
                 file_path = self._generate_section(structure, section)
-            except DeepseekAPIError as exc:
+            except Exception as exc:
                 print(f"[WARN] 生成章节 '{section.id}' 失败：{exc}")
                 continue
             if file_path:

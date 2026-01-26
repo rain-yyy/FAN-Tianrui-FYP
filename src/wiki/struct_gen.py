@@ -10,8 +10,8 @@ from typing import Any, Dict, Optional
 
 import dotenv
 from src.config import PROJECT_ROOT
-from langchain_openai import ChatOpenAI
-from src.prompts import get_structure_prompt
+from src.ai_client_factory import get_ai_client
+from src.prompts import get_structure_prompt, STRUCTURE_PROMPT
 
 dotenv.load_dotenv()
 openai_key = os.getenv("OPENAI_API_KEY")
@@ -94,9 +94,8 @@ def generate_wiki_structure(
     else:
         print("Warning: README.md not found. Context will be limited.")
 
-    # 2. 初始化模型和提示
-    llm = ChatOpenAI(model="gpt-4o-mini-2024-07-18", temperature=0.1)
-    prompt = get_structure_prompt()
+    # 2. 初始化模型
+    llm = get_ai_client("openai", model="gpt-4o-mini-2024-07-18")
     current_date = datetime.utcnow().date().isoformat()
 
     # 2.1 准备 RepoMap 语境
@@ -105,21 +104,15 @@ def generate_wiki_structure(
         repo_map = _build_repo_map_context(repo_path)
         print(repo_map)
 
-    # 3. 构建执行链
-    chain = prompt | llm
-
     # 4. 调用 AI
     print("Invoking AI model...")
-    response = chain.invoke(
-        {
-            "file_tree": file_tree,
-            "readme_content": readme_content,
-            "current_date": current_date,
-            "repo_map": repo_map or "",
-        }
+    messages = STRUCTURE_PROMPT.format_messages(
+        file_tree=file_tree,
+        readme_content=readme_content,
+        current_date=current_date,
+        repo_map=repo_map or "",
     )
-
-    ai_message_content = getattr(response, "content", response)
+    ai_message_content = llm.chat(messages, temperature=0.1)
     if isinstance(ai_message_content, list):
         ai_message_content = "".join(
             part for part in ai_message_content if isinstance(part, str)

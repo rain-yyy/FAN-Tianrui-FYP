@@ -6,11 +6,10 @@ from typing import Dict, Iterable, List, Mapping, TYPE_CHECKING
 
 from dotenv import load_dotenv
 from langchain_core.documents import Document
-from langchain_openai import ChatOpenAI
-
-from knowledge_base_loader import load_knowledge_base
-from prompts import get_rag_chat_prompt
-from hybrid_retrieval import (
+from src.ai_client_factory import get_ai_client
+from src.prompts import get_rag_chat_prompt, RAG_CHAT_PROMPT
+from src.ingestion.kb_loader import load_knowledge_base
+from src.core.retrieval import (
     RankedCandidate,
     SparseBM25Index,
     compute_doc_key,
@@ -388,12 +387,14 @@ def _answer_with_stores(
     if not context:
         print("Warning: No relevant context retrieved. The answer may be limited.")
 
-    llm = ChatOpenAI(model=DEFAULT_MODEL, temperature=0.1)
+    llm = get_ai_client("openai", model=DEFAULT_MODEL)
 
     print("Calling AI model to generate answer...")
-    chain = RAG_PROMPT | llm
-    response = chain.invoke({"context": context or "无检索结果。", "question": question})
-    answer_text = getattr(response, "content", response)
+    messages = RAG_CHAT_PROMPT.format_messages(
+        context=context or "无检索结果。", 
+        question=question
+    )
+    answer_text = llm.chat(messages, temperature=0.1)
 
     if not isinstance(answer_text, str):
         answer_text = str(answer_text)
