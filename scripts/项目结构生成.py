@@ -7,7 +7,7 @@ from src.config import CONFIG_PATH, load_config, PROJECT_ROOT
 from src.ingestion.file_processor import generate_file_tree
 from src.wiki.struct_gen import generate_wiki_structure
 from src.wiki.content_gen import WikiContentGenerator
-from src.ai_client_factory import get_ai_client
+from src.clients.ai_client_factory import get_ai_client
 
 
 # 支持 Git URL（如 https://github.com/user/repo.git）或本地路径

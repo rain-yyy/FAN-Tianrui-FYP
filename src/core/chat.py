@@ -6,7 +6,7 @@ from typing import Dict, Iterable, List, Mapping, TYPE_CHECKING
 
 from dotenv import load_dotenv
 from langchain_core.documents import Document
-from src.ai_client_factory import get_ai_client
+from src.clients.ai_client_factory import get_ai_client
 from src.prompts import get_rag_chat_prompt, RAG_CHAT_PROMPT
 from src.ingestion.kb_loader import load_knowledge_base
 from src.core.retrieval import (

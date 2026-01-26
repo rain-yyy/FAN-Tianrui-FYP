@@ -8,8 +8,8 @@ from typing import Any, Dict, Iterable, List, Sequence
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from src.ai_client_base import BaseAIClient
-from src.ai_client_factory import get_ai_client
+from src.clients.ai_client_base import BaseAIClient
+from src.clients.ai_client_factory import get_ai_client
 from src.prompts import get_wiki_section_prompt
 
 

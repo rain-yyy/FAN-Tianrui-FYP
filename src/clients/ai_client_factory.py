@@ -1,8 +1,8 @@
 from typing import Optional, Dict, Type
-from src.ai_client_base import BaseAIClient
-from src.openai_client import OpenAIClient
-from src.deepseek_client import DeepseekClient
-from src.qwen_client import QwenClient
+from src.clients.ai_client_base import BaseAIClient
+from src.clients.openai_client import OpenAIClient
+from src.clients.deepseek_client import DeepseekClient
+from src.clients.qwen_client import QwenClient
 
 class AIClientFactory:
     """

@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 
 import dotenv
 from src.config import PROJECT_ROOT
-from src.ai_client_factory import get_ai_client
+from src.clients.ai_client_factory import get_ai_client
 from src.prompts import get_structure_prompt, STRUCTURE_PROMPT
 
 dotenv.load_dotenv()

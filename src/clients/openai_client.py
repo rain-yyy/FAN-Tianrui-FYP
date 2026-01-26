@@ -1,7 +1,7 @@
 import os
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
-from src.ai_client_base import BaseAIClient
+from src.clients.ai_client_base import BaseAIClient
 from dotenv import load_dotenv
 
 class OpenAIClient(BaseAIClient):
