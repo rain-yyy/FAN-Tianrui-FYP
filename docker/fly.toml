@@ -1,0 +1,32 @@
+# fly.toml - Fly.io 应用配置文件
+# 官方文档: https://fly.io/docs/reference/configuration/
+
+# 应用名称 - 请根据你在 Fly.io 上创建的应用名称修改
+app = "fan-tianrui-fyp"
+
+# 主要部署区域 (可选择其他区域，如 hkg = 香港, nrt = 东京, sin = 新加坡)
+primary_region = "sin"
+
+[build]
+  # 使用 Dockerfile 构建
+  dockerfile = "Dockerfile"
+
+[env]
+  # 非敏感环境变量
+  PYTHONPATH = "/app"
+  HOST = "0.0.0.0"
+  PORT = "8000"
+
+[http_service]
+  # 内部端口（你的应用监听的端口）
+  internal_port = 8000
+  # 强制 HTTPS
+  force_https = true
+  # 自动停止和启动配置
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  # 最小运行机器数
+  min_machines_running = 0
+  # 进程组
+  processes = ["app"]
+

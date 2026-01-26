@@ -1,0 +1,419 @@
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import sys
+from pathlib import Path
+import json
+import uuid
+import asyncio
+import shutil
+from datetime import datetime
+from typing import Dict, Any, Optional
+from enum import Enum
+
+# 获取项目根目录并添加到 sys.path
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# 导入必要的模块
+from scripts.setup_repository import setup_repository
+from src.config import CONFIG_PATH, load_config
+from src.ingestion.file_processor import generate_file_tree
+from src.wiki.struct_gen import generate_wiki_structure
+from src.wiki.content_gen import WikiContentGenerator
+from src.clients.ai_client_factory import get_ai_client
+from src.storage.r2_client import upload_wiki_to_r2
+
+app = FastAPI(
+    title="Project Wiki Generation API",
+    description="将项目仓库 URL 转换为 Wiki 结构和内容的 API（异步任务模式）"
+)
+
+
+# ============ 任务状态管理 ============
+
+class TaskStatus(str, Enum):
+    PENDING = "pending"       # 任务已创建，等待执行
+    PROCESSING = "processing" # 任务正在执行
+    COMPLETED = "completed"   # 任务已完成
+    FAILED = "failed"         # 任务执行失败
+
+
+class TaskInfo(BaseModel):
+    task_id: str
+    status: TaskStatus
+    progress: float = 0.0           # 进度百分比 (0-100)
+    current_step: str = ""          # 当前步骤描述
+    created_at: datetime
+    updated_at: datetime
+    result: Optional[Dict[str, Any]] = None  # 任务完成后的结果
+    error: Optional[str] = None              # 错误信息
+
+
+# 内存中的任务存储（生产环境建议使用 Redis 等持久化存储）
+tasks_store: Dict[str, TaskInfo] = {}
+
+# 配置 CORS，允许前端跨域请求
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 开发环境下允许所有来源，生产环境应指定具体域名
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 默认路径配置
+DEFAULT_OUTPUT_PATH: Path = PROJECT_ROOT / "wiki_structure.json"
+DEFAULT_WIKI_SECTION_JSON_OUTPUT: Path = PROJECT_ROOT / "wiki_section_json"
+
+class GenRequest(BaseModel):
+    url_link: str
+
+
+class GenResponse(BaseModel):
+    """任务完成后的结果"""
+    r2_structure_url: str | None = None  # R2 中 wiki_structure.json 的 URL
+    r2_content_base_url: str | None = None  # R2 中 content 目录的基础 URL
+    json_wiki: str | None = None  # 保留旧字段以兼容
+    json_content: str | None = None  # 保留旧字段以兼容
+
+
+class TaskCreateResponse(BaseModel):
+    """创建任务后返回的响应"""
+    task_id: str
+    message: str = "任务已创建，正在后台处理"
+
+
+class TaskStatusResponse(BaseModel):
+    """任务状态查询响应"""
+    task_id: str
+    status: TaskStatus
+    progress: float
+    current_step: str
+    created_at: datetime
+    updated_at: datetime
+    result: Optional[GenResponse] = None
+    error: Optional[str] = None
+
+def update_task_progress(task_id: str, progress: float, current_step: str):
+    """更新任务进度"""
+    if task_id in tasks_store:
+        tasks_store[task_id].progress = progress
+        tasks_store[task_id].current_step = current_step
+        tasks_store[task_id].updated_at = datetime.now()
+
+
+def run_structure_generation(
+    repo_url_or_path: str, config_path: Path, output_path: Path,
+    task_id: Optional[str] = None
+) -> tuple[str, Dict[str, Any]]:
+    """
+    根据仓库地址（Git URL 或本地路径）生成 wiki 目录结构，并保存到指定文件。
+    """
+    if task_id:
+        update_task_progress(task_id, 5, "正在克隆/读取仓库...")
+
+    if repo_url_or_path.startswith(("http://", "https://", "git@")):
+        repo_path = setup_repository(repo_url_or_path)
+    else:
+        repo_path = repo_url_or_path
+
+    if task_id:
+        update_task_progress(task_id, 15, "仓库准备完成，正在加载配置...")
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"配置文件不存在：{config_path}")
+
+    # 加载配置（用于验证配置文件有效性）
+    _ = load_config(str(config_path))
+
+    if task_id:
+        update_task_progress(task_id, 20, "正在生成文件树...")
+
+    file_tree = generate_file_tree(repo_path, str(config_path))
+
+    if task_id:
+        update_task_progress(task_id, 30, "正在生成 Wiki 目录结构...")
+
+    wiki_structure = generate_wiki_structure(repo_path, file_tree)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as f:
+        json.dump(wiki_structure, f, indent=2, ensure_ascii=False)
+
+    if task_id:
+        update_task_progress(task_id, 40, "Wiki 目录结构生成完成")
+
+    return repo_path, wiki_structure
+
+
+def run_wiki_content_generation(
+    repo_path: str,
+    wiki_structure: Dict[str, Any],
+    json_output_dir: Path,
+    task_id: Optional[str] = None
+) -> list[Path]:
+    """
+    调用 AI 客户端，根据 wiki 目录逐条生成内容与 Mermaid 图，并写入 JSON。
+    """
+    if task_id:
+        update_task_progress(task_id, 45, "正在初始化 AI 客户端...")
+
+    client = get_ai_client("qwen")
+    generator = WikiContentGenerator(
+        repo_root=repo_path,
+        json_output_dir=json_output_dir,
+        client=client,
+    )
+
+    if task_id:
+        update_task_progress(task_id, 50, "正在生成 Wiki 内容（此步骤可能耗时较长）...")
+
+    result = generator.generate(wiki_structure)
+
+    if task_id:
+        update_task_progress(task_id, 85, "Wiki 内容生成完成")
+
+    return result
+
+
+def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output_dir: Path):
+    """
+    清理本地生成的临时文件，释放存储空间
+    
+    - repo_path: 克隆的仓库目录
+    - output_path: wiki_structure.json 文件路径
+    - json_output_dir: wiki_section_json 目录路径
+    """
+    # 清理克隆的仓库目录
+    if repo_path and Path(repo_path).exists():
+        try:
+            shutil.rmtree(repo_path)
+            print(f"[清理] 已删除克隆的仓库目录: {repo_path}")
+        except Exception as e:
+            print(f"[清理警告] 删除仓库目录失败: {repo_path}, 错误: {e}")
+
+    # 清理生成的 wiki_structure.json
+    if output_path.exists():
+        try:
+            output_path.unlink()
+            print(f"[清理] 已删除 wiki_structure.json: {output_path}")
+        except Exception as e:
+            print(f"[清理警告] 删除 wiki_structure.json 失败: {output_path}, 错误: {e}")
+
+    # 清理生成的 wiki_section_json 目录
+    if json_output_dir.exists():
+        try:
+            shutil.rmtree(json_output_dir)
+            print(f"[清理] 已删除 wiki_section_json 目录: {json_output_dir}")
+        except Exception as e:
+            print(f"[清理警告] 删除 wiki_section_json 目录失败: {json_output_dir}, 错误: {e}")
+
+
+async def execute_generation_task(task_id: str, url_link: str):
+    """
+    后台异步执行 Wiki 生成任务
+    """
+    repo_path: Optional[str] = None
+    output_path: Optional[Path] = None
+    json_output_dir: Optional[Path] = None
+
+    try:
+        # 更新状态为处理中
+        tasks_store[task_id].status = TaskStatus.PROCESSING
+        tasks_store[task_id].updated_at = datetime.now()
+
+        # 获取默认路径
+        config_path = CONFIG_PATH.expanduser().resolve()
+        output_path = DEFAULT_OUTPUT_PATH.expanduser().resolve()
+        json_output_dir = DEFAULT_WIKI_SECTION_JSON_OUTPUT.expanduser().resolve()
+
+        # 1. 生成项目结构 (wiki_structure.json)
+        # 使用 run_in_executor 让同步代码在线程池中执行，避免阻塞事件循环
+        loop = asyncio.get_event_loop()
+        repo_path, wiki_structure = await loop.run_in_executor(
+            None,
+            lambda: run_structure_generation(
+                repo_url_or_path=url_link,
+                config_path=config_path,
+                output_path=output_path,
+                task_id=task_id
+            )
+        )
+
+        # 2. 生成 Wiki 内容和对应的 JSON 详情
+        await loop.run_in_executor(
+            None,
+            lambda: run_wiki_content_generation(
+                repo_path=repo_path,
+                wiki_structure=wiki_structure,
+                json_output_dir=json_output_dir,
+                task_id=task_id
+            )
+        )
+
+        update_task_progress(task_id, 90, "正在上传到 R2 存储...")
+
+        # 3. 上传到 R2 存储
+        r2_structure_url, r2_content_base_url = await loop.run_in_executor(
+            None,
+            lambda: upload_wiki_to_r2(
+                repo_url=url_link,
+                wiki_structure=wiki_structure,
+                structure_local_path=output_path,
+                content_dir=json_output_dir,
+            )
+        )
+
+        # 更新任务为完成状态
+        tasks_store[task_id].status = TaskStatus.COMPLETED
+        tasks_store[task_id].progress = 100
+        tasks_store[task_id].current_step = "任务完成"
+        tasks_store[task_id].result = {
+            "r2_structure_url": r2_structure_url,
+            "r2_content_base_url": r2_content_base_url,
+            "json_wiki": str(output_path) if not r2_structure_url else None,
+            "json_content": str(json_output_dir) if not r2_content_base_url else None,
+        }
+        tasks_store[task_id].updated_at = datetime.now()
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # 更新任务为失败状态
+        tasks_store[task_id].status = TaskStatus.FAILED
+        tasks_store[task_id].error = str(e)
+        tasks_store[task_id].current_step = "任务失败"
+        tasks_store[task_id].updated_at = datetime.now()
+
+    finally:
+        # 无论成功还是失败，都清理本地文件以释放存储空间
+        update_task_progress(task_id, tasks_store[task_id].progress, "正在清理本地临时文件...")
+        if output_path and json_output_dir:
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: cleanup_local_files(repo_path, output_path, json_output_dir)
+            )
+        print(f"[任务 {task_id}] 本地文件清理完成")
+
+@app.post("/generate", response_model=TaskCreateResponse)
+async def generate_wiki(request: GenRequest):
+    """
+    创建 Wiki 生成任务（异步）
+
+    - 接收仓库 URL，创建后台任务
+    - 立即返回任务 ID，无需等待任务完成
+    - 使用 /task/{task_id} 接口查询任务进度和结果
+    """
+    try:
+        # 生成唯一任务 ID
+        task_id = str(uuid.uuid4())
+        now = datetime.now()
+
+        # 创建任务记录
+        tasks_store[task_id] = TaskInfo(
+            task_id=task_id,
+            status=TaskStatus.PENDING,
+            progress=0,
+            current_step="任务已创建，等待处理",
+            created_at=now,
+            updated_at=now,
+        )
+
+        # 启动后台任务（不阻塞响应）
+        asyncio.create_task(execute_generation_task(task_id, request.url_link))
+
+        return TaskCreateResponse(
+            task_id=task_id,
+            message="任务已创建，正在后台处理。请使用 /task/{task_id} 查询进度。"
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/task/{task_id}", response_model=TaskStatusResponse)
+async def get_task_status(task_id: str):
+    """
+    查询任务状态和进度
+
+    - task_id: 任务 ID（由 /generate 接口返回）
+    - 返回任务的当前状态、进度、结果或错误信息
+    """
+    if task_id not in tasks_store:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+
+    task = tasks_store[task_id]
+
+    # 构建响应
+    response = TaskStatusResponse(
+        task_id=task.task_id,
+        status=task.status,
+        progress=task.progress,
+        current_step=task.current_step,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
+        error=task.error,
+    )
+
+    # 如果任务完成，包含结果
+    if task.status == TaskStatus.COMPLETED and task.result:
+        response.result = GenResponse(**task.result)
+
+    return response
+
+
+@app.get("/tasks", response_model=list[TaskStatusResponse])
+async def list_tasks():
+    """
+    列出所有任务（用于调试和管理）
+    """
+    result = []
+    for task in tasks_store.values():
+        response = TaskStatusResponse(
+            task_id=task.task_id,
+            status=task.status,
+            progress=task.progress,
+            current_step=task.current_step,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+            error=task.error,
+        )
+        if task.status == TaskStatus.COMPLETED and task.result:
+            response.result = GenResponse(**task.result)
+        result.append(response)
+    return result
+
+
+@app.delete("/task/{task_id}")
+async def delete_task(task_id: str):
+    """
+    删除已完成或失败的任务记录
+
+    - 只能删除已完成（completed）或失败（failed）的任务
+    - 正在处理中的任务不能删除
+    """
+    if task_id not in tasks_store:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+
+    task = tasks_store[task_id]
+    if task.status in [TaskStatus.PENDING, TaskStatus.PROCESSING]:
+        raise HTTPException(
+            status_code=400,
+            detail="不能删除正在处理中或等待中的任务"
+        )
+
+    del tasks_store[task_id]
+    return {"message": f"任务 {task_id} 已删除"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+if __name__ == "__main__":
+    import uvicorn
+    # 建议使用 uvicorn scripts.api:app --reload 进行开发
+    uvicorn.run(app, host="0.0.0.0", port=8000)
