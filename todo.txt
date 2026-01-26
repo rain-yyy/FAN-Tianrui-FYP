@@ -7,3 +7,4 @@
 最后在清理文件完成后，还会显示，正在清理本地临时文件
 github action 没有自动运行（无伤大雅
 加一个flyio的instruction 手册
+加上gemini
