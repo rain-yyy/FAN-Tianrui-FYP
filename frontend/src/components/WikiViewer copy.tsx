@@ -56,127 +56,77 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Helper to transform R2 URLs to custom domain
   const transformUrl = (url: string) => {
     if (!url) return url;
     if (url.includes('r2.cloudflarestorage.com')) {
       try {
         const urlObj = new URL(url);
+        // Extract pathname and add custom domain prefix
         return `https://cityu-fyp.livelive.fun${urlObj.pathname}`;
       } catch (e) {
-        console.warn('❗ [transformUrl] Failed to parse URL:', url);
+        console.warn('Failed to transform URL:', url);
         return url;
       }
     }
     return url;
   };
 
+  // Helper to extract filename from URL
   const extractFilename = (url: string): string | null => {
     if (!url) return null;
     try {
       const urlObj = new URL(url);
       const pathname = urlObj.pathname;
+      // Extract filename from path (e.g., /Folo/20260127/sections/infrastructure.json -> infrastructure.json)
       const parts = pathname.split('/');
       return parts[parts.length - 1] || null;
     } catch (e) {
+      // If URL parsing fails, try to extract from string directly
       const parts = url.split('/');
       return parts[parts.length - 1] || null;
     }
   };
 
-  // 🆕 添加内容解析函数
-  const parseContentSafely = (rawContent: any): WikiPageContent['content'] => {
-    try {
-      // 如果 content 本身就是正确格式，直接返回
-      if (
-        rawContent &&
-        typeof rawContent === 'object' &&
-        typeof rawContent.intro === 'string' &&
-        Array.isArray(rawContent.sections)
-      ) {
-        // 检查 intro 是否被意外序列化
-        if (rawContent.intro.trim().startsWith('{')) {
-          console.log('🔄 检测到 intro 字段可能被序列化，尝试解析...');
-          try {
-            const parsedIntro = JSON.parse(rawContent.intro);
-            console.log('✅ intro 解析成功：', parsedIntro);
-            return {
-              intro: parsedIntro.intro || rawContent.intro,
-              sections: parsedIntro.sections || rawContent.sections || [],
-              mermaid: parsedIntro.mermaid || rawContent.mermaid || ''
-            };
-          } catch (e) {
-            console.log('⚠️ intro 解析失败，使用原始值');
-            return {
-              intro: rawContent.intro,
-              sections: rawContent.sections || [],
-              mermaid: rawContent.mermaid || ''
-            };
-          }
-        }
-        
-        return {
-          intro: rawContent.intro,
-          sections: rawContent.sections || [],
-          mermaid: rawContent.mermaid || ''
-        };
-      }
-
-      // 如果整个 content 是字符串，尝试解析
-      if (typeof rawContent === 'string') {
-        console.log('🔄 检测到整个 content 被序列化为字符串，尝试解析...');
-        const parsed = JSON.parse(rawContent);
-        console.log('✅ content 解析成功：', parsed);
-        
-        // 递归检查解析后的内容
-        return parseContentSafely(parsed);
-      }
-
-      // 兜底返回
-      console.warn('⚠️ content 格式异常，返回默认值');
-      return {
-        intro: '',
-        sections: [],
-        mermaid: ''
-      };
-    } catch (e) {
-      console.error('❌ parseContentSafely 解析失败：', e);
-      return {
-        intro: '',
-        sections: [],
-        mermaid: ''
-      };
-    }
-  };
-
+  // Fetch Structure
   useEffect(() => {
     const fetchStructure = async () => {
-      console.log('🚀 [1] 开始加载结构文件：', structureUrl);
-
       try {
         setLoading(true);
+        // Transform URL and add timestamp
         const targetUrl = transformUrl(structureUrl);
-        console.log('🧩 [1.1] 转换后的结构文件 URL：', targetUrl);
         const res = await axios.get(`${targetUrl}?t=${Date.now()}`);
         let data = res.data;
 
-        console.log('📦 [1.2] 原始结构数据：', data);
+        if (DEBUG) console.log('Wiki Structure:', data);
 
+        // Normalize structure to array if it's not
+        // This is a guess-work fallback, normally we expect array of items
         if (!Array.isArray(data)) {
-          if (data.toc && Array.isArray(data.toc)) {
-            data = data.toc;
-          } else if (data.pages && Array.isArray(data.pages)) {
-            data = data.pages;
-          } else {
-            data = Object.keys(data).map(key => ({
-              id: key,
-              title: typeof data[key] === 'string' ? data[key] : (data[key].title || key)
-            }));
-          }
+             // If it's an object, try to convert keys to items or find a 'toc' or 'pages' key
+             if (data.toc && Array.isArray(data.toc)) {
+                 data = data.toc;
+             } else if (data.pages && Array.isArray(data.pages)) {
+                 data = data.pages;
+             } else {
+                 // Fallback: assume flat object where keys are IDs and values are titles or objects
+                 data = Object.keys(data).map(key => ({
+                     id: key,
+                     title: typeof data[key] === 'string' ? data[key] : (data[key].title || key)
+                 }));
+             }
         }
-
+        
+        // Ensure we have valid items
         const normalized: WikiStructureItem[] = data.map((item: any) => {
+          // Determine id: prefer id, then section_id, then filename without extension
           const id = item.id || item.section_id || item.filename?.replace('.json', '') || 'unknown';
-          const filename = item.filename || `${id}.json`;
+          
+          // Determine filename: prefer filename, then construct from id or section_id
+          const filename = item.filename || 
+                          (item.id ? `${item.id}.json` : null) || 
+                          (item.section_id ? `${item.section_id}.json` : null);
+          
           return {
             id,
             title: item.title || item.name || 'Untitled',
@@ -185,16 +135,14 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
           };
         });
 
-        console.log('✅ [1.3] 结构数据标准化结果：', normalized);
-
         setStructure(normalized);
-
+        
+        // Select first item by default
         if (normalized.length > 0) {
-          console.log('🎯 [1.4] 默认选中第一个 ID：', normalized[0].id);
           setSelectedId(normalized[0].id);
         }
       } catch (err) {
-        console.error('❌ [1-ERROR] 加载结构文件失败：', err);
+        console.error('Failed to load wiki structure:', err);
         setError('Failed to load documentation structure.');
       } finally {
         setLoading(false);
@@ -206,34 +154,42 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
     }
   }, [structureUrl]);
 
+  // Fetch Page Content
   useEffect(() => {
     if (!selectedId || !structure.length || !contentUrls.length) return;
-    console.log('🚀 [2] 开始加载页面内容：', selectedId);
 
     const fetchPage = async () => {
       try {
         setLoadingPage(true);
         const item = findItemById(structure, selectedId);
-        console.log('🔍 [2.1] 找到的结构项：', item);
-
         if (!item) throw new Error('Page not found in structure');
 
+        // Construct expected filename patterns
+        // Try multiple matching strategies:
+        // 1. Use filename if present
+        // 2. Use id + .json
+        // 3. Match by filename without extension
         const expectedFilename = item.filename || `${item.id}.json`;
         const expectedFilenameWithoutExt = expectedFilename.replace('.json', '');
-        console.log('📄 [2.2] 预期匹配文件名：', expectedFilename);
-
+        const itemIdWithoutExt = item.id.replace('.json', '');
+        
+        // Find URL in contentUrls by matching filename
+        // Extract filename from each URL and compare
         let matchedUrl: string | undefined;
         for (const url of contentUrls) {
           const urlFilename = extractFilename(url);
-          const urlFilenameWithoutExt = urlFilename?.replace('.json', '');
-
-          console.log('🔗 [2.3] 检查 URL：', url);
-          console.log('     ↳ 文件名：', urlFilename);
-
+          if (!urlFilename) continue;
+          
+          const urlFilenameWithoutExt = urlFilename.replace('.json', '');
+          
+          // Try multiple matching strategies
           if (
             urlFilename === expectedFilename ||
+            urlFilename === `${item.id}.json` ||
             urlFilenameWithoutExt === expectedFilenameWithoutExt ||
-            urlFilenameWithoutExt === item.id
+            urlFilenameWithoutExt === itemIdWithoutExt ||
+            urlFilenameWithoutExt === item.id ||
+            urlFilenameWithoutExt === item.filename?.replace('.json', '')
           ) {
             matchedUrl = url;
             break;
@@ -241,38 +197,19 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
         }
 
         if (!matchedUrl) {
-          console.error('❌ [2.4] 未找到匹配的内容 URL：', expectedFilename, contentUrls);
-          throw new Error(`Content URL not found for ${expectedFilename}`);
+          throw new Error(`Content URL not found for ${expectedFilename} (id: ${item.id})`);
         }
 
+        // Transform R2 URL to custom domain URL
         const transformedUrl = transformUrl(matchedUrl);
-        console.log('🌐 [2.5] 匹配到的 URL：', matchedUrl);
-        console.log('     ↳ 转换后：', transformedUrl);
 
         const res = await axios.get<WikiPageContent>(`${transformedUrl}?t=${Date.now()}`);
-        console.log('📦 [2.6] 请求返回的原始页面内容：', res.data);
-        console.log('📦 [2.6.1] content 类型：', typeof res.data.content);
-        console.log('📦 [2.6.2] content.intro 类型：', typeof res.data.content?.intro);
-        console.log('📦 [2.6.3] content.intro 前 200 字符：', 
-          typeof res.data.content?.intro === 'string' 
-            ? res.data.content.intro.substring(0, 200) 
-            : res.data.content?.intro
-        );
-
-        // 🆕 使用安全解析函数处理 content
-        const parsedContent = parseContentSafely(res.data.content);
-        console.log('✅ [2.7] 解析后的 content：', parsedContent);
-
-        const finalPageContent: WikiPageContent = {
-          ...res.data,
-          content: parsedContent
-        };
-
-        console.log('✅ [2.8] 最终设置的 pageContent：', finalPageContent);
-        setPageContent(finalPageContent);
+        if (DEBUG) console.log('Wiki Page Content:', res.data);
+        setPageContent(res.data);
+        setMobileMenuOpen(false); // Close mobile menu on selection
       } catch (err) {
-        console.error('❌ [2-ERROR] 加载页面失败：', err);
-        setError('Failed to load page content.');
+        console.error('Failed to load page content:', err);
+        // Don't set global error, just page error logic if needed
       } finally {
         setLoadingPage(false);
       }
@@ -281,6 +218,7 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
     fetchPage();
   }, [selectedId, contentUrls, structure]);
 
+  // Helper to find item in potentially nested structure
   const findItemById = (items: WikiStructureItem[], id: string): WikiStructureItem | null => {
     for (const item of items) {
       if (item.id === id) return item;
@@ -292,18 +230,19 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
     return null;
   };
 
-  const SidebarItem = ({ item, depth = 0 }: { item: WikiStructureItem; depth?: number }) => {
+  // Render Sidebar Item
+  const SidebarItem = ({ item, depth = 0 }: { item: WikiStructureItem, depth?: number }) => {
     const isSelected = selectedId === item.id;
     const hasChildren = item.children && item.children.length > 0;
-
+    
     return (
       <li>
         <button
           onClick={() => setSelectedId(item.id)}
           className={cn(
             "w-full text-left px-3 py-2 rounded-lg text-sm transition-all duration-200 flex items-center gap-2",
-            isSelected
-              ? "bg-primary/20 text-blue-300 font-medium"
+            isSelected 
+              ? "bg-primary/20 text-blue-300 font-medium" 
               : "text-muted-foreground hover:bg-white/5 hover:text-white",
             depth > 0 && "ml-4 border-l border-white/10"
           )}
@@ -337,9 +276,11 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
       </div>
     );
   }
+  // console.log(pageContent.content)
 
   return (
     <div className="flex h-[80vh] w-full max-w-[1400px] bg-secondary/30 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
+      {/* Sidebar - Desktop */}
       <aside className="hidden md:flex w-64 lg:w-72 flex-col border-r border-white/10 bg-black/20">
         <div className="p-4 border-b border-white/10">
           <h2 className="font-semibold text-white/90 flex items-center gap-2">
@@ -356,6 +297,7 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
         </nav>
       </aside>
 
+      {/* Mobile Header */}
       <div className="md:hidden absolute top-0 left-0 right-0 h-14 bg-secondary/80 border-b border-white/10 flex items-center px-4 z-20 backdrop-blur">
         <button onClick={() => setMobileMenuOpen(true)} className="p-2 -ml-2 text-white/70">
           <Menu className="w-6 h-6" />
@@ -363,10 +305,11 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
         <span className="ml-2 font-medium truncate">{pageContent?.title || 'Loading...'}</span>
       </div>
 
+      {/* Mobile Sidebar */}
       <AnimatePresence>
         {mobileMenuOpen && (
           <>
-            <motion.div
+            <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -380,10 +323,10 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
               className="absolute top-0 bottom-0 left-0 w-64 bg-secondary border-r border-white/10 z-40 md:hidden flex flex-col"
             >
               <div className="p-4 border-b border-white/10 flex justify-between items-center">
-                <h2 className="font-semibold text-white/90">Documentation</h2>
-                <button onClick={() => setMobileMenuOpen(false)}>
-                  <ChevronLeft className="w-5 h-5" />
-                </button>
+                 <h2 className="font-semibold text-white/90">Documentation</h2>
+                 <button onClick={() => setMobileMenuOpen(false)}>
+                   <ChevronLeft className="w-5 h-5" />
+                 </button>
               </div>
               <nav className="flex-1 overflow-y-auto p-3">
                 <ul className="space-y-1">
@@ -397,6 +340,7 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
         )}
       </AnimatePresence>
 
+      {/* Main Content */}
       <main className="flex-1 relative overflow-hidden flex flex-col bg-transparent">
         {loadingPage ? (
           <div className="absolute inset-0 flex items-center justify-center bg-black/10 backdrop-blur-sm z-10">
@@ -407,22 +351,24 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
         <div className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar scroll-smooth">
           {pageContent ? (
             <div className="max-w-4xl mx-auto space-y-8 pb-10 mt-10 md:mt-0">
+              {/* Header */}
               <div className="space-y-2 border-b border-white/10 pb-6">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  {pageContent.breadcrumb.split('/').map((part, i, arr) => (
-                    <React.Fragment key={i}>
-                      <span className={i === arr.length - 1 ? "text-blue-400" : ""}>{part.trim()}</span>
-                      {i < arr.length - 1 && <ChevronRight className="w-3 h-3 opacity-50" />}
-                    </React.Fragment>
-                  ))}
+                   {pageContent.breadcrumb.split('/').map((part, i, arr) => (
+                     <React.Fragment key={i}>
+                       <span className={i === arr.length - 1 ? "text-blue-400" : ""}>{part.trim()}</span>
+                       {i < arr.length - 1 && <ChevronRight className="w-3 h-3 opacity-50" />}
+                     </React.Fragment>
+                   ))}
                 </div>
                 <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">
                   {pageContent.title}
                 </h1>
               </div>
 
+              {/* Intro */}
               <div className="prose prose-invert prose-lg max-w-none prose-headings:font-bold prose-headings:text-white prose-p:text-gray-300 prose-a:text-blue-400 hover:prose-a:text-blue-300 prose-code:text-blue-200 prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-img:rounded-xl">
-                <ReactMarkdown
+                <ReactMarkdown 
                   remarkPlugins={[remarkGfm]}
                   rehypePlugins={[rehypeHighlight]}
                 >
@@ -430,6 +376,7 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
                 </ReactMarkdown>
               </div>
 
+              {/* Mermaid Diagram */}
               {pageContent.content.mermaid && (
                 <div className="my-8">
                   <div className="text-sm text-muted-foreground mb-2 font-mono uppercase tracking-widest text-xs">Workflow Diagram</div>
@@ -437,6 +384,7 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
                 </div>
               )}
 
+              {/* Sections */}
               <div className="space-y-12">
                 {pageContent.content.sections.map((section, idx) => (
                   <section key={idx} className="scroll-mt-20">
@@ -445,7 +393,7 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
                       {section.heading}
                     </h2>
                     <div className="prose prose-invert prose-lg max-w-none prose-p:text-gray-300 prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10">
-                      <ReactMarkdown
+                      <ReactMarkdown 
                         remarkPlugins={[remarkGfm]}
                         rehypePlugins={[rehypeHighlight]}
                       >
@@ -457,10 +405,10 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <FileText className="w-12 h-12 mb-4 opacity-20" />
-              <p>Select a page to view content</p>
-            </div>
+             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+               <FileText className="w-12 h-12 mb-4 opacity-20" />
+               <p>Select a page to view content</p>
+             </div>
           )}
         </div>
       </main>
