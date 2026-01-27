@@ -1,9 +1,10 @@
 1. 图表好像没有正确渲染
-2. 给vercel也加入github action
+
 3. 把前端重新写好，放到vercel上
 4. 在supabase中创建数据库来维护r2中的内容，包括我的taskid等等
 
 优化：
+2. 给vercel也加入github action
 github action 没有自动运行（无伤大雅
 加一个flyio的instruction 手册
 加上gemini

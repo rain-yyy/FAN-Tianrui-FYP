@@ -138,6 +138,10 @@ WIKI_SECTION_PROMPT: PromptDefinition = PromptDefinition(
 - 结构层次清晰，概览在前，细节分节展开，必要时使用列表或引用提高可读性。
 - Mermaid 图需覆盖章节最重要的流程或组件关系，做到节点命名明确，避免冗余装饰。
 - 遇到缺失信息时，可结合章节标题和已有上下文做适度推断，但要保持技术合理性。
+- **重要：Mermaid 语法要求**：
+  * 节点标签如果包含特殊字符（如 @、#、$、& 等），必须用双引号包裹，例如：`A["user@example.com"]` 而不是 `A[user@example.com]`
+  * 节点 ID 只能包含字母、数字和下划线，不能包含特殊字符
+  * 确保所有语法符合 Mermaid 规范，避免解析错误
 """,
     human="""
 文档标题：{doc_title}
@@ -154,7 +158,7 @@ WIKI_SECTION_PROMPT: PromptDefinition = PromptDefinition(
   "sections": [
     {{"heading": "小节标题", "body": "成段描述，可使用列表与引用"}}
   ],
-  "mermaid": "仅包含 Mermaid 代码，不要包裹 ```"
+  "mermaid": "仅包含 Mermaid 代码，不要包裹 ```。节点标签包含特殊字符时必须用双引号包裹，例如：A[\"text@domain.com\"]"
 }}
 </OUTPUT_SCHEMA_HINT>
 
