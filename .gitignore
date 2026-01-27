@@ -22,3 +22,6 @@ wiki_structure.json
 todo.txt
 
 RepoMapper/
+
+frontend/node_modules/
+frontend/.next/
