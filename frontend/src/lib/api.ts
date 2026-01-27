@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://fan-tianrui-fyp.fly.dev';
+// is test api now, will be changed to the production api later
+// TODO: change to the production api
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://cityu-fyp-testapi.tianruifan21.workers.dev';
 
 export interface HealthResponse {
   status: string;
