@@ -289,7 +289,7 @@ async def execute_generation_task(task_id: str, url_link: str):
 
     finally:
         # 无论成功还是失败，都清理本地文件以释放存储空间
-        update_task_progress(task_id, tasks_store[task_id].progress, "正在清理本地临时文件...")
+        # 不再更新状态给用户，后台静默清理
         if output_path and json_output_dir:
             await asyncio.get_event_loop().run_in_executor(
                 None,
