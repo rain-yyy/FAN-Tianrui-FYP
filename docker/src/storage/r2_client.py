@@ -287,7 +287,7 @@ def upload_wiki_to_r2(
     wiki_structure: dict,
     structure_local_path: Optional[Path] = None,
     content_dir: Optional[Path] = None,
-) -> Tuple[Optional[str], Optional[str]]:
+) -> Tuple[Optional[str], Optional[List[str]]]:
     """
     Upload wiki structure and content files to R2.
 
@@ -298,7 +298,7 @@ def upload_wiki_to_r2(
         content_dir: Local directory containing content JSON files (optional)
 
     Returns:
-        Tuple of (structure_url, content_base_url) or (None, None) if upload fails
+        Tuple of (structure_url, content_urls) or (None, None) if upload fails
     """
     try:
         client = R2Client()
@@ -326,16 +326,19 @@ def upload_wiki_to_r2(
     structure_url = client.get_public_url(structure_key)
 
     # Upload content files if provided
-    content_base_url = None
+    content_urls = []
     if content_dir and content_dir.exists():
         sections_path = f"{base_path}/sections"
         results = client.upload_directory(content_dir, sections_path)
         if results:
             # Check if at least one file uploaded successfully
-            if any(success for _, success in results):
-                content_base_url = client.get_public_url(sections_path)
-                print(f"[INFO] Uploaded {sum(1 for _, s in results if s)}/{len(results)} content files to R2")
+            for r2_key, success in results:
+                if success:
+                    content_urls.append(client.get_public_url(r2_key))
+            
+            if content_urls:
+                print(f"[INFO] Uploaded {len(content_urls)}/{len(results)} content files to R2")
             else:
                 print("[WARN] Failed to upload any content files to R2")
-
-    return structure_url, content_base_url
+    
+    return structure_url, content_urls if content_urls else None

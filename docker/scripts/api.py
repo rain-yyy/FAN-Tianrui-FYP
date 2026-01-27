@@ -74,7 +74,7 @@ class GenRequest(BaseModel):
 class GenResponse(BaseModel):
     """任务完成后的结果"""
     r2_structure_url: str | None = None  # R2 中 wiki_structure.json 的 URL
-    r2_content_base_url: str | None = None  # R2 中 content 目录的基础 URL
+    r2_content_urls: list[str] | None = None  # R2 中 content 目录的所有文件 URL
     json_wiki: str | None = None  # 保留旧字段以兼容
     json_content: str | None = None  # 保留旧字段以兼容
 
@@ -256,7 +256,7 @@ async def execute_generation_task(task_id: str, url_link: str):
         update_task_progress(task_id, 90, "正在上传到 R2 存储...")
 
         # 3. 上传到 R2 存储
-        r2_structure_url, r2_content_base_url = await loop.run_in_executor(
+        r2_structure_url, r2_content_urls = await loop.run_in_executor(
             None,
             lambda: upload_wiki_to_r2(
                 repo_url=url_link,
@@ -272,9 +272,9 @@ async def execute_generation_task(task_id: str, url_link: str):
         tasks_store[task_id].current_step = "任务完成"
         tasks_store[task_id].result = {
             "r2_structure_url": r2_structure_url,
-            "r2_content_base_url": r2_content_base_url,
+            "r2_content_urls": r2_content_urls,
             "json_wiki": str(output_path) if not r2_structure_url else None,
-            "json_content": str(json_output_dir) if not r2_content_base_url else None,
+            "json_content": str(json_output_dir) if not r2_content_urls else None,
         }
         tasks_store[task_id].updated_at = datetime.now()
 
