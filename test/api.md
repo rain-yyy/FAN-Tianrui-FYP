@@ -129,7 +129,10 @@ curl -X POST "http://localhost:8000/generate" \
   "updated_at": "2026-01-27T10:15:00",
   "result": {
     "r2_structure_url": "https://r2.example.com/wiki/xxx/wiki_structure.json",
-    "r2_content_base_url": "https://r2.example.com/wiki/xxx/content/",
+    "r2_content_urls": [
+      "https://r2.example.com/wiki/xxx/sections/part1.json",
+      "https://r2.example.com/wiki/xxx/sections/part2.json"
+    ],
     "json_wiki": null,
     "json_content": null
   },
@@ -184,7 +187,10 @@ curl "http://localhost:8000/task/550e8400-e29b-41d4-a716-446655440000"
     "updated_at": "2026-01-27T10:15:00",
     "result": {
       "r2_structure_url": "https://r2.example.com/wiki/xxx/wiki_structure.json",
-      "r2_content_base_url": "https://r2.example.com/wiki/xxx/content/",
+      "r2_content_urls": [
+        "https://r2.example.com/wiki/xxx/sections/part1.json",
+        "https://r2.example.com/wiki/xxx/sections/part2.json"
+      ],
       "json_wiki": null,
       "json_content": null
     },
@@ -294,7 +300,7 @@ curl -X DELETE "http://localhost:8000/task/550e8400-e29b-41d4-a716-446655440000"
 ```typescript
 {
   r2_structure_url: string | null      // R2 中 wiki_structure.json 的 URL
-  r2_content_base_url: string | null   // R2 中 content 目录的基础 URL
+  r2_content_urls: string[] | null     // R2 中 content 目录的所有文件 URL
   json_wiki: string | null             // 保留字段（兼容性）
   json_content: string | null          // 保留字段（兼容性）
 }
@@ -328,11 +334,10 @@ Wiki 生成任务包含以下步骤：
 
    - 上传 wiki_structure.json
    - 上传 content 目录
-7. **清理本地文件** (95-100%)
+7. **任务完成** (100%)
 
-   - 删除克隆的仓库目录
-   - 删除生成的临时文件
-8. **任务完成** (100%)
+   - 更新任务状态为 completed
+   - 后台静默清理本地临时文件
 
 ---
 

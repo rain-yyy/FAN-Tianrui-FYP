@@ -1,0 +1,30 @@
+{
+    "section_id": "cli-usage",
+    "title": "CLI Usage",
+    "breadcrumb": "Usage / CLI Usage",
+    "files": [
+      "README.md"
+    ],
+    "content": {
+      "intro": "The CLI interface of Smolagents provides a lightweight, model-agnostic way to invoke agents directly from the terminal—ideal for rapid prototyping, debugging, and integration into automation pipelines. It abstracts away boilerplate while preserving full control over agent configuration, tool selection, sandboxing, and LLM routing via LiteLLM or local backends.",
+      "sections": [
+        {
+          "heading": "Installation & Prerequisites",
+          "body": "Install the library via pip:\n\n```bash\npip install smolagents\n```\n\nEnsure you have access to an LLM backend (e.g., OpenAI API key, local `ollama` server, or Hugging Face Inference Endpoints). For sandboxed code execution, optional dependencies like `e2b`, `modal`, or `docker` must be installed separately depending on your chosen sandbox provider."
+        },
+        {
+          "heading": "Basic Command Structure",
+          "body": "The CLI entrypoint is `smolagents`. All commands follow this pattern:\n\n```bash\nsmolagents [COMMAND] [OPTIONS]\n```\n\nKey top-level commands include:\n- `run`: execute a pre-defined agent with configurable tools and model\n- `list-tools`: discover available tools (Hub-hosted, MCP, LangChain integrations)\n- `serve`: launch a local HTTP API for agent inference\n- `init`: scaffold a new agent or tool project with best-practice structure"
+        },
+        {
+          "heading": "Running an Agent",
+          "body": "Use `smolagents run` to invoke agents without writing Python code:\n\n```bash\nsmolagents run --agent code --model gpt-4o --tool web_search --prompt \"What's the latest release date of Smolagents?\"\n```\n\nSupported flags include:\n- `--agent`: name or path to agent class (e.g., `code`, `react`, or custom Hub ID like `hf://smolagents/stock-analyzer`)\n- `--model`: LLM identifier (e.g., `ollama/llama3`, `openai/gpt-4o`, `hf://meta-llama/Meta-Llama-3-8B-Instruct`)\n- `--tool`: one or more tools by name or Hub ID (e.g., `web_search`, `hf://tools/weather-api`)\n- `--sandbox`: enable sandboxed code execution (`e2b`, `blaxel`, `docker`, `pyodide`)\n- `--max-steps`: limit reasoning iterations to prevent infinite loops"
+        },
+        {
+          "heading": "Tool Discovery & Management",
+          "body": "List and inspect tools using:\n\n```bash\nsmolagents list-tools --source hub        # List public Hub tools\nsmolagents list-tools --source mcp --url http://localhost:8000  # Discover MCP server tools\n```\n\nYou can also pull tools locally:\n\n```bash\nsmolagents pull-tool hf://tools/github-search --to ./my-tools\n```\n\nTools pulled this way can be referenced by local path in `--tool` flags."
+        }
+      ],
+      "mermaid": "flowchart LR\n    A[CLI Input] --> B[Parse Command & Flags]\n    B --> C{Command Type}\n    C -->|run| D[Load Agent + Tools + Model]\n    C -->|list-tools| E[Query Tool Registry]\n    C -->|serve| F[Start FastAPI Server]\n    D --> G[Sandbox Setup?]\n    G -->|Yes| H[Spawn Sandbox Env]\n    G -->|No| I[Direct Execution]\n    H --> J[Execute Code Safely]\n    I --> J\n    J --> K[Return Structured Output]"
+    }
+  }

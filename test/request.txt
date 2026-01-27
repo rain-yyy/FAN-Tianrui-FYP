@@ -1,0 +1,29 @@
+{
+    "task_id": "ad9eb02b-c932-426f-8305-63a9f965fc61",
+    "status": "completed",
+    "progress": 100.0,
+    "current_step": "任务完成",
+    "created_at": "2026-01-27T06:47:34.657336",
+    "updated_at": "2026-01-27T06:50:46.866852",
+    "result": {
+        "r2_structure_url": "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/wiki_structure.json",
+        "r2_content_urls": [
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/infrastructure.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/data-models.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/security.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/overview.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/observability.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/license.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/deployment.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/document-processing-pipeline.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/user-guides.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/contributing.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/core-backend-services.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/ai-features.json",
+            "https://cityu-fyp.ed8ae7084f2b8a4d83482ce8a3fe4a83.r2.cloudflarestorage.com/Folo/20260127/sections/system-architecture.json"
+        ],
+        "json_wiki": null,
+        "json_content": null
+    },
+    "error": null
+}
