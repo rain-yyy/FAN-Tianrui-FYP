@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Book, ChevronRight, Menu, Loader2, FileText, ChevronLeft } from 'lucide-react';
 import axios from 'axios';
 import Mermaid from './Mermaid';
+import ChatInterface from './ChatInterface';
 import { cn } from '@/lib/utils';
 import 'highlight.js/styles/github-dark.css'; // Import highlight.js style
 
@@ -42,12 +43,13 @@ type WikiStructure = WikiStructureItem[] | { [key: string]: any };
 interface WikiViewerProps {
   structureUrl: string;
   contentUrls: string[];
+  repoUrl?: string;  // 仓库 URL，用于 RAG 聊天功能
 }
 
 // Debug mode
 const DEBUG = true;
 
-export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProps) {
+export default function WikiViewer({ structureUrl, contentUrls, repoUrl }: WikiViewerProps) {
   const [structure, setStructure] = useState<WikiStructureItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pageContent, setPageContent] = useState<WikiPageContent | null>(null);
@@ -322,6 +324,30 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
     );
   };
 
+  // 为聊天接口构建当前页面的上下文
+  const currentPageContext = useMemo(() => {
+    if (!pageContent) return undefined;
+    
+    // 构建一个简洁的上下文描述
+    const contextParts = [
+      `当前页面: ${pageContent.title}`,
+      `路径: ${pageContent.breadcrumb}`,
+    ];
+    
+    // 添加页面简介的前几句
+    if (pageContent.content.intro) {
+      const introPreview = pageContent.content.intro.substring(0, 300);
+      contextParts.push(`页面简介: ${introPreview}${pageContent.content.intro.length > 300 ? '...' : ''}`);
+    }
+    
+    // 添加关联文件信息
+    if (pageContent.files && pageContent.files.length > 0) {
+      contextParts.push(`关联文件: ${pageContent.files.slice(0, 5).join(', ')}`);
+    }
+    
+    return contextParts.join('\n');
+  }, [pageContent]);
+
   if (loading && !structure.length) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -339,6 +365,7 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
   }
 
   return (
+    <>
     <div className="flex h-[80vh] w-full max-w-[1400px] bg-secondary/30 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
       <aside className="hidden md:flex w-64 lg:w-72 flex-col border-r border-white/10 bg-black/20">
         <div className="p-4 border-b border-white/10">
@@ -465,5 +492,15 @@ export default function WikiViewer({ structureUrl, contentUrls }: WikiViewerProp
         </div>
       </main>
     </div>
+    
+    {/* RAG 聊天组件 */}
+    {repoUrl && (
+      <ChatInterface
+        repoUrl={repoUrl}
+        currentPageContext={currentPageContext}
+        currentPageTitle={pageContent?.title}
+      />
+    )}
+    </>
   );
 }

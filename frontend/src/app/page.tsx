@@ -489,6 +489,7 @@ export default function Home() {
                 <WikiViewer 
                   structureUrl={status.result!.r2_structure_url!} 
                   contentUrls={status.result!.r2_content_urls!}
+                  repoUrl={status.result?.repo_url || localStorage.getItem('wiki_gen_repo_url') || url}
                 />
              </motion.div>
           )}
