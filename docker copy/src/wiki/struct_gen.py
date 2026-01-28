@@ -12,9 +12,6 @@ import dotenv
 from src.config import PROJECT_ROOT
 from src.clients.ai_client_factory import get_ai_client
 from src.prompts import get_structure_prompt, STRUCTURE_PROMPT
-from src.ingestion.code_graph import CodeGraphBuilder
-from src.ingestion.community_engine import CommunityEngine
-from src.ingestion.file_processor import get_files_to_process
 
 dotenv.load_dotenv()
 openai_key = os.getenv("OPENAI_API_KEY")
@@ -81,7 +78,7 @@ def _build_repo_map_context(repo_path: str, target_subdir: str = "src") -> str:
 
 
 def generate_wiki_structure(
-    repo_path: str, file_tree: str, repo_map: Optional[str] = None, communities_info: Optional[str] = None
+    repo_path: str, file_tree: str, repo_map: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     调用 gpt 4o mini 生成分层 Wiki 目录并解析 JSON 响应。
@@ -98,8 +95,7 @@ def generate_wiki_structure(
         print("Warning: README.md not found. Context will be limited.")
 
     # 2. 初始化模型
-    # TODO:测试换成qwen
-    llm = get_ai_client("qwen", model="qwen-plus")
+    llm = get_ai_client("openai", model="gpt-4o-mini-2024-07-18")
     current_date = datetime.utcnow().date().isoformat()
 
     # 2.1 准备 RepoMap 语境
@@ -109,36 +105,6 @@ def generate_wiki_structure(
         # print(repo_map)
         print(f"Repo map context built: {len(repo_map)} tokens")
 
-    # 2.2 准备社区信息 (GraphRAG)
-    if communities_info is None:
-        try:
-            print("Building code graph and communities...")
-            # 获取需要处理的文件列表（使用 config 中的过滤逻辑）
-            # 注意：这里需要 config_path，我们假设它存在或通过某种方式获取
-            config_path = PROJECT_ROOT / "config" / "repo_config.json"
-            file_paths = get_files_to_process(repo_path, str(config_path))
-            
-            builder = CodeGraphBuilder()
-            graph = builder.build_graph(repo_path, file_paths)
-            
-            engine = CommunityEngine(graph)
-            communities = engine.run_leiden()
-            summaries = engine.generate_summaries(client_provider="deepseek")
-            
-            # 格式化社区信息为字符串
-            comm_list = []
-            for cid, summary in summaries.items():
-                nodes = communities.get(cid, [])
-                # 只列出前几个核心文件
-                core_files = [n for n in nodes if ":" not in n][:5]
-                comm_list.append(f"Community {cid}:\n- Summary: {summary}\n- Key Files: {', '.join(core_files)}")
-            
-            communities_info = "\n\n".join(comm_list)
-            print(f"Community info built: {len(communities_info)} chars")
-        except Exception as e:
-            print(f"Warning: Failed to build communities: {e}")
-            communities_info = "No community information available."
-
     # 4. 调用 AI
     print("Invoking AI model...")
     messages = STRUCTURE_PROMPT.format_messages(
@@ -146,7 +112,6 @@ def generate_wiki_structure(
         readme_content=readme_content,
         current_date=current_date,
         repo_map=repo_map or "",
-        communities=communities_info or ""
     )
     ai_message_content = llm.chat(messages, temperature=0.1)
     if isinstance(ai_message_content, list):

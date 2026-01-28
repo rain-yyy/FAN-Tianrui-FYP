@@ -4,8 +4,8 @@ import hashlib
 import math
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Any
 
 from langchain_core.documents import Document
 
@@ -215,4 +215,336 @@ def mmr_select(
         selected.append(remaining.pop(best_idx))
 
     return selected
+
+
+# ====================== 社区优先两阶段检索 ======================
+
+@dataclass
+class CommunityInfo:
+    """社区信息数据类"""
+    community_id: int
+    summary: str
+    node_ids: List[str] = field(default_factory=list)
+    relevance_score: float = 0.0
+
+
+class CommunityFirstRetriever:
+    """
+    社区优先的两阶段检索器。
+    
+    第一阶段：通过查询语义匹配定位相关业务社区
+    第二阶段：在匹配的社区内部检索具体代码片段
+    """
+
+    def __init__(
+        self,
+        communities: Dict[int, List[str]],
+        community_summaries: Dict[int, str],
+        documents: List[Document],
+        tokenizer: Tokenizer | None = None,
+    ):
+        """
+        初始化社区优先检索器。
+
+        Args:
+            communities: 社区ID到节点ID列表的映射 {community_id: [node_id1, node_id2, ...]}
+            community_summaries: 社区ID到摘要的映射 {community_id: summary_text}
+            documents: 所有文档列表，每个文档的 metadata 应包含 source 字段
+            tokenizer: 可选的分词器
+        """
+        self._communities = communities
+        self._summaries = community_summaries
+        self._documents = documents
+        self._tokenizer = tokenizer or default_tokenizer
+
+        # 为每个文档建立社区映射
+        self._doc_to_community: Dict[str, int] = {}
+        self._community_docs: Dict[int, List[Document]] = defaultdict(list)
+        self._build_doc_community_mapping()
+
+        # 为社区摘要构建 BM25 索引
+        self._community_bm25: Optional[SparseBM25Index] = None
+        self._community_info_list: List[CommunityInfo] = []
+        self._build_community_index()
+
+    def _build_doc_community_mapping(self) -> None:
+        """构建文档到社区的映射关系"""
+        # 创建节点ID到社区ID的映射
+        node_to_community: Dict[str, int] = {}
+        for comm_id, nodes in self._communities.items():
+            for node in nodes:
+                node_to_community[node] = comm_id
+
+        # 将文档分配到对应的社区
+        for doc in self._documents:
+            source = doc.metadata.get("source", "")
+            if not source:
+                continue
+
+            # 尝试匹配文档源路径到社区节点
+            matched_community = None
+
+            # 直接匹配文件路径
+            if source in node_to_community:
+                matched_community = node_to_community[source]
+            else:
+                # 尝试部分路径匹配
+                for node_id, comm_id in node_to_community.items():
+                    if source.endswith(node_id) or node_id.endswith(source):
+                        matched_community = comm_id
+                        break
+                    # 检查函数/类节点 (格式: file_path:name)
+                    if ":" in node_id:
+                        file_part = node_id.split(":")[0]
+                        if source.endswith(file_part) or file_part.endswith(source):
+                            matched_community = comm_id
+                            break
+
+            if matched_community is not None:
+                self._doc_to_community[compute_doc_key(doc)] = matched_community
+                self._community_docs[matched_community].append(doc)
+
+    def _build_community_index(self) -> None:
+        """为社区摘要构建 BM25 索引"""
+        if not self._summaries:
+            return
+
+        # 创建社区信息列表
+        for comm_id, summary in self._summaries.items():
+            nodes = self._communities.get(comm_id, [])
+            self._community_info_list.append(CommunityInfo(
+                community_id=comm_id,
+                summary=summary,
+                node_ids=nodes,
+            ))
+
+        # 创建虚拟文档用于 BM25 检索
+        community_docs = [
+            Document(
+                page_content=info.summary,
+                metadata={"community_id": info.community_id}
+            )
+            for info in self._community_info_list
+        ]
+
+        if community_docs:
+            self._community_bm25 = SparseBM25Index.build(community_docs, self._tokenizer)
+
+    def retrieve_communities(
+        self,
+        query: str,
+        top_k: int = 3,
+    ) -> List[CommunityInfo]:
+        """
+        第一阶段：检索与查询最相关的社区。
+
+        Args:
+            query: 用户查询
+            top_k: 返回的社区数量
+
+        Returns:
+            按相关性排序的社区信息列表
+        """
+        if not self._community_bm25 or not self._community_info_list:
+            return []
+
+        # 使用 BM25 检索社区
+        results = self._community_bm25.search(query, top_k=top_k)
+
+        matched_communities = []
+        for doc, score in results:
+            comm_id = doc.metadata.get("community_id")
+            if comm_id is not None:
+                for info in self._community_info_list:
+                    if info.community_id == comm_id:
+                        info.relevance_score = score
+                        matched_communities.append(info)
+                        break
+
+        return matched_communities
+
+    def retrieve_from_communities(
+        self,
+        query: str,
+        community_ids: List[int],
+        top_k_per_community: int = 5,
+    ) -> List[Tuple[Document, float]]:
+        """
+        第二阶段：从指定社区内检索文档。
+
+        Args:
+            query: 用户查询
+            community_ids: 要检索的社区ID列表
+            top_k_per_community: 每个社区返回的文档数量
+
+        Returns:
+            (文档, 分数) 元组列表
+        """
+        all_results: List[Tuple[Document, float]] = []
+
+        for comm_id in community_ids:
+            comm_docs = self._community_docs.get(comm_id, [])
+            if not comm_docs:
+                continue
+
+            # 为该社区的文档构建临时 BM25 索引
+            comm_bm25 = SparseBM25Index.build(comm_docs, self._tokenizer)
+            results = comm_bm25.search(query, top_k=top_k_per_community)
+            all_results.extend(results)
+
+        # 按分数排序并去重
+        seen_keys = set()
+        unique_results = []
+        for doc, score in sorted(all_results, key=lambda x: x[1], reverse=True):
+            key = compute_doc_key(doc)
+            if key not in seen_keys:
+                seen_keys.add(key)
+                unique_results.append((doc, score))
+
+        return unique_results
+
+    def retrieve(
+        self,
+        query: str,
+        top_k_communities: int = 3,
+        top_k_docs_per_community: int = 5,
+        top_k_total: int = 10,
+    ) -> List[Tuple[Document, float]]:
+        """
+        执行完整的两阶段检索。
+
+        Args:
+            query: 用户查询
+            top_k_communities: 第一阶段选择的社区数量
+            top_k_docs_per_community: 每个社区检索的文档数量
+            top_k_total: 最终返回的文档总数
+
+        Returns:
+            (文档, 分数) 元组列表
+        """
+        # 第一阶段：检索相关社区
+        relevant_communities = self.retrieve_communities(query, top_k=top_k_communities)
+
+        if not relevant_communities:
+            # 如果没有匹配到社区，回退到全局 BM25 检索
+            fallback_bm25 = SparseBM25Index.build(self._documents, self._tokenizer)
+            return fallback_bm25.search(query, top_k=top_k_total)
+
+        # 第二阶段：从相关社区检索文档
+        community_ids = [c.community_id for c in relevant_communities]
+        results = self.retrieve_from_communities(
+            query,
+            community_ids,
+            top_k_per_community=top_k_docs_per_community,
+        )
+
+        return results[:top_k_total]
+
+    def hybrid_retrieve(
+        self,
+        query: str,
+        dense_results: List[Tuple[Document, float]],
+        top_k_communities: int = 3,
+        top_k_docs_per_community: int = 5,
+        alpha: float = 0.6,
+        top_k: int = 10,
+    ) -> List[RankedCandidate]:
+        """
+        混合检索：结合社区优先检索和稠密向量检索。
+
+        Args:
+            query: 用户查询
+            dense_results: 来自向量检索的结果 [(doc, score), ...]
+            top_k_communities: 第一阶段选择的社区数量
+            top_k_docs_per_community: 每个社区检索的文档数量
+            alpha: 稠密检索权重 (1-alpha 为稀疏检索权重)
+            top_k: 返回的文档数量
+
+        Returns:
+            排序后的候选文档列表
+        """
+        # 社区优先检索（稀疏）
+        sparse_results = self.retrieve(
+            query,
+            top_k_communities=top_k_communities,
+            top_k_docs_per_community=top_k_docs_per_community,
+            top_k_total=top_k * 2,
+        )
+
+        # 合并结果
+        candidates_map: Dict[str, RankedCandidate] = {}
+
+        # 归一化分数
+        dense_scores = [s for _, s in dense_results]
+        sparse_scores = [s for _, s in sparse_results]
+        norm_dense = normalize_scores(dense_scores)
+        norm_sparse = normalize_scores(sparse_scores)
+
+        # 添加稠密检索结果
+        for idx, (doc, _) in enumerate(dense_results):
+            key = compute_doc_key(doc)
+            category = doc.metadata.get("category", "unknown")
+            candidates_map[key] = RankedCandidate(
+                key=key,
+                category=category,
+                doc=doc,
+                dense_score=norm_dense[idx] if idx < len(norm_dense) else 0.0,
+                sparse_score=0.0,
+            )
+
+        # 添加/更新稀疏检索结果
+        for idx, (doc, _) in enumerate(sparse_results):
+            key = compute_doc_key(doc)
+            category = doc.metadata.get("category", "unknown")
+            score = norm_sparse[idx] if idx < len(norm_sparse) else 0.0
+
+            if key in candidates_map:
+                candidates_map[key].sparse_score = score
+            else:
+                candidates_map[key] = RankedCandidate(
+                    key=key,
+                    category=category,
+                    doc=doc,
+                    dense_score=0.0,
+                    sparse_score=score,
+                )
+
+        # 计算最终分数
+        for cand in candidates_map.values():
+            cand.final_score = alpha * cand.dense_score + (1 - alpha) * cand.sparse_score
+
+        # 排序并返回
+        sorted_candidates = sorted(
+            candidates_map.values(),
+            key=lambda c: c.final_score,
+            reverse=True,
+        )
+
+        return sorted_candidates[:top_k]
+
+
+def create_community_retriever(
+    communities: Dict[int, List[str]],
+    community_summaries: Dict[int, str],
+    documents: List[Document],
+    tokenizer: Tokenizer | None = None,
+) -> CommunityFirstRetriever:
+    """
+    创建社区优先检索器的工厂函数。
+
+    Args:
+        communities: 社区ID到节点ID列表的映射
+        community_summaries: 社区ID到摘要的映射
+        documents: 所有文档列表
+        tokenizer: 可选的分词器
+
+    Returns:
+        配置好的 CommunityFirstRetriever 实例
+    """
+    return CommunityFirstRetriever(
+        communities=communities,
+        community_summaries=community_summaries,
+        documents=documents,
+        tokenizer=tokenizer,
+    )
 

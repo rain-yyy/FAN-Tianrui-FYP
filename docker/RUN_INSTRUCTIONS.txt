@@ -1,0 +1,62 @@
+Docker 运行和日志查看说明
+=====================================
+
+1. 进入docker目录
+   cd docker
+
+2. 构建Docker镜像
+   docker-compose build
+
+3. 运行Docker容器（后台运行）
+   docker-compose up -d
+
+4. 运行Docker容器（前台运行，直接显示日志）
+   docker-compose up
+
+5. 查看实时日志
+   docker-compose logs -f
+
+6. 查看最近100行日志
+   docker-compose logs --tail=100
+
+7. 查看特定服务的日志
+   docker-compose logs -f wiki-api
+
+8. 停止容器
+   docker-compose down
+
+9. 停止容器并删除卷
+   docker-compose down -v
+
+10. 重启容器
+    docker-compose restart
+
+11. 查看容器状态
+    docker-compose ps
+
+12. 进入运行中的容器
+    docker exec -it wiki-api-container /bin/bash
+
+=====================================
+常用组合命令：
+
+一次性构建并运行（前台，显示日志）：
+docker-compose up --build
+
+后台运行后查看日志：
+docker-compose up -d
+docker-compose logs -f
+
+停止并重新构建运行：
+docker-compose down
+docker-compose up --build
+
+=====================================
+注意事项：
+
+- 确保在docker目录下运行命令，或者使用 -f 参数指定文件路径
+- 如果.env文件不存在，需要创建它并配置必要的环境变量
+- 服务运行在端口8000，可以通过 http://localhost:8000 访问
+- 使用 -f 参数可以实时跟踪日志输出（类似tail -f）
+- 如果修改了requirements.txt，必须重新构建镜像：docker-compose build 或 docker-compose up --build
+- 如果遇到ModuleNotFoundError，检查requirements.txt是否包含所需依赖，然后重新构建镜像

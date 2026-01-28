@@ -17,7 +17,10 @@ from src.core.retrieval import (
     normalize_scores,
 )
 
-from langchain_community.vectorstores import FAISS
+if TYPE_CHECKING:
+    from langchain_community.vectorstores import FAISS
+else:  # pragma: no cover - runtime fallback for type checking convenience
+    FAISS = object  # type: ignore[assignment]
 
 load_dotenv()
 
@@ -383,9 +386,8 @@ def _answer_with_stores(
     context = _format_documents(docs)
     if not context:
         print("Warning: No relevant context retrieved. The answer may be limited.")
-    
-    # TODO: 测试换成qwen
-    llm = get_ai_client("qwen", model="qwen-plus")
+
+    llm = get_ai_client("openai", model=DEFAULT_MODEL)
 
     print("Calling AI model to generate answer...")
     messages = RAG_CHAT_PROMPT.format_messages(

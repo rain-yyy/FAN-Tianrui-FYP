@@ -1,10 +1,14 @@
-4. 在supabase中创建数据库来维护r2中的内容，包括我的taskid等等
+1. 创建一个优化方案（特别是要用创新
+2. 实现问答接口，并优化前端的展示问题
+3. 优化一下提示词
+4. 加入gemini，替换openai api
+5. 加入google 登陆
+6. 展示的代码块展示``存在问题，看起来转意也有问题，然后图标还是存在报错，左下角存在大量恶心的报错
 
 优化：
 2. 给vercel也加入github action
 github action 没有自动运行（无伤大雅
 加一个flyio的instruction 手册
-加上gemini
 现在fly有一个问题就是，只有我调用的时候，才会打印log；
 license 不处理
 整理整理前端代码，里面估计有很多废物

@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.git/
+.gitignore
+docker-compose.yml
+Dockerfile
+.vscode/
+.cursor/
+*.md
+todo.txt
+docker/

@@ -110,13 +110,6 @@ def run_structure_generation(
 ) -> tuple[str, Dict[str, Any]]:
     """
     根据仓库地址（Git URL 或本地路径）生成 wiki 目录结构，并保存到指定文件。
-    
-    流程包括：
-    1. 克隆/读取仓库
-    2. 生成文件树
-    3. 构建代码知识图谱 (CKG) 并运行 Leiden 社区发现算法
-    4. 生成社区摘要
-    5. 生成 Wiki 目录结构
     """
     if task_id:
         update_task_progress(task_id, 5, "正在克隆/读取仓库...")
@@ -141,17 +134,7 @@ def run_structure_generation(
     file_tree = generate_file_tree(repo_path, str(config_path))
 
     if task_id:
-        update_task_progress(task_id, 25, "正在构建代码知识图谱与社区分析...")
-
-    # generate_wiki_structure 内部会执行以下步骤：
-    # - 构建 RepoMap 上下文
-    # - 使用 Tree-sitter 构建代码知识图谱 (CodeGraphBuilder)
-    # - 运行 Leiden 社区发现算法 (CommunityEngine)
-    # - 生成社区摘要
-    # - 调用 LLM 生成 Wiki 目录结构
-    
-    if task_id:
-        update_task_progress(task_id, 30, "正在生成 Wiki 目录结构（包含 GraphRAG 社区分析）...")
+        update_task_progress(task_id, 30, "正在生成 Wiki 目录结构...")
 
     wiki_structure = generate_wiki_structure(repo_path, file_tree)
 

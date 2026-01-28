@@ -1,7 +1,6 @@
 import os
 import json
 import fnmatch
-from pathlib import Path
 from src.config import CONFIG, load_config
 
 # TODO: 只处理中文，英文，符号，数字，其他语言的内容直接忽略
@@ -169,18 +168,3 @@ def generate_file_tree(repo_path: str, config_path: str) -> str:
     tree_string = f".\n{build_tree_string(tree)}"
     print("File tree generated.")
     return tree_string
-
-
-def get_files_to_process(repo_path: str, config_path: str) -> list[str]:
-    """
-    根据配置获取需要处理的文件列表。
-    
-    Args:
-        repo_path: 仓库根目录路径
-        config_path: 配置文件路径
-        
-    Returns:
-        需要处理的文件路径列表（绝对路径）
-    """
-    config = load_config(config_path)
-    return find_relevant_files(repo_path, config)

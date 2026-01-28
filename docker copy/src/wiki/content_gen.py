@@ -28,9 +28,6 @@ class WikiSection:
         return " / ".join(self.breadcrumbs + [self.title])
 
 
-from src.ingestion.code_graph import CodeGraphBuilder
-import networkx as nx
-
 class WikiContentGenerator:
     """
     将 wiki 目录树与仓库文件上下文交给 AI 模型，生成每个节点对应的内容与 Mermaid 架构图。
@@ -55,10 +52,6 @@ class WikiContentGenerator:
         self.prompt_template = prompt_template or get_wiki_section_prompt()
         self.max_file_chars = max_file_chars
         self.max_section_chars = max_section_chars
-        self.graph: Optional[nx.DiGraph] = None
-
-    def set_graph(self, graph: nx.DiGraph):
-        self.graph = graph
 
     def generate(self, structure: Dict[str, Any]) -> List[Path]:
         """
@@ -108,29 +101,18 @@ class WikiContentGenerator:
 
     def _collect_file_context(self, files: Iterable[str]) -> str:
         """
-        读取文件内容片段，并结合图谱提取依赖关系。
+        读取文件内容片段，限制单文件与单章节总字数，避免提示词过长。
         """
         snippets: List[str] = []
         accumulated = 0
-        
-        rel_files = list(files)
 
-        for rel_path in rel_files:
+        for rel_path in files:
             if accumulated >= self.max_section_chars:
                 break
             snippet = self._read_single_file(rel_path)
             if not snippet:
                 continue
-            
-            # 提取图谱中的依赖信息
-            dependency_info = ""
-            if self.graph and rel_path in self.graph:
-                deps = [neighbor for neighbor in self.graph.neighbors(rel_path) 
-                        if self.graph.edges[rel_path, neighbor].get("type") == "calls"]
-                if deps:
-                    dependency_info = f"\n[逻辑依赖]: 该文件调用了 {', '.join(deps[:5])}"
-
-            snippets.append(f"### {rel_path}{dependency_info}\n{snippet}")
+            snippets.append(f"### {rel_path}\n{snippet}")
             accumulated += len(snippet)
 
         return "\n\n".join(snippets)

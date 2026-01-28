@@ -61,8 +61,7 @@ STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
             - **Overview**: Must include entry points (e.g., `main.py`, `index.js`), key configuration (`package.json`, `docker-compose.yml`), and `README.md`.
             - **Architecture/Services**: Look for distinct modules in the file tree. If there is an `api` folder, list its key files. If there is a `models` folder, map it to "Data Models".
             - **Repo Map Usage**: Use the provided Repo Map to identify which files contain the most important classes and function definitions. High-importance files MUST be referenced in their respective sections.
-            - **Community Logic (GraphRAG)**: You have been provided with a <COMMUNITIES> section that identifies logical clusters of code based on actual call graphs and dependencies. Use these communities as the PRIMARY GUIDE for organizing your top-level and mid-level sections. Each community represents a cohesive business or technical domain.
-            - **Sparse README Handling**: If the README is short or missing, rely ENTIRELY on the file tree, communities, and naming conventions to structure the documentation.
+            - **Sparse README Handling**: If the README is short or missing, rely ENTIRELY on the file tree and naming conventions to structure the documentation.
 
             Focus on the following when designing the table of contents:
             - Core backend services, API layer, document and knowledge base processing flows.
@@ -87,10 +86,6 @@ STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
             <REPO_MAP>
             {repo_map}
             </REPO_MAP>
-
-            <COMMUNITIES>
-            {communities}
-            </COMMUNITIES>
           """,
 )
 
