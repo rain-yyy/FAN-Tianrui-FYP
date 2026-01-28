@@ -1,9 +1,10 @@
 import networkx as nx
 from tree_sitter import Parser, Node
-import tree_sitter_languages
 from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
 import json
+
+from src.ingestion.ts_parser import TreeSitterParser
 
 class CodeGraphBuilder:
     """
@@ -11,25 +12,14 @@ class CodeGraphBuilder:
     """
     
     # 映射文件扩展名到 tree-sitter 语言名称
-    EXTENSION_TO_LANGUAGE = {
-        ".py": "python",
-        ".js": "javascript",
-        ".jsx": "javascript",
-        ".ts": "typescript",
-        ".tsx": "tsx",
-    }
+    EXTENSION_TO_LANGUAGE = TreeSitterParser.EXTENSION_TO_LANGUAGE
 
     def __init__(self):
         self.graph = nx.DiGraph()
-        self.parsers = {}
+        self.ts_parser = TreeSitterParser()
 
     def get_parser(self, language_name: str) -> Parser:
-        if language_name not in self.parsers:
-            lang = tree_sitter_languages.get_language(language_name)
-            parser = Parser()
-            parser.set_language(lang)
-            self.parsers[language_name] = parser
-        return self.parsers[language_name]
+        return self.ts_parser.get_parser(language_name)
 
     def build_graph(self, repo_root: str, file_paths: List[str]):
         """

@@ -1,13 +1,15 @@
 1. 创建一个优化方案（特别是要用创新
-2. 实现问答接口，并优化前端的展示问题
+embedding存在梯子问题
+现在只有少量的file找不到（.github folder需要处理一下， 剩下的看起来是幻觉导致的）
+2. 实现问答接口，
+4. 优化前端的展示问题(展示的代码块展示``存在问题，看起来转意也有问题，然后图标还是存在报错，左下角存在大量恶心的报错)
 3. 检查一下api的使用量
-有大量的[WARN] 跳过不存在的文件：packages/shared/src/constants.ts
-3. 优化一下提示词
 4. 加入gemini，替换openai api
 5. 加入google 登陆
-6. 展示的代码块展示``存在问题，看起来转意也有问题，然后图标还是存在报错，左下角存在大量恶心的报错
+了解一下rank和embedding的区别
 
 优化：
+
 2. 给vercel也加入github action
 github action 没有自动运行（无伤大雅
 加一个flyio的instruction 手册

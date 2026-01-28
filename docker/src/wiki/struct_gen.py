@@ -115,8 +115,8 @@ def generate_wiki_structure(
     file_paths = get_files_to_process(repo_path, str(config_path))
 
     # TODO 保存在本地，用于测试文件路径错误的问题（已修复）
-    # with open("file_paths.json", "w", encoding="utf-8") as f:
-    #     json.dump(file_paths, f, indent=2, ensure_ascii=False)
+    with open("file_paths.json", "w", encoding="utf-8") as f:
+        json.dump(file_paths, f, indent=2, ensure_ascii=False)
     # print("file_paths: ", file_paths)
 
 
@@ -140,8 +140,8 @@ def generate_wiki_structure(
         print(f"Valid file list built: {len(relative_paths)} files")
         
     #TODO 保存在本地，用于测试文件路径错误的问题（已修复）  
-    # with open("valid_file_list.json", "w", encoding="utf-8") as f:
-    #     json.dump(valid_file_list, f, indent=2, ensure_ascii=False)
+    with open("valid_file_list.json", "w", encoding="utf-8") as f:
+        json.dump(valid_file_list, f, indent=2, ensure_ascii=False)
     # print("valid_file_list: ", valid_file_list)
 
     # 2.3 准备社区信息 (GraphRAG)

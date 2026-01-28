@@ -380,9 +380,10 @@ async def execute_generation_task(task_id: str, url_link: str):
             )
         )
 
-        print(wiki_structure)
+        
 
         # TODO: 测试用截断,用于测试文件路径错误的问题（已修复）
+        # print(wiki_structure)
 
         
         # 2. 生成 Wiki 内容和对应的 JSON 详情

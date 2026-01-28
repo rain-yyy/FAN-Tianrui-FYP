@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List, Any
-
+import json
 
 @dataclass(frozen=True)
 class PromptDefinition:
@@ -24,6 +24,11 @@ class PromptDefinition:
         """
         格式化提示词为模型调用的消息列表。
         """
+
+        # TODO 保存在本地，用于测试文件路径错误的问题（已修复）
+        with open("structure_prompt.json", "w", encoding="utf-8") as f:
+            json.dump(kwargs, f, indent=2, ensure_ascii=False)
+
         return [
             {"role": "system", "content": self.system.strip().format(**kwargs)},
             {"role": "user", "content": self.human.strip().format(**kwargs)},

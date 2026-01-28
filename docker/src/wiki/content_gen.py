@@ -51,7 +51,7 @@ class WikiContentGenerator:
         self.json_output_dir = Path(json_output_dir).expanduser().resolve()
         self.json_output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.client = client or get_ai_client("qwen")
+        self.client = client or get_ai_client("deepseek")
         self.prompt_template = prompt_template or get_wiki_section_prompt()
         self.max_file_chars = max_file_chars
         self.max_section_chars = max_section_chars

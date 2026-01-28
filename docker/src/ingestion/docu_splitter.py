@@ -45,7 +45,10 @@ def load_and_split_docs(file_paths: list[str]) -> list[Document]:
                 docs.extend(file_docs)
                 
         except Exception as e:
-            print(f"Skipping file {file_path} due to error: {e}")
+            # 获取更详细的错误信息
+            import traceback
+            error_details = traceback.format_exc().splitlines()[-1]
+            print(f"Skipping file {file_path} due to error: {e} ({error_details})")
             continue
             
     print(f"Split content into {len(docs)} document chunks.")

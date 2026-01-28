@@ -1,7 +1,21 @@
-import tree_sitter_languages
+import tree_sitter
 from tree_sitter import Parser, Node
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+
+# 尝试导入更现代且兼容 tree-sitter 0.22+ 的语言包
+try:
+    import tree_sitter_language_pack as tslp
+    HAS_TSLP = True
+except ImportError:
+    HAS_TSLP = False
+
+# 尝试导入旧版的 tree-sitter-languages
+try:
+    import tree_sitter_languages
+    HAS_TS_LANGS = True
+except ImportError:
+    HAS_TS_LANGS = False
 
 class CodeChunk:
     def __init__(self, content: str, start_line: int, end_line: int, node_type: str, name: Optional[str] = None):
@@ -36,10 +50,38 @@ class TreeSitterParser:
 
     def get_parser(self, language_name: str) -> Parser:
         if language_name not in self.parsers:
-            lang = tree_sitter_languages.get_language(language_name)
-            parser = Parser()
-            parser.set_language(lang)
+            lang = None
+            
+            # 优先使用 tree-sitter-language-pack (兼容性更好)
+            if HAS_TSLP:
+                try:
+                    lang = tslp.get_language(language_name)
+                except Exception:
+                    pass
+            
+            # 如果失败，尝试使用 tree-sitter-languages
+            if lang is None and HAS_TS_LANGS:
+                try:
+                    lang = tree_sitter_languages.get_language(language_name)
+                except Exception:
+                    # 如果 tree-sitter-languages 报错 "__init__() takes exactly 1 argument (2 given)"
+                    # 这是因为它与新版 tree-sitter 0.22+ 不兼容
+                    pass
+            
+            if lang is None:
+                raise ValueError(f"Could not load tree-sitter language: {language_name}")
+
+            # 兼容 tree-sitter 0.22+ 和旧版本
+            try:
+                # 新版 API: Parser(language)
+                parser = Parser(lang)
+            except TypeError:
+                # 旧版 API
+                parser = Parser()
+                parser.set_language(lang)
+                
             self.parsers[language_name] = parser
+            
         return self.parsers[language_name]
 
     def parse_code(self, code: str, extension: str) -> List[CodeChunk]:
