@@ -19,3 +19,6 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
     restart: always
+    volumes:
+      - ./vector_stores:/app/vector_stores
+    

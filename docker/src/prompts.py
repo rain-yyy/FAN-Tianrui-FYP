@@ -46,7 +46,6 @@ STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
             - `lastIndexed` must use the provided `current_date` without modifying the format.
             - `toc` is an array of objects; each object must include at least `id` and `title`, with optional `children`.
             - Each node must provide a `files` array listing all relative paths that are most relevant for drafting the section.
-            - **CRITICAL FOR `files` ARRAY**: Do NOT just list "README.md". You MUST analyze the <FILE_TREE> and <REPO_MAP> to find the actual source code files (e.g., `main.py`, `app.tsx`, `config.yaml`, controllers, models) that implement the functionality described in that section.
             - If `children` exists it must be an array, and each child must follow the same structure recursively.
 
             Mandatory constraints:
@@ -57,11 +56,18 @@ STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
             - Remove sections for unsupported functionality in the repository; add sections when you discover specific features (AI, pipelines, CI/CD, etc.).
             - Populate `lastIndexed` with the provided `current_date`.
 
+            **CRITICAL CONSTRAINT FOR `files` ARRAY**:
+            - You are provided with a <VALID_FILE_LIST> containing ALL available file paths in this repository.
+            - The `files` array in EVERY toc node MUST ONLY contain paths that EXACTLY match entries from <VALID_FILE_LIST>.
+            - Do NOT invent, guess, or hallucinate file paths. If a path is not in <VALID_FILE_LIST>, it does NOT exist.
+            - Do NOT just list "README.md". Select actual source code files that implement the functionality.
+            - Copy paths EXACTLY as they appear in <VALID_FILE_LIST>, including case sensitivity.
+
             Detailed Strategy for File Selection:
-            - **Overview**: Must include entry points (e.g., `main.py`, `index.js`), key configuration (`package.json`, `docker-compose.yml`), and `README.md`.
+            - **Overview**: Must include entry points (e.g., `main.py`, `index.js`), key configuration (`package.json`, `docker-compose.yml`), and `README.md` - but ONLY if they exist in <VALID_FILE_LIST>.
             - **Architecture/Services**: Look for distinct modules in the file tree. If there is an `api` folder, list its key files. If there is a `models` folder, map it to "Data Models".
-            - **Repo Map Usage**: Use the provided Repo Map to identify which files contain the most important classes and function definitions. High-importance files MUST be referenced in their respective sections.
-            - **Community Logic (GraphRAG)**: You have been provided with a <COMMUNITIES> section that identifies logical clusters of code based on actual call graphs and dependencies. Use these communities as the PRIMARY GUIDE for organizing your top-level and mid-level sections. Each community represents a cohesive business or technical domain.
+            - **Repo Map Usage**: Use the provided Repo Map to identify which files contain the most important classes and function definitions. Cross-reference with <VALID_FILE_LIST> to ensure paths are valid.
+            - **Community Logic (GraphRAG)**: Use the <COMMUNITIES> section to understand logical clusters, but always verify file paths against <VALID_FILE_LIST>.
             - **Sparse README Handling**: If the README is short or missing, rely ENTIRELY on the file tree, communities, and naming conventions to structure the documentation.
 
             Focus on the following when designing the table of contents:
@@ -75,6 +81,10 @@ STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
             <CURRENT_DATE>
             {current_date}
             </CURRENT_DATE>
+
+            <VALID_FILE_LIST>
+            {valid_file_list}
+            </VALID_FILE_LIST>
 
             <FILE_TREE>
             {file_tree}
@@ -133,6 +143,74 @@ Please provide your answer directly.
 """,
 )
 
+
+HYDE_PROMPT: PromptDefinition = PromptDefinition(
+    name="hyde-generator",
+    system="""
+You are a technical documentation expert. Your task is to generate a hypothetical answer document that would be relevant to the given question about a software codebase.
+
+This hypothetical document will be used to improve semantic search retrieval. Generate content that:
+1. Directly addresses the technical question
+2. Uses terminology and concepts likely found in actual code documentation
+3. Includes relevant technical details, function names, and architectural concepts
+4. Is written as if it were part of the actual codebase documentation
+
+Keep the response focused and technical. Do not include disclaimers or meta-commentary.
+""",
+    human="""
+Generate a hypothetical technical documentation snippet that would answer this question:
+
+{question}
+
+Write the documentation directly, as if it exists in the codebase.
+""",
+)
+
+
+RAG_CHAT_WITH_HISTORY_PROMPT: PromptDefinition = PromptDefinition(
+    name="rag-chat-with-history",
+    system="""
+You are a senior RAG (Retrieval-Augmented Generation) assistant helping developers understand this codebase.
+
+## Knowledge Base Architecture
+Our knowledge base uses a categorical storage strategy:
+- **Code Files (code)**: Store actual source code, serving as the authoritative source of truth for system behavior. When analyzing, focus on logic flow, side effects, and edge cases.
+- **Text Documents (text)**: Store design documents, READMEs, comments, and other descriptive content, providing design intent and usage guidelines.
+
+During retrieval, relevant snippets are extracted from both categories and tagged with a `type` field indicating their source classification.
+
+## Response Principles
+- **Strictly grounded in retrieved content**: Every statement must derive from the provided context; do not speculate.
+- **Prioritize code evidence**: When code and documentation conflict, defer to the code implementation.
+- **Integrate multi-source information**: Synthesize snippets from different types into a coherent, complete answer.
+- **Acknowledge knowledge boundaries**: If the context is insufficient to answer the question, clearly state what information is missing.
+- **Professional technical communication**: Use clear, concise technical language appropriate for developer audiences.
+- **Context-aware responses**: Consider the conversation history when formulating your answer. Build upon previous exchanges naturally.
+
+## Response Requirements
+Provide the best possible answer directly, without listing evidence sources or follow-up suggestions. Focus on:
+- Accurately answering the user's question in the context of the ongoing conversation
+- Providing actionable technical insights
+- Referencing previous discussion points when relevant
+- Highlighting potential risks or considerations (when applicable)
+""",
+    human="""
+<RETRIEVED_CONTEXT>
+{context}
+</RETRIEVED_CONTEXT>
+
+<CONVERSATION_HISTORY>
+{conversation_history}
+</CONVERSATION_HISTORY>
+
+<CURRENT_QUESTION>
+{question}
+</CURRENT_QUESTION>
+
+Please provide your answer directly, considering the conversation context.
+""",
+)
+
 WIKI_SECTION_PROMPT: PromptDefinition = PromptDefinition(
     name="wiki-section-writer",
     system="""
@@ -179,6 +257,8 @@ PROMPT_REGISTRY: Dict[str, PromptDefinition] = {
     STRUCTURE_PROMPT.name: STRUCTURE_PROMPT,
     RAG_CHAT_PROMPT.name: RAG_CHAT_PROMPT,
     WIKI_SECTION_PROMPT.name: WIKI_SECTION_PROMPT,
+    HYDE_PROMPT.name: HYDE_PROMPT,
+    RAG_CHAT_WITH_HISTORY_PROMPT.name: RAG_CHAT_WITH_HISTORY_PROMPT,
 }
 
 
@@ -206,14 +286,34 @@ def get_wiki_section_prompt() -> ChatPromptTemplate:
     return WIKI_SECTION_PROMPT.build()
 
 
+def get_hyde_prompt() -> ChatPromptTemplate:
+    """
+    获取用于 HyDE 假设文档生成的提示词模板。
+    """
+
+    return HYDE_PROMPT.build()
+
+
+def get_rag_chat_with_history_prompt() -> ChatPromptTemplate:
+    """
+    获取用于带对话历史的 RAG 问答的提示词模板。
+    """
+
+    return RAG_CHAT_WITH_HISTORY_PROMPT.build()
+
+
 __all__ = [
     "PromptDefinition",
     "STRUCTURE_PROMPT",
     "RAG_CHAT_PROMPT",
     "WIKI_SECTION_PROMPT",
+    "HYDE_PROMPT",
+    "RAG_CHAT_WITH_HISTORY_PROMPT",
     "PROMPT_REGISTRY",
     "get_structure_prompt",
     "get_rag_chat_prompt",
     "get_wiki_section_prompt",
+    "get_hyde_prompt",
+    "get_rag_chat_with_history_prompt",
 ]
 

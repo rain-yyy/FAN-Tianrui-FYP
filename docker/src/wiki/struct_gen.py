@@ -81,7 +81,8 @@ def _build_repo_map_context(repo_path: str, target_subdir: str = "src") -> str:
 
 
 def generate_wiki_structure(
-    repo_path: str, file_tree: str, repo_map: Optional[str] = None, communities_info: Optional[str] = None
+    repo_path: str, file_tree: str, repo_map: Optional[str] = None, communities_info: Optional[str] = None,
+    valid_file_list: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     调用 gpt 4o mini 生成分层 Wiki 目录并解析 JSON 响应。
@@ -99,7 +100,7 @@ def generate_wiki_structure(
 
     # 2. 初始化模型
     # TODO:测试换成qwen
-    llm = get_ai_client("qwen", model="qwen-plus")
+    llm = get_ai_client("qwen", model="qwen3-max-2026-01-23")
     current_date = datetime.utcnow().date().isoformat()
 
     # 2.1 准备 RepoMap 语境
@@ -109,14 +110,44 @@ def generate_wiki_structure(
         # print(repo_map)
         print(f"Repo map context built: {len(repo_map)} tokens")
 
-    # 2.2 准备社区信息 (GraphRAG)
+    # 2.2 准备有效文件列表（用于约束 LLM 输出）
+    config_path = PROJECT_ROOT / "config" / "repo_config.json"
+    file_paths = get_files_to_process(repo_path, str(config_path))
+
+    # TODO 保存在本地，用于测试文件路径错误的问题（已修复）
+    # with open("file_paths.json", "w", encoding="utf-8") as f:
+    #     json.dump(file_paths, f, indent=2, ensure_ascii=False)
+    # print("file_paths: ", file_paths)
+
+
+    
+    if valid_file_list is None:
+        print("Building valid file list...")
+        # 将绝对路径转换为相对路径，使用 os.path.relpath 以处理 macOS 等系统中的路径前缀不一致（如 /var vs /private/var）
+        repo_abs_path = os.path.abspath(repo_path)
+        relative_paths = []
+        for fp in file_paths:
+            try:
+                # 使用 os.path.relpath 比 Path.relative_to 更鲁棒
+                rel = os.path.relpath(fp, repo_abs_path).replace("\\", "/")
+                # 过滤掉不在仓库目录下的路径（以 .. 开头的路径）
+                if not rel.startswith(".."):
+                    relative_paths.append(rel)
+            except (ValueError, TypeError):
+                continue
+        
+        valid_file_list = "\n".join(sorted(relative_paths))
+        print(f"Valid file list built: {len(relative_paths)} files")
+        
+    #TODO 保存在本地，用于测试文件路径错误的问题（已修复）  
+    # with open("valid_file_list.json", "w", encoding="utf-8") as f:
+    #     json.dump(valid_file_list, f, indent=2, ensure_ascii=False)
+    # print("valid_file_list: ", valid_file_list)
+
+    # 2.3 准备社区信息 (GraphRAG)
     if communities_info is None:
         try:
             print("Building code graph and communities...")
-            # 获取需要处理的文件列表（使用 config 中的过滤逻辑）
-            # 注意：这里需要 config_path，我们假设它存在或通过某种方式获取
-            config_path = PROJECT_ROOT / "config" / "repo_config.json"
-            file_paths = get_files_to_process(repo_path, str(config_path))
             
             builder = CodeGraphBuilder()
             graph = builder.build_graph(repo_path, file_paths)
@@ -146,7 +177,8 @@ def generate_wiki_structure(
         readme_content=readme_content,
         current_date=current_date,
         repo_map=repo_map or "",
-        communities=communities_info or ""
+        communities=communities_info or "",
+        valid_file_list=valid_file_list or ""
     )
     ai_message_content = llm.chat(messages, temperature=0.1)
     if isinstance(ai_message_content, list):

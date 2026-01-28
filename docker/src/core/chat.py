@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, TYPE_CHECKING
+from typing import Dict, Iterable, List, Mapping, Optional, TYPE_CHECKING
 
 from dotenv import load_dotenv
 from langchain_core.documents import Document
 from src.clients.ai_client_factory import get_ai_client
-from src.prompts import get_rag_chat_prompt, RAG_CHAT_PROMPT
+from src.prompts import get_rag_chat_prompt, RAG_CHAT_PROMPT, HYDE_PROMPT, RAG_CHAT_WITH_HISTORY_PROMPT
 from src.ingestion.kb_loader import load_knowledge_base
 from src.core.retrieval import (
     RankedCandidate,
@@ -40,6 +40,9 @@ SPARSE_K_MULTIPLIER = 4
 MAX_TOTAL_CANDIDATES = 60
 RAG_PROMPT = get_rag_chat_prompt()
 
+# HyDE 配置
+HYDE_ENABLED = True  # 是否启用 HyDE
+
 
 @dataclass
 class CategoryRetrievalUnit:
@@ -52,6 +55,62 @@ def _ensure_openai_key() -> None:
         raise ValueError(
             "OPENAI_API_KEY environment variable not set. Please set it before running."
         )
+
+
+def _generate_hyde_document(question: str) -> str:
+    """
+    使用 HyDE (Hypothetical Document Embeddings) 技术生成假设性文档。
+    
+    HyDE 的核心思想是：先让 LLM 根据问题生成一个假设性的答案文档，
+    然后用这个假设文档去进行向量检索，而不是直接用用户的问题。
+    这样可以缩小问题和答案之间的语义鸿沟，提高检索效果。
+    
+    Args:
+        question: 用户的原始问题
+        
+    Returns:
+        假设性答案文档，用于后续检索
+    """
+    try:
+        llm = get_ai_client("qwen", model="qwen-plus")
+        
+        messages = HYDE_PROMPT.format_messages(question=question)
+        hyde_doc = llm.chat(messages, temperature=0.3, max_tokens=500)
+        
+        if not isinstance(hyde_doc, str):
+            hyde_doc = str(hyde_doc)
+        
+        print(f"[HyDE] 生成假设文档成功，长度: {len(hyde_doc)} 字符")
+        return hyde_doc.strip()
+        
+    except Exception as e:
+        print(f"[HyDE] 生成假设文档失败: {e}，回退到原始问题")
+        return question
+
+
+def _format_conversation_history(history: List[Dict[str, str]]) -> str:
+    """
+    格式化对话历史为可读文本。
+    
+    Args:
+        history: 对话历史列表 [{"role": "user/assistant", "content": "..."}]
+        
+    Returns:
+        格式化后的对话历史字符串
+    """
+    if not history:
+        return ""
+    
+    formatted_parts = []
+    for msg in history[-6:]:  # 只保留最近 6 轮对话
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if role == "user":
+            formatted_parts.append(f"用户: {content}")
+        elif role == "assistant":
+            formatted_parts.append(f"助手: {content}")
+    
+    return "\n".join(formatted_parts)
 
 
 def _resolve_vector_store_root(base_path: str) -> str:
@@ -285,11 +344,24 @@ def answer_question(
     question: str,
     *,
     category_top_k: Mapping[str, int] | None = None,
+    conversation_history: Optional[List[Dict[str, str]]] = None,
+    use_hyde: bool = True,
 ) -> Dict[str, object]:
     """
     基于本地多类别 FAISS 向量库执行检索增强问答（RAG）。
+    
+    支持 HyDE (Hypothetical Document Embeddings) 和多轮对话。
     加载向量库，执行混合检索，使用 MMR 选择文档，然后调用 LLM 生成答案。
-    返回包含答案文本和参考来源的字典。
+    
+    Args:
+        db_path: 向量库根目录路径
+        question: 用户问题
+        category_top_k: 各类别检索的 top-k 配置
+        conversation_history: 对话历史列表 [{"role": "user/assistant", "content": "..."}]
+        use_hyde: 是否使用 HyDE 技术增强检索
+        
+    Returns:
+        包含答案文本和参考来源的字典
     """
     if not question or not question.strip():
         raise ValueError("问题不能为空。")
@@ -300,7 +372,13 @@ def answer_question(
     top_k_plan = dict(category_top_k or CATEGORY_TOP_K)
     stores = _load_vector_stores(root_path, top_k_plan.keys())
 
-    return _answer_with_stores(stores, question, category_top_k=top_k_plan)
+    return _answer_with_stores(
+        stores, 
+        question, 
+        category_top_k=top_k_plan,
+        conversation_history=conversation_history,
+        use_hyde=use_hyde and HYDE_ENABLED,
+    )
 
 
 def interactive_chat(
@@ -354,18 +432,39 @@ def _answer_with_stores(
     question: str,
     *,
     category_top_k: Mapping[str, int],
+    conversation_history: Optional[List[Dict[str, str]]] = None,
+    use_hyde: bool = True,
 ) -> Dict[str, object]:
     """
     使用已加载的向量库回答问题。
+    
+    支持 HyDE 增强检索和多轮对话上下文。
     执行混合检索收集候选文档，使用 MMR 算法选择最相关且多样化的文档，
     格式化上下文后调用 LLM 生成答案，并提取参考来源信息。
-    返回包含答案和来源的字典。
+    
+    Args:
+        stores: 类别到检索单元的映射
+        question: 用户问题
+        category_top_k: 各类别检索的 top-k 配置
+        conversation_history: 对话历史列表
+        use_hyde: 是否使用 HyDE 技术
+        
+    Returns:
+        包含答案和来源的字典
     """
     _ensure_openai_key()
 
+    # HyDE: 生成假设性文档用于检索
+    retrieval_query = question
+    if use_hyde:
+        print("[RAG] 使用 HyDE 增强检索...")
+        hyde_doc = _generate_hyde_document(question)
+        # 结合原始问题和假设文档进行检索
+        retrieval_query = f"{question}\n\n{hyde_doc}"
+
     candidates = _gather_hybrid_candidates(
         stores,
-        question,
+        retrieval_query,
         category_top_k=category_top_k,
     )
     if not candidates:
@@ -373,7 +472,7 @@ def _answer_with_stores(
     else:
         mmr_pick = mmr_select(
             candidates,
-            question,
+            question,  # MMR 使用原始问题进行多样性选择
             top_n=min(MMR_TARGET, len(candidates)),
             lambda_mult=MMR_LAMBDA,
         )
@@ -384,30 +483,39 @@ def _answer_with_stores(
     if not context:
         print("Warning: No relevant context retrieved. The answer may be limited.")
     
-    # TODO: 测试换成qwen
     llm = get_ai_client("qwen", model="qwen-plus")
 
     print("Calling AI model to generate answer...")
-    messages = RAG_CHAT_PROMPT.format_messages(
-        context=context or "无检索结果。", 
-        question=question
-    )
+    
+    # 根据是否有对话历史选择不同的 prompt
+    if conversation_history and len(conversation_history) > 0:
+        history_text = _format_conversation_history(conversation_history)
+        messages = RAG_CHAT_WITH_HISTORY_PROMPT.format_messages(
+            context=context or "无检索结果。", 
+            conversation_history=history_text,
+            question=question
+        )
+    else:
+        messages = RAG_CHAT_PROMPT.format_messages(
+            context=context or "无检索结果。", 
+            question=question
+        )
+    
     answer_text = llm.chat(messages, temperature=0.1)
 
     if not isinstance(answer_text, str):
         answer_text = str(answer_text)
 
     sources: List[str] = []
+    seen_sources = set()  # 去重
     for doc in docs:
         source = doc.metadata.get("source") or doc.metadata.get("file_path")
         category = doc.metadata.get("kb_category")
-        if source:
-            if category:
-                sources.append(f"{category}:{source}")
-            else:
-                sources.append(source)
-        elif category:
-            sources.append(category)
+        
+        source_key = f"{category}:{source}" if category and source else (source or category)
+        if source_key and source_key not in seen_sources:
+            seen_sources.add(source_key)
+            sources.append(source_key)
 
     return {
         "answer": answer_text.strip(),

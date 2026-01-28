@@ -16,6 +16,7 @@ primary_region = "sin"
   PYTHONPATH = "/app"
   HOST = "0.0.0.0"
   PORT = "8000"
+  VECTOR_STORE_PATH = "/data/vector_stores"
 
 [http_service]
   # 内部端口（你的应用监听的端口）
@@ -30,3 +31,6 @@ primary_region = "sin"
   # 进程组
   processes = ["app"]
 
+[mounts]
+  source = "rag_data"
+  destination = "/data"
