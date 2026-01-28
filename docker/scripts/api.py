@@ -28,6 +28,7 @@ from src.wiki.struct_gen import generate_wiki_structure
 from src.wiki.content_gen import WikiContentGenerator
 from src.clients.ai_client_factory import get_ai_client
 from src.storage.r2_client import upload_wiki_to_r2
+from src.storage.supabase_client import update_repo_vector_path
 from src.core.chat import answer_question
 
 app = FastAPI(
@@ -79,12 +80,19 @@ VECTOR_STORE_ROOT: Path = Path(os.getenv("VECTOR_STORE_PATH", str(PROJECT_ROOT /
 repo_vector_store_mapping: Dict[str, str] = {}
 
 
+def _get_repo_name(repo_url: str) -> str:
+    """从仓库 URL 中提取仓库名称"""
+    clean_url = repo_url.rstrip('/').replace('.git', '')
+    repo_name = clean_url.split('/')[-1] if '/' in clean_url else clean_url
+    return repo_name
+
+
 def _get_repo_hash(repo_url: str) -> str:
     """根据仓库 URL 生成唯一的短哈希标识"""
     # 清理 URL
     clean_url = repo_url.rstrip('/').replace('.git', '').lower()
     # 提取仓库名称
-    repo_name = clean_url.split('/')[-1] if '/' in clean_url else clean_url
+    repo_name = _get_repo_name(clean_url)
     # 生成短哈希
     url_hash = hashlib.md5(clean_url.encode()).hexdigest()[:8]
     return f"{repo_name}_{url_hash}"
@@ -262,9 +270,9 @@ def run_rag_indexing(
     if task_id:
         update_task_progress(task_id, 86, "正在构建 RAG 向量索引...")
     
-    # 生成仓库唯一标识
-    repo_hash = _get_repo_hash(repo_url)
-    vector_store_path = VECTOR_STORE_ROOT / repo_hash
+    # 获取仓库名称作为目录名 (按照用户要求: repo_name/code, repo_name/text)
+    repo_name = _get_repo_name(repo_url)
+    vector_store_path = VECTOR_STORE_ROOT / repo_name
     
     # 确保目录存在
     vector_store_path.mkdir(parents=True, exist_ok=True)
@@ -306,6 +314,12 @@ def run_rag_indexing(
     
     # 更新映射
     repo_vector_store_mapping[repo_url] = str(vector_store_path)
+    
+    # 同步到 Supabase
+    try:
+        update_repo_vector_path(repo_url, str(vector_store_path))
+    except Exception as e:
+        print(f"[Supabase] 同步向量路径失败: {e}")
     
     if task_id:
         update_task_progress(task_id, 89, "RAG 向量索引构建完成")
@@ -591,11 +605,19 @@ async def chat_with_repo(request: ChatRequest):
         
         # 如果映射中没有，尝试根据 URL 推断路径
         if not vector_store_path:
-            repo_hash = _get_repo_hash(request.repo_url)
-            inferred_path = VECTOR_STORE_ROOT / repo_hash
+            # 尝试 repo_name (新规则)
+            repo_name = _get_repo_name(request.repo_url)
+            inferred_path = VECTOR_STORE_ROOT / repo_name
             if inferred_path.exists():
                 vector_store_path = str(inferred_path)
                 repo_vector_store_mapping[request.repo_url] = vector_store_path
+            else:
+                # 尝试 repo_hash (旧规则，兼容性)
+                repo_hash = _get_repo_hash(request.repo_url)
+                inferred_path = VECTOR_STORE_ROOT / repo_hash
+                if inferred_path.exists():
+                    vector_store_path = str(inferred_path)
+                    repo_vector_store_mapping[request.repo_url] = vector_store_path
         
         if not vector_store_path or not Path(vector_store_path).exists():
             raise HTTPException(

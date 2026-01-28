@@ -24,4 +24,4 @@ RepoMapper/
 frontend/node_modules/
 frontend/.next/
 
-docker/vector_store/
+docker/vector_stores/
