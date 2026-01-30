@@ -102,22 +102,15 @@ export default function Home() {
         
         // Sync final result to Supabase
         if (session) {
-          await supabaseApi.syncTaskEnd(id, res.status, res.result);
-          if (res.status === 'completed' && res.result?.r2_structure_url && res.result?.r2_content_urls) {
-            // Also sync to repositories table
-            const repoUrl = localStorage.getItem('wiki_gen_repo_url') || '';
-            if (repoUrl) {
-              await supabaseApi.syncRepository(repoUrl, res.result.r2_structure_url, res.result.r2_content_urls);
-            }
-          }
+        // 任务结束 已经在后端同步到supabase了，这里不需要同步了
           loadHistory(session.user.id);
         }
       } else {
-        pollTimerRef.current = setTimeout(() => pollStatus(id), 2000);
+        pollTimerRef.current = setTimeout(() => pollStatus(id), 10000);
       }
     } catch (error: any) {
       console.error('Polling failed:', error);
-      pollTimerRef.current = setTimeout(() => pollStatus(id), 5000);
+      pollTimerRef.current = setTimeout(() => pollStatus(id), 10000);
     }
   };
 
@@ -134,13 +127,12 @@ export default function Home() {
     setIsSubmitting(true);
     setStatus(null);
     try {
-      const res = await api.createTask(url);
+      const res = await api.createTask(url, session.user.id as string);
       setTaskId(res.task_id);
       localStorage.setItem('wiki_gen_task_id', res.task_id);
       localStorage.setItem('wiki_gen_repo_url', url);
       
-      // Initial sync to Supabase
-      await supabaseApi.syncTaskStart(session.user.id, res.task_id, url);
+      // 这里不需要同步到supabase,因为createTask接口已经在后端同步到supabase了
       
       pollStatus(res.task_id);
     } catch (error) {
@@ -477,7 +469,8 @@ export default function Home() {
               )}
             </motion.div>
           )}
-
+          
+          {/* Wiki Viewer */}
           {isCompleted && !showHistory && (
              <motion.div
                key="wiki-viewer"

@@ -58,32 +58,7 @@ export default function WikiViewer({ structureUrl, contentUrls, repoUrl }: WikiV
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const transformUrl = (url: string) => {
-    if (!url) return url;
-    if (url.includes('r2.cloudflarestorage.com')) {
-      try {
-        const urlObj = new URL(url);
-        return `https://cityu-fyp.livelive.fun${urlObj.pathname}`;
-      } catch (e) {
-        console.warn('❗ [transformUrl] Failed to parse URL:', url);
-        return url;
-      }
-    }
-    return url;
-  };
 
-  const extractFilename = (url: string): string | null => {
-    if (!url) return null;
-    try {
-      const urlObj = new URL(url);
-      const pathname = urlObj.pathname;
-      const parts = pathname.split('/');
-      return parts[parts.length - 1] || null;
-    } catch (e) {
-      const parts = url.split('/');
-      return parts[parts.length - 1] || null;
-    }
-  };
 
   // 🆕 添加内容解析函数
   const parseContentSafely = (rawContent: any): WikiPageContent['content'] => {
@@ -156,8 +131,8 @@ export default function WikiViewer({ structureUrl, contentUrls, repoUrl }: WikiV
 
       try {
         setLoading(true);
-        const targetUrl = transformUrl(structureUrl);
-        console.log('🧩 [1.1] 转换后的结构文件 URL：', targetUrl);
+        const targetUrl = structureUrl;
+        console.log('🧩 [1.1] 结构文件 URL：', targetUrl);
         const res = await axios.get(`${targetUrl}?t=${Date.now()}`);
         let data = res.data;
 
@@ -220,46 +195,41 @@ export default function WikiViewer({ structureUrl, contentUrls, repoUrl }: WikiV
 
         if (!item) throw new Error('Page not found in structure');
 
-        const expectedFilename = item.filename || `${item.id}.json`;
-        const expectedFilenameWithoutExt = expectedFilename.replace('.json', '');
-        console.log('📄 [2.2] 预期匹配文件名：', expectedFilename);
+        // 扁平化 structure 以找到索引
+        const flattenStructure = (items: WikiStructureItem[]): WikiStructureItem[] => {
+          const result: WikiStructureItem[] = [];
+          const traverse = (items: WikiStructureItem[]) => {
+            for (const item of items) {
+              result.push(item);
+              if (item.children) {
+                traverse(item.children);
+              }
+            }
+          };
+          traverse(items);
+          return result;
+        };
 
-        let matchedUrl: string | undefined;
-        for (const url of contentUrls) {
-          const urlFilename = extractFilename(url);
-          const urlFilenameWithoutExt = urlFilename?.replace('.json', '');
+        const flatStructure = flattenStructure(structure);
+        const index = flatStructure.findIndex(item => item.id === selectedId);
 
-          console.log('🔗 [2.3] 检查 URL：', url);
-          console.log('     ↳ 文件名：', urlFilename);
-
-          if (
-            urlFilename === expectedFilename ||
-            urlFilenameWithoutExt === expectedFilenameWithoutExt ||
-            urlFilenameWithoutExt === item.id
-          ) {
-            matchedUrl = url;
-            break;
-          }
+        if (index === -1 || index >= contentUrls.length) {
+          console.error('❌ [2.2] 未找到匹配的内容 URL：', selectedId, contentUrls);
+          throw new Error(`Content URL not found for ${selectedId}`);
         }
 
-        if (!matchedUrl) {
-          console.error('❌ [2.4] 未找到匹配的内容 URL：', expectedFilename, contentUrls);
-          throw new Error(`Content URL not found for ${expectedFilename}`);
-        }
+        const matchedUrl = contentUrls[index];
+        console.log('🌐 [2.3] 直接使用后端返回的 URL（通过索引匹配）：', matchedUrl);
 
-        const transformedUrl = transformUrl(matchedUrl);
-        console.log('🌐 [2.5] 匹配到的 URL：', matchedUrl);
-        console.log('     ↳ 转换后：', transformedUrl);
-
-        const res = await axios.get<WikiPageContent>(`${transformedUrl}?t=${Date.now()}`);
-        console.log('📦 [2.6] 请求返回的原始页面内容：', res.data);
-        console.log('📦 [2.6.1] content 类型：', typeof res.data.content);
-        console.log('📦 [2.6.2] content.intro 类型：', typeof res.data.content?.intro);
-        console.log('📦 [2.6.3] content.intro 前 200 字符：', 
-          typeof res.data.content?.intro === 'string' 
-            ? res.data.content.intro.substring(0, 200) 
-            : res.data.content?.intro
-        );
+        const res = await axios.get<WikiPageContent>(`${matchedUrl}?t=${Date.now()}`);
+        // console.log('📦 [2.6] 请求返回的原始页面内容：', res.data);
+        // console.log('📦 [2.6.1] content 类型：', typeof res.data.content);
+        // console.log('📦 [2.6.2] content.intro 类型：', typeof res.data.content?.intro);
+        // console.log('📦 [2.6.3] content.intro 前 200 字符：', 
+        //   typeof res.data.content?.intro === 'string' 
+        //     ? res.data.content.intro.substring(0, 200) 
+        //     : res.data.content?.intro
+        // );
 
         // 🆕 使用安全解析函数处理 content
         const parsedContent = parseContentSafely(res.data.content);

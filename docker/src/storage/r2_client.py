@@ -6,10 +6,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Tuple
 import json
-
+from urllib.parse import urlparse
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 from botocore.config import Config
+
 
 import dotenv
 
@@ -66,13 +67,7 @@ class R2Client:
 
     def _extract_repo_name(self, repo_url: str) -> str:
         """
-        Extract repository name from URL or path.
-        
-        Args:
-            repo_url: Repository URL or path
-            
-        Returns:
-            Repository name
+        Extract repository name from URL or path
         """
         # Remove .git suffix if present
         repo_url = repo_url.rstrip('/').replace('.git', '')
@@ -281,6 +276,252 @@ class R2Client:
 
         return results
 
+    def list_objects_by_prefix(self, prefix: str) -> List[str]:
+        """
+        List all object keys under a given prefix.
+
+        Args:
+            prefix: R2 object key prefix (e.g., "repo_name/")
+
+        Returns:
+            List of object keys
+        """
+        keys = []
+        try:
+            paginator = self.s3_client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
+                contents = page.get("Contents", [])
+                for obj in contents:
+                    keys.append(obj["Key"])
+        except ClientError as e:
+            print(f"[ERROR] Failed to list objects with prefix '{prefix}': {e}")
+        except BotoCoreError as e:
+            print(f"[ERROR] BotoCore error listing objects: {e}")
+        return keys
+
+    def delete_objects_by_prefix(self, prefix: str, max_retries: int = 3) -> bool:
+        """
+        Delete all objects under a given prefix (recursive folder deletion).
+
+        Args:
+            prefix: R2 object key prefix (e.g., "repo_name/")
+            max_retries: Maximum number of retry attempts
+
+        Returns:
+            True if all deletions successful, False otherwise
+        """
+        # List all objects with this prefix
+        keys = self.list_objects_by_prefix(prefix)
+        
+        if not keys:
+            print(f"[INFO] No objects found with prefix '{prefix}'")
+            return True
+        
+        print(f"[INFO] Found {len(keys)} objects to delete under prefix '{prefix}'")
+        
+        # R2/S3 delete_objects can handle up to 1000 objects per request
+        batch_size = 1000
+        all_success = True
+        
+        for i in range(0, len(keys), batch_size):
+            batch_keys = keys[i:i + batch_size]
+            delete_request = {"Objects": [{"Key": key} for key in batch_keys]}
+            
+            for attempt in range(max_retries):
+                try:
+                    response = self.s3_client.delete_objects(
+                        Bucket=self.bucket_name,
+                        Delete=delete_request
+                    )
+                    
+                    # Check for errors in response
+                    errors = response.get("Errors", [])
+                    if errors:
+                        print(f"[WARN] Some objects failed to delete: {errors}")
+                        all_success = False
+                    else:
+                        deleted_count = len(response.get("Deleted", []))
+                        print(f"[INFO] Successfully deleted {deleted_count} objects (batch {i // batch_size + 1})")
+                    break
+                    
+                except ClientError as e:
+                    error_code = e.response.get("Error", {}).get("Code", "Unknown")
+                    error_message = e.response.get("Error", {}).get("Message", str(e))
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt
+                        print(f"[WARN] Delete failed (attempt {attempt + 1}/{max_retries}): {error_code} - {error_message}")
+                        print(f"[WARN] Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        print(f"[ERROR] Failed to delete objects after {max_retries} attempts")
+                        all_success = False
+                        
+                except BotoCoreError as e:
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt
+                        print(f"[WARN] BotoCore error (attempt {attempt + 1}/{max_retries}): {e}")
+                        time.sleep(wait_time)
+                    else:
+                        print(f"[ERROR] BotoCore error deleting objects: {e}")
+                        all_success = False
+        
+        return all_success
+
+    # ============ Chat History Storage Methods ============
+
+    def get_chat_r2_key(self, user_id: str, chat_id: str) -> str:
+        """
+        Generate R2 key for a chat session.
+
+        Args:
+            user_id: User ID
+            chat_id: Chat session ID
+
+        Returns:
+            R2 object key (e.g., "chats/user_id/chat_id.json")
+        """
+        return f"chats/{user_id}/{chat_id}.json"
+
+    def upload_chat_snapshot(
+        self,
+        user_id: str,
+        chat_id: str,
+        messages: List[dict],
+        metadata: Optional[dict] = None,
+        max_retries: int = 3,
+    ) -> Optional[str]:
+        """
+        Upload chat history snapshot to R2.
+
+        Args:
+            user_id: User ID
+            chat_id: Chat session ID
+            messages: List of message dicts [{"role": "user/assistant", "content": "..."}]
+            metadata: Optional metadata dict (repo_url, title, etc.)
+            max_retries: Maximum number of retry attempts
+
+        Returns:
+            R2 key if successful, None otherwise
+        """
+        r2_key = self.get_chat_r2_key(user_id, chat_id)
+        
+        # Build the snapshot data
+        snapshot = {
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "messages": messages,
+            "message_count": len(messages),
+            "updated_at": datetime.now().isoformat(),
+        }
+        if metadata:
+            snapshot["metadata"] = metadata
+
+        success = self.upload_json_data(snapshot, r2_key, max_retries=max_retries)
+        if success:
+            print(f"[R2] Chat snapshot uploaded: {r2_key} ({len(messages)} messages)")
+            return r2_key
+        return None
+
+    def download_chat_snapshot(
+        self,
+        user_id: str,
+        chat_id: str,
+    ) -> Optional[dict]:
+        """
+        Download chat history snapshot from R2.
+
+        Args:
+            user_id: User ID
+            chat_id: Chat session ID
+
+        Returns:
+            Chat snapshot dict if successful, None otherwise
+        """
+        r2_key = self.get_chat_r2_key(user_id, chat_id)
+        
+        try:
+            response = self.s3_client.get_object(
+                Bucket=self.bucket_name,
+                Key=r2_key,
+            )
+            content = response["Body"].read().decode("utf-8")
+            snapshot = json.loads(content)
+            print(f"[R2] Chat snapshot downloaded: {r2_key}")
+            return snapshot
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            if error_code == "NoSuchKey":
+                print(f"[R2] Chat snapshot not found: {r2_key}")
+            else:
+                print(f"[R2] Error downloading chat snapshot: {error_code}")
+            return None
+        except Exception as e:
+            print(f"[R2] Unexpected error downloading chat snapshot: {e}")
+            return None
+
+def transform_url(url: str) -> str:
+    """
+    Transform R2 URL to custom domain URL
+    """
+    if not url:
+        return url
+    if "r2.cloudflarestorage.com" in url:
+        try:
+            url_obj = urlparse(url)
+            return f"https://cityu-fyp.livelive.fun{url_obj.path}"
+        except Exception as e:
+            print(f"[ERROR] Failed to transform URL: {e}")
+            return url
+    return url
+
+
+def upload_chat_snapshot(
+    user_id: str,
+    chat_id: str,
+    messages: List[dict],
+    metadata: Optional[dict] = None,
+) -> Optional[str]:
+    """
+    Helper function to upload chat snapshot to R2.
+    
+    Args:
+        user_id: User ID
+        chat_id: Chat session ID
+        messages: List of message dicts
+        metadata: Optional metadata dict
+        
+    Returns:
+        R2 key if successful, None otherwise
+    """
+    try:
+        client = R2Client()
+        return client.upload_chat_snapshot(user_id, chat_id, messages, metadata)
+    except ValueError as e:
+        print(f"[R2] Client initialization failed: {e}")
+        return None
+
+
+def download_chat_snapshot(
+    user_id: str,
+    chat_id: str,
+) -> Optional[dict]:
+    """
+    Helper function to download chat snapshot from R2.
+    
+    Args:
+        user_id: User ID
+        chat_id: Chat session ID
+        
+    Returns:
+        Chat snapshot dict if successful, None otherwise
+    """
+    try:
+        client = R2Client()
+        return client.download_chat_snapshot(user_id, chat_id)
+    except ValueError as e:
+        print(f"[R2] Client initialization failed: {e}")
+        return None
+
 
 def upload_wiki_to_r2(
     repo_url: str,
@@ -312,6 +553,11 @@ def upload_wiki_to_r2(
     date = client._generate_date()
     base_path = f"{repo_name}/{date}"
 
+    # Delete existing files for this repo (all historical versions)
+    repo_prefix = f"{repo_name}/"
+    print(f"[INFO] Checking for existing files with prefix '{repo_prefix}'...")
+    client.delete_objects_by_prefix(repo_prefix)
+
     # Upload wiki structure
     structure_key = f"{base_path}/wiki_structure.json"
     if structure_local_path and structure_local_path.exists():
@@ -340,5 +586,9 @@ def upload_wiki_to_r2(
                 print(f"[INFO] Uploaded {len(content_urls)}/{len(results)} content files to R2")
             else:
                 print("[WARN] Failed to upload any content files to R2")
+
+    # 对url进行加工，使用自定义域名访问R2
+    structure_url = transform_url(structure_url)
+    content_urls = [transform_url(url) for url in content_urls]
     
     return structure_url, content_urls if content_urls else None

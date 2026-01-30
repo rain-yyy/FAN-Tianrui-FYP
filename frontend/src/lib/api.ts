@@ -77,8 +77,8 @@ export const api = {
     }
   },
 
-  createTask: async (url_link: string): Promise<TaskResponse> => {
-    const res = await axios.post<TaskResponse>(`${API_BASE_URL}/generate`, { url_link });
+  createTask: async (url_link: string, user_id: string): Promise<TaskResponse> => {
+    const res = await axios.post<TaskResponse>(`${API_BASE_URL}/generate`, { url_link, user_id });
     return res.data;
   },
 

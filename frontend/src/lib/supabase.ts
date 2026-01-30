@@ -11,39 +11,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // Helper functions for common database operations
 export const supabaseApi = {
-  // Sync a new task to Supabase
-  syncTaskStart: async (userId: string, taskId: string, repoUrl: string) => {
-    const { error } = await supabase.from('tasks').insert({
-      user_id: userId,
-      task_id: taskId,
-      repo_url: repoUrl,
-      status: 'processing',
-    });
-    return { error };
-  },
-
-  // Sync task completion or failure
-  syncTaskEnd: async (taskId: string, status: 'completed' | 'failed', result: any = null) => {
-    const { error } = await supabase
-      .from('tasks')
-      .update({
-        status,
-        result,
-      })
-      .eq('task_id', taskId);
-    return { error };
-  },
-
-  // Sync repository info
-  syncRepository: async (repoUrl: string, structureUrl: string, contentUrls: string[]) => {
-    const { error } = await supabase.from('repositories').upsert({
-      repo_url: repoUrl,
-      r2_structure_url: structureUrl,
-      r2_content_urls: contentUrls,
-      last_updated: new Date().toISOString(),
-    });
-    return { error };
-  },
 
   // Get user task history
   getTaskHistory: async (userId: string) => {

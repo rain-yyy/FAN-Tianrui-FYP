@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Mapping, Optional, TYPE_CHECKING
 
@@ -258,9 +259,12 @@ def _collect_candidates_for_category(
     """
     candidates: Dict[str, RankedCandidate] = {}
 
-    dense_hits = unit.dense_store.similarity_search_with_relevance_scores(
-        question, k=dense_k
-    )
+    # 过滤 FAISS 的 UserWarning，避免打印大量文档内容
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning, message=".*Relevance scores.*")
+        dense_hits = unit.dense_store.similarity_search_with_relevance_scores(
+            question, k=dense_k
+        )
     dense_scores = normalize_scores([score for _, score in dense_hits])
     for idx, (doc, _) in enumerate(dense_hits):
         norm_score = dense_scores[idx] if idx < len(dense_scores) else 0.0

@@ -7,8 +7,9 @@
 4. 加入gemini，替换openai api
 5. 加入google 登陆
 了解一下rank和embedding的区别
-给fly环境变量配置我的supabase key、
-控制同一个repo在cloudfare中只存一个json（复用）
+repo表要先创建，后面再把属性填进去
+需要一个任务强制中断接口
+把后端的代码整理一下
 
 
 优化：
@@ -19,3 +20,8 @@ github action 没有自动运行（无伤大雅
 现在fly有一个问题就是，只有我调用的时候，才会打印log；
 license 不处理
 整理整理前端代码，里面估计有很多废物
+
+TODO
+
+3. 测前端，修前端
+4. 写report

@@ -28,8 +28,9 @@ from src.wiki.struct_gen import generate_wiki_structure
 from src.wiki.content_gen import WikiContentGenerator
 from src.clients.ai_client_factory import get_ai_client
 from src.storage.r2_client import upload_wiki_to_r2
-from src.storage.supabase_client import update_repo_vector_path
 from src.core.chat import answer_question
+from src.ingestion.supabase_client import SupabaseClient
+
 
 app = FastAPI(
     title="Project Wiki Generation API",
@@ -100,12 +101,18 @@ def _get_repo_hash(repo_url: str) -> str:
 
 class GenRequest(BaseModel):
     url_link: str
+    user_id: Optional[str] = None  # 用户 ID，用于关联任务
 
 
 class ChatRequest(BaseModel):
     """RAG 聊天请求"""
     question: str = Field(..., min_length=1, description="用户问题")
     repo_url: str = Field(..., description="仓库 URL，用于定位对应的向量库")
+    user_id: str = Field(..., description="用户 ID，用于关联聊天会话")
+    chat_id: Optional[str] = Field(
+        default=None,
+        description="聊天会话 ID，如果为空则创建新会话"
+    )
     conversation_history: Optional[List[Dict[str, str]]] = Field(
         default=None, 
         description="对话历史 [{'role': 'user'/'assistant', 'content': '...'}]"
@@ -121,6 +128,21 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[str]
     repo_url: str
+    chat_id: str = Field(..., description="聊天会话 ID")
+    message_count: int = Field(default=0, description="当前会话的消息总数")
+
+
+class ChatSessionResponse(BaseModel):
+    """聊天会话详情响应"""
+    id: str
+    user_id: str
+    repo_url: str
+    title: Optional[str] = None
+    preview_text: Optional[str] = None
+    message_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+    messages: Optional[List[Dict[str, Any]]] = None
 
 
 class GenResponse(BaseModel):
@@ -265,16 +287,24 @@ def run_rag_indexing(
         task_id: 任务 ID（用于进度更新）
     
     Returns:
-        向量库根目录路径
+        vector_store_path: 根目录/vector_stores/repo_name
     """
     if task_id:
         update_task_progress(task_id, 86, "正在构建 RAG 向量索引...")
     
     # 获取仓库名称作为目录名 (按照用户要求: repo_name/code, repo_name/text)
     repo_name = _get_repo_name(repo_url)
+    
+    # 确保根目录存在
+    VECTOR_STORE_ROOT.mkdir(parents=True, exist_ok=True)
     vector_store_path = VECTOR_STORE_ROOT / repo_name
     
-    # 确保目录存在
+    # 如果已存在旧的向量数据库，直接删除以覆盖
+    if vector_store_path.exists():
+        print(f"[RAG] 发现已存在的向量数据库，正在删除旧数据: {vector_store_path}")
+        shutil.rmtree(vector_store_path)
+    
+    # 重新创建目录
     vector_store_path.mkdir(parents=True, exist_ok=True)
     
     # 获取需要处理的文件
@@ -313,13 +343,8 @@ def run_rag_indexing(
             print(f"[RAG] 文本向量库已保存: {text_store_path}")
     
     # 更新映射
+    # TODO 应该用supabase来更新，而不是使用本地记录的repo_vector_store_mapping
     repo_vector_store_mapping[repo_url] = str(vector_store_path)
-    
-    # 同步到 Supabase
-    try:
-        update_repo_vector_path(repo_url, str(vector_store_path))
-    except Exception as e:
-        print(f"[Supabase] 同步向量路径失败: {e}")
     
     if task_id:
         update_task_progress(task_id, 89, "RAG 向量索引构建完成")
@@ -363,13 +388,16 @@ def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output
             print(f"[清理警告] 删除 wiki_section_json 目录失败: {json_output_dir}, 错误: {e}")
 
 
-async def execute_generation_task(task_id: str, url_link: str):
+async def execute_generation_task(task_id: str, url_link: str, is_cached: bool):
     """
     后台异步执行 Wiki 生成任务
     """
     repo_path: Optional[str] = None
     output_path: Optional[Path] = None
     json_output_dir: Optional[Path] = None
+
+    # 创建单例 Supabase 客户端，避免重复实例化
+    supabase_client = SupabaseClient()
 
     try:
         # 更新状态为处理中
@@ -380,6 +408,28 @@ async def execute_generation_task(task_id: str, url_link: str):
         config_path = CONFIG_PATH.expanduser().resolve()
         output_path = DEFAULT_OUTPUT_PATH.expanduser().resolve()
         json_output_dir = DEFAULT_WIKI_SECTION_JSON_OUTPUT.expanduser().resolve()
+        
+        if is_cached:
+            data = supabase_client.get_repo_data(repo_url=url_link)
+            if data:
+                tasks_store[task_id].status = TaskStatus.COMPLETED
+                tasks_store[task_id].progress = 100
+                tasks_store[task_id].current_step = "任务完成"
+                tasks_store[task_id].result = {
+                    "r2_structure_url": data["r2_structure_url"],
+                    "r2_content_urls": data["r2_content_urls"],
+                    "vector_store_path": data["vector_store_path"],  # RAG 向量库路径
+                    "repo_url": url_link,  # 仓库 URL（用于聊天接口）
+                }
+                tasks_store[task_id].updated_at = datetime.now()
+
+                if not supabase_client.task_status_update(task_id=task_id, status="completed"):
+                    raise HTTPException(status_code=500, detail="Supabase 更新任务状态失败")
+                return None
+
+        # 同步任务状态到supabase
+        if not supabase_client.task_status_update(task_id=task_id, status="Generating Wiki structure"):
+            raise HTTPException(status_code=500, detail="Supabase 更新任务状态失败")
 
         # 1. 生成项目结构 (wiki_structure.json)
         # 使用 run_in_executor 让同步代码在线程池中执行，避免阻塞事件循环
@@ -394,12 +444,13 @@ async def execute_generation_task(task_id: str, url_link: str):
             )
         )
 
-        
-
         # TODO: 测试用截断,用于测试文件路径错误的问题（已修复）
         # print(wiki_structure)
 
-        
+        # 同步任务状态到supabase
+        if not supabase_client.task_status_update(task_id=task_id, status="Generating Wiki Content"):
+            raise HTTPException(status_code=500, detail="Supabase 更新任务状态失败")
+
         # 2. 生成 Wiki 内容和对应的 JSON 详情
         await loop.run_in_executor(
             None,
@@ -411,6 +462,10 @@ async def execute_generation_task(task_id: str, url_link: str):
             )
         )
 
+        # 同步任务状态到supabase
+        if not supabase_client.task_status_update(task_id=task_id, status="Building RAG Index"):
+            raise HTTPException(status_code=500, detail="Supabase 更新任务状态失败")
+
         # 3. 构建 RAG 向量索引（用于聊天问答）
         vector_store_path = await loop.run_in_executor(
             None,
@@ -420,11 +475,13 @@ async def execute_generation_task(task_id: str, url_link: str):
                 config_path=config_path,
                 task_id=task_id
             )
-        )
+        )     
 
-        update_task_progress(task_id, 90, "正在上传到 R2 存储...")
+        # 同步任务状态到supabase
+        if not supabase_client.task_status_update(task_id=task_id, status="Uploading to R2"):
+            raise HTTPException(status_code=500, detail="Supabase 更新任务状态失败")
 
-        # 3. 上传到 R2 存储
+        # 4. 上传到 R2 存储
         r2_structure_url, r2_content_urls = await loop.run_in_executor(
             None,
             lambda: upload_wiki_to_r2(
@@ -442,12 +499,14 @@ async def execute_generation_task(task_id: str, url_link: str):
         tasks_store[task_id].result = {
             "r2_structure_url": r2_structure_url,
             "r2_content_urls": r2_content_urls,
-            "json_wiki": str(output_path) if not r2_structure_url else None,
-            "json_content": str(json_output_dir) if not r2_content_urls else None,
             "vector_store_path": vector_store_path,  # RAG 向量库路径
             "repo_url": url_link,  # 仓库 URL（用于聊天接口）
         }
         tasks_store[task_id].updated_at = datetime.now()
+
+        # 同步任务结果到supabase
+        if not supabase_client.task_finished(task_id=task_id, repo_url=url_link, r2_structure_url=r2_structure_url, r2_content_urls=r2_content_urls, vector_store_path=vector_store_path):
+            raise HTTPException(status_code=500, detail="Supabase 保存任务结果失败")
 
     except Exception as e:
         import traceback
@@ -457,6 +516,9 @@ async def execute_generation_task(task_id: str, url_link: str):
         tasks_store[task_id].error = str(e)
         tasks_store[task_id].current_step = "任务失败"
         tasks_store[task_id].updated_at = datetime.now()
+
+        # 同步任务失败到supabase（这里不抛出异常，避免覆盖原始错误）
+        supabase_client.task_status_update(task_id=task_id, status="failed", error=str(e))
 
     finally:
         # 无论成功还是失败，都清理本地文件以释放存储空间
@@ -492,9 +554,21 @@ async def generate_wiki(request: GenRequest):
             updated_at=now,
         )
 
-        # 启动后台任务（不阻塞响应）
-        asyncio.create_task(execute_generation_task(task_id, request.url_link))
+        # TODO 要确认前端返回的userid，满足supabase的uuid要求
+        supabase_client = SupabaseClient()
+        is_cached: bool = supabase_client.check_repo_processed(repo_url=request.url_link)
+        
+        # 发送taskid到supabase,用于后续的查询任务进度和结果
+        if not supabase_client.create_task(task_id=task_id, repo_url=request.url_link, user_id=request.user_id):
+            raise HTTPException(status_code=500, detail="Supabase 创建任务失败")
 
+        # 启动后台任务（不阻塞响应）
+        asyncio.create_task(execute_generation_task(task_id, request.url_link, is_cached = is_cached))
+        if is_cached:
+            return TaskCreateResponse(
+                task_id=task_id,
+                message="仓库近期已处理过，正在加载缓存结果"
+            )
         return TaskCreateResponse(
             task_id=task_id,
             message="任务已创建，正在后台处理。请使用 /task/{task_id} 查询进度。"
@@ -507,6 +581,7 @@ async def generate_wiki(request: GenRequest):
 
 
 @app.get("/task/{task_id}", response_model=TaskStatusResponse)
+# TODO 应该用supabase来查询，而不是使用本地记录的tasks_store
 async def get_task_status(task_id: str):
     """
     查询任务状态和进度
@@ -590,18 +665,24 @@ async def health_check():
 @app.post("/chat", response_model=ChatResponse)
 async def chat_with_repo(request: ChatRequest):
     """
-    RAG 问答接口
+    RAG 问答接口（带持久化）
     
     基于已生成的向量库回答用户关于项目的问题。
+    消息会实时存入 Supabase，每 5 条消息同步一次到 R2。
     
     - question: 用户问题
     - repo_url: 仓库 URL，用于定位对应的向量库
+    - user_id: 用户 ID
+    - chat_id: 可选的聊天会话 ID，如果为空则创建新会话
+    TODO: 修改前端来支持新的api格式
     - conversation_history: 可选的对话历史（用于多轮对话）
     - current_page_context: 可选的当前页面上下文
     """
     try:
+        supabase_client = SupabaseClient()
+        
         # 1. 查找向量库路径
-        vector_store_path = repo_vector_store_mapping.get(request.repo_url)
+        vector_store_path = supabase_client.get_vector_store_path(request.repo_url)
         
         # 如果映射中没有，尝试根据 URL 推断路径
         if not vector_store_path:
@@ -625,12 +706,26 @@ async def chat_with_repo(request: ChatRequest):
                 detail=f"未找到该仓库的向量索引。请先通过 /generate 接口生成文档。"
             )
         
-        # 2. 构建增强问题（包含上下文信息）
+        # 2. 获取或创建聊天会话
+        chat_id = request.chat_id
+        if not chat_id:
+            # 创建新会话，标题使用问题的前 50 个字符
+            # TODO: 后面改成ai总结title
+            title = request.question[:50] + ("..." if len(request.question) > 50 else "")
+            chat_id = supabase_client.create_chat_session(
+                user_id=request.user_id,
+                repo_url=request.repo_url,
+                title=title,
+            )
+            if not chat_id:
+                raise HTTPException(status_code=500, detail="创建聊天会话失败")
+        
+        # 3. 构建增强问题（包含上下文信息）
         enhanced_question = request.question
         if request.current_page_context:
             enhanced_question = f"[当前页面上下文: {request.current_page_context}]\n\n用户问题: {request.question}"
         
-        # 3. 执行 RAG 问答
+        # 4. 执行 RAG 问答
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
@@ -640,10 +735,44 @@ async def chat_with_repo(request: ChatRequest):
             )
         )
         
+        answer_text = str(result.get("answer", ""))
+        sources = list(result.get("sources", []))
+        
+        # 5. 保存消息到 Supabase (即时持久化)
+        # 保存用户消息
+        supabase_client.add_chat_message(
+            chat_id=chat_id,
+            role="user",
+            content=request.question,
+            metadata={"page_context": request.current_page_context} if request.current_page_context else {"page_context": "None"},
+        )
+        # 保存助手回复
+        # TODO, 优化这里的metadata的存储（或者说就不需要存）
+        supabase_client.add_chat_message(
+            chat_id=chat_id,
+            role="assistant",
+            content=answer_text,
+            metadata={"sources": sources},
+        )
+        
+        # 6. 更新会话元数据
+        # 获取当前消息数量
+        session = supabase_client.get_chat_session(chat_id)
+        current_count = (session.get("message_count", 0) if session else 0) + 2
+        preview_text = answer_text[:100] + ("..." if len(answer_text) > 100 else "")
+        
+        supabase_client.update_chat_session(
+            chat_id=chat_id,
+            message_count=current_count,
+            preview_text=preview_text,
+        )
+        
         return ChatResponse(
-            answer=str(result.get("answer", "")),
-            sources=list(result.get("sources", [])),
-            repo_url=request.repo_url
+            answer=answer_text,
+            sources=sources,
+            repo_url=request.repo_url,
+            chat_id=chat_id,
+            message_count=current_count,
         )
     
     except HTTPException:
@@ -656,6 +785,94 @@ async def chat_with_repo(request: ChatRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"RAG 问答失败: {str(e)}")
+
+
+@app.get("/chat/sessions")
+async def get_chat_sessions(
+    user_id: str,
+    repo_url: Optional[str] = None,
+    limit: int = 20,
+):
+    """
+    获取用户的聊天会话列表
+    
+    - user_id: 用户 ID
+    - repo_url: 可选，按仓库 URL 过滤
+    - limit: 返回的最大数量
+    """
+    try:
+        supabase_client = SupabaseClient()
+        sessions = supabase_client.get_user_chat_sessions(
+            user_id=user_id,
+            repo_url=repo_url,
+            limit=limit,
+        )
+        return {"sessions": sessions, "count": len(sessions)}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取会话列表失败: {str(e)}")
+
+
+@app.get("/chat/session/{chat_id}", response_model=ChatSessionResponse)
+async def get_chat_session(chat_id: str, include_messages: bool = True):
+    """
+    获取聊天会话详情
+    
+    - chat_id: 聊天会话 ID
+    - include_messages: 是否包含消息列表
+    """
+    try:
+        supabase_client = SupabaseClient()
+        session = supabase_client.get_chat_session(chat_id)
+        
+        if not session:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        
+        messages = None
+        if include_messages:
+            messages = supabase_client.get_chat_messages(chat_id, limit=100)
+        
+        return ChatSessionResponse(
+            id=session["id"],
+            user_id=session["user_id"],
+            repo_url=session["repo_url"],
+            title=session.get("title"),
+            preview_text=session.get("preview_text"),
+            message_count=session.get("message_count", 0),
+            created_at=session["created_at"],
+            updated_at=session["updated_at"],
+            messages=messages,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取会话详情失败: {str(e)}")
+
+
+@app.delete("/chat/session/{chat_id}")
+async def delete_chat_session(chat_id: str):
+    """
+    删除聊天会话及其所有消息
+    
+    - chat_id: 聊天会话 ID
+    """
+    try:
+        supabase_client = SupabaseClient()
+        success = supabase_client.delete_chat_session(chat_id)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="删除会话失败")
+        
+        return {"message": f"会话 {chat_id} 已删除"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"删除会话失败: {str(e)}")
 
 
 @app.get("/chat/repos")
