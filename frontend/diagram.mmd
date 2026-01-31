@@ -1,0 +1,17 @@
+flowchart LR
+  A[User: repo_url] --> B[Frontend: Next.js]
+  B --> C[Backend: FastAPI]
+  C --> D[Clone Repo]
+  D --> E[Tree-sitter Parsing]
+  E --> F[CodeGraphBuilder: dependency/call graph]
+  F --> G[Leiden Community Detection]
+  G --> H[Qwen3-Max: Wiki ToC + section->source mapping]
+  H --> I[DeepSeek v3.1: Section content + Mermaid]
+  I --> J[Embedding: code/text modes]
+  J --> K[FAISS multi-category indexes]
+  C --> L[Supabase: tasks/repos/chat]
+  I --> M[R2: JSON artifacts]
+  B --> N[Chat UI]
+  N --> C
+  C --> O[RAG: HyDE + hybrid retrieve + MMR + LLM answer]
+  O --> N

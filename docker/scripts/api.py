@@ -406,8 +406,9 @@ async def execute_generation_task(task_id: str, url_link: str, is_cached: bool):
 
         # 获取默认路径
         config_path = CONFIG_PATH.expanduser().resolve()
-        output_path = DEFAULT_OUTPUT_PATH.expanduser().resolve()
-        json_output_dir = DEFAULT_WIKI_SECTION_JSON_OUTPUT.expanduser().resolve()
+        # 使用任务 ID 隔离输出路径，避免多任务并发时的文件冲突
+        output_path = (PROJECT_ROOT / f"wiki_structure_{task_id}.json").expanduser().resolve()
+        json_output_dir = (PROJECT_ROOT / f"wiki_section_json_{task_id}").expanduser().resolve()
         
         if is_cached:
             data = supabase_client.get_repo_data(repo_url=url_link)
