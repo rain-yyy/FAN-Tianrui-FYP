@@ -18,7 +18,6 @@ export default function Mermaid({ chart }: MermaidProps) {
 
   // 动态加载并初始化 mermaid（只执行一次）
   useEffect(() => {
-    // 如果已经初始化，直接设置加载完成
     if (mermaidInitialized && mermaidModule) {
       setIsLoading(false);
       return;
@@ -28,20 +27,19 @@ export default function Mermaid({ chart }: MermaidProps) {
 
     const loadMermaid = async () => {
       try {
-        // 动态导入 mermaid，确保只在客户端加载
         if (!mermaidModule) {
           mermaidModule = await import('mermaid');
         }
         
         const mermaid = mermaidModule.default;
         
-        // 只在未初始化时初始化
         if (!mermaidInitialized) {
           mermaid.initialize({
             startOnLoad: false,
             theme: 'dark',
             securityLevel: 'loose',
             fontFamily: 'var(--font-sans)',
+            suppressErrorRendering: true,
           });
           mermaidInitialized = true;
         }
@@ -57,21 +55,27 @@ export default function Mermaid({ chart }: MermaidProps) {
     loadMermaid();
   }, []);
 
-  // 修复 Mermaid 语法中的常见问题
-  const fixMermaidSyntax = (mermaidCode: string): string => {
-    let fixed = mermaidCode;
+  // 预处理 mermaid 代码
+  const prepareChart = (code: string): string => {
+    let prepared = code.trim();
+    // 处理 JSON 中字面上的 \\n（未被解析的转义换行符）
+    prepared = prepared.replace(/\\n/g, '\n');
     
-    // 修复节点标签中的 @ 符号问题
-    // Mermaid 中，如果节点标签包含特殊字符（如 @），需要用引号包裹
-    // 匹配类似 H[@follow/web] 或 B[follow@rss3.io] 的模式
-    fixed = fixed.replace(/(\w+)\[([^\]]*@[^\]]*)\]/g, (match, nodeId, label) => {
-      // 如果标签已经用引号包裹，先移除引号
-      const cleanLabel = label.replace(/^["']|["']$/g, '');
-      // 用双引号包裹整个标签，保留 @ 符号
-      return `${nodeId}["${cleanLabel}"]`;
+    // 处理节点标签中的特殊字符：/ ( ) @ 等需要用双引号包裹
+    // 匹配 NodeId[Label] 或 NodeId(Label) 等形式
+    prepared = prepared.replace(/(\w+)(\[|\(|\{)([^\]\)\}]+)(\]|\)|\})/g, (match, nodeId, openBracket, label, closeBracket) => {
+      // 如果标签已经用引号包裹，直接返回
+      if (/^["'].*["']$/.test(label.trim())) {
+        return match;
+      }
+      // 如果标签包含特殊字符，用双引号包裹
+      if (/[\/\(\)@#&<>]/.test(label)) {
+        return `${nodeId}${openBracket}"${label}"${closeBracket}`;
+      }
+      return match;
     });
     
-    return fixed;
+    return prepared;
   };
 
   // 渲染图表
@@ -87,55 +91,23 @@ export default function Mermaid({ chart }: MermaidProps) {
       try {
         setIsError(false);
         setIsLoading(true);
-        
-        // 清理之前的 SVG
         setSvg('');
         
         const mermaid = mermaidModule!.default;
-        
-        // 生成唯一的 ID
         const id = `mermaid-${Math.random().toString(36).substring(2, 11)}`;
         
-        // 尝试修复常见的语法问题
-        let chartToRender = fixMermaidSyntax(chart);
-        
-        // 渲染图表
-        const { svg: renderedSvg } = await mermaid.render(id, chartToRender);
+        const preparedChart = prepareChart(chart);
+        const { svg: renderedSvg } = await mermaid.render(id, preparedChart);
         setSvg(renderedSvg);
         setIsLoading(false);
-      } catch (error: any) {
+      } catch (error) {
         console.error('Mermaid render error:', error);
-        console.error('Original chart content:', chart);
-        
-        // 如果修复后仍然失败，尝试更激进的修复
-        try {
-          const mermaid = mermaidModule!.default;
-          const id = `mermaid-${Math.random().toString(36).substring(2, 11)}`;
-          
-          // 更激进的修复：将所有节点标签中的 @ 替换为 (at)
-          let aggressiveFix = chart.replace(/(\w+)\[([^\]]+)\]/g, (match, nodeId, label) => {
-            if (label.includes('@')) {
-              return `${nodeId}["${label.replace(/@/g, '(at)')}"]`;
-            }
-            return match;
-          });
-          
-          const { svg: renderedSvg } = await mermaid.render(id, aggressiveFix);
-          setSvg(renderedSvg);
-          setIsLoading(false);
-        } catch (retryError) {
-          console.error('Mermaid retry render error:', retryError);
-          setIsError(true);
-          setIsLoading(false);
-        }
+        setIsError(true);
+        setIsLoading(false);
       }
     };
 
-    // 添加小延迟确保 DOM 已准备好
-    const timer = setTimeout(() => {
-      renderChart();
-    }, 100);
-
+    const timer = setTimeout(renderChart, 100);
     return () => clearTimeout(timer);
   }, [chart]);
 
