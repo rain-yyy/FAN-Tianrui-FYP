@@ -25,3 +25,4 @@ TODO
 3. 测前端，修前端，把恶心的报错干掉,mermaid图还是不行，然后让前端适应我的新的api
 4. 写report
 5. 检查一下wiki content生成的时候，用到的文档是什么（是不是本地路径）
+6. vector_store_path要修改成
