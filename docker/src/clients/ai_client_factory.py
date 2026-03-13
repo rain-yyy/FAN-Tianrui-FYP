@@ -1,8 +1,6 @@
-from typing import Optional, Dict, Type
+from typing import Optional, Dict, Type, Tuple
 from src.clients.ai_client_base import BaseAIClient
-from src.clients.openai_client import OpenAIClient
-from src.clients.deepseek_client import DeepseekClient
-from src.clients.qwen_client import QwenClient
+from src.clients.openrouter_client import OpenRouterClient
 
 class AIClientFactory:
     """
@@ -10,9 +8,7 @@ class AIClientFactory:
     """
     
     _clients: Dict[str, Type[BaseAIClient]] = {
-        "openai": OpenAIClient,
-        "deepseek": DeepseekClient,
-        "qwen": QwenClient
+        "openrouter": OpenRouterClient
     }
 
     @staticmethod
@@ -21,7 +17,7 @@ class AIClientFactory:
         获取指定服务商的客户端实例。
         
         Args:
-            provider: 服务商名称 ('openai', 'deepseek', 'qwen')
+            provider: 服务商名称 ('openrouter')
             **kwargs: 传递给客户端构造函数的参数
             
         Returns:
@@ -33,8 +29,25 @@ class AIClientFactory:
         
         return client_class(**kwargs)
 
-def get_ai_client(provider: str = "openai", **kwargs) -> BaseAIClient:
+def get_ai_client(provider: str = "openrouter", **kwargs) -> BaseAIClient:
     """
     便捷函数，用于获取 AI 客户端。
     """
     return AIClientFactory.get_client(provider, **kwargs)
+
+def get_model_config(config: dict, model_key: str) -> Tuple[str, str]:
+    """
+    从配置中获取指定用途的模型配置。
+    
+    Args:
+        config: 配置字典
+        model_key: 模型用途键名（如 'hyde_generation', 'rag_answer'）
+        
+    Returns:
+        (provider, model_name): 提供商和模型名称
+    """
+    ai_models = config.get("ai_models", {})
+    provider = ai_models.get("provider", "openrouter")
+    models = ai_models.get("models", {})
+    model_name = models.get(model_key, "anthropic/claude-3.5-sonnet")
+    return provider, model_name

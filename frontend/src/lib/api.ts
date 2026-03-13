@@ -1,8 +1,5 @@
-import axios from 'axios';
-
-// is test api now, will be changed to the production api later
-// TODO: change to the production api
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://cityu-fyp-testapi.tianruifan21.workers.dev';
+//TODO : 记得改回来
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000' || 'https://cityu-fyp-testapi.tianruifan21.workers.dev';
 
 export interface HealthResponse {
   status: string;
@@ -22,16 +19,16 @@ export interface GenResponse {
   repo_url: string | null;
 }
 
-// ============ Chat API Types ============
-
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
 }
 
 export interface ChatRequest {
+  user_id: string;
   question: string;
   repo_url: string;
+  chat_id?: string;
   conversation_history?: ChatMessage[];
   current_page_context?: string;
 }
@@ -39,6 +36,7 @@ export interface ChatRequest {
 export interface ChatResponse {
   answer: string;
   sources: string[];
+  chat_id: string;
   repo_url: string;
 }
 
@@ -56,69 +54,99 @@ export interface AvailableReposResponse {
 }
 
 export interface TaskStatusResponse {
+  id: string;
+  user_id: string;
   task_id: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  repo_url: string;
+  status: 'pending' | 'processing' | 'completed' | 'cached' | 'failed';
   progress: number;
   current_step: string;
   created_at: string;
-  updated_at: string;
+  last_updated: string;
   result: GenResponse | null;
   error: string | null;
 }
 
+export interface TasksResponse {
+  tasks: TaskStatusResponse[];
+}
+
+const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers || {}),
+    },
+    ...init,
+  });
+
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const errorData = await res.json() as { detail?: string };
+      detail = errorData.detail || detail;
+    } catch {
+      // ignore json parsing error and use status text
+    }
+    throw new Error(detail || 'Request failed');
+  }
+
+  return res.json() as Promise<T>;
+};
+
 export const api = {
   checkHealth: async (): Promise<boolean> => {
     try {
-      const res = await axios.get<HealthResponse>(`${API_BASE_URL}/health`);
-      return res.data.status === 'ok';
-    } catch (error) {
-      console.error('Health check failed:', error);
+      const data = await requestJson<HealthResponse>('/health', { method: 'GET' });
+      return data.status === 'ok';
+    } catch {
       return false;
     }
   },
 
-  createTask: async (url_link: string): Promise<TaskResponse> => {
-    const res = await axios.post<TaskResponse>(`${API_BASE_URL}/generate`, { url_link });
-    return res.data;
+  createTask: async (url_link: string, user_id: string): Promise<TaskResponse> => {
+    return requestJson<TaskResponse>('/generate', {
+      method: 'POST',
+      body: JSON.stringify({ url_link, user_id }),
+    });
   },
 
   getTaskStatus: async (task_id: string): Promise<TaskStatusResponse> => {
     try {
-      const res = await axios.get<TaskStatusResponse>(`${API_BASE_URL}/task/${task_id}`);
-      return res.data;
+      const data = await requestJson<{ task: TaskStatusResponse }>(`/task/${task_id}`, {
+        method: 'POST',
+      });
+      return data.task;
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        return {
-          task_id,
-          status: 'failed',
-          progress: 0,
-          current_step: 'Task not found',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          result: null,
-          error: 'Task not found or expired'
-        };
-      }
       throw error;
     }
   },
 
-  // ============ RAG Chat API ============
+  getTasks: async (user_id: string): Promise<TasksResponse> => {
+    return requestJson<TasksResponse>('/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ user_id }),
+    });
+  },
 
-  /**
-   * 发送问题到 RAG 聊天接口
-   * @param request 聊天请求参数
-   * @returns 聊天响应，包含答案和来源
-   */
   askQuestion: async (request: ChatRequest): Promise<ChatResponse> => {
     try {
-      const res = await axios.post<ChatResponse>(`${API_BASE_URL}/chat`, request);
-      return res.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        const status = error.response?.status;
-        const detail = error.response?.data?.detail || error.message;
-        
+      const res = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+
+      if (!res.ok) {
+        const status = res.status;
+        let detail = res.statusText;
+        try {
+          const errorData = await res.json();
+          detail = errorData.detail || detail;
+        } catch {
+          // ignore
+        }
+
         if (status === 404) {
           throw new Error('未找到该仓库的向量索引。请先生成文档后再使用聊天功能。');
         } else if (status === 400) {
@@ -127,20 +155,18 @@ export const api = {
           throw new Error(`聊天请求失败: ${detail}`);
         }
       }
+      return res.json();
+    } catch (error) {
+      console.error('Ask question failed:', error);
       throw error;
     }
   },
 
-  /**
-   * 获取所有可用于聊天的仓库列表
-   * @returns 可用仓库列表
-   */
   getAvailableRepos: async (): Promise<AvailableReposResponse> => {
     try {
-      const res = await axios.get<AvailableReposResponse>(`${API_BASE_URL}/chat/repos`);
-      return res.data;
-    } catch (error) {
-      console.error('Failed to fetch available repos:', error);
+      const data = await requestJson<{ repos: AvailableRepo[] }>('/chat/repos', { method: 'GET' });
+      return { repos: data.repos, count: data.repos.length };
+    } catch {
       return { repos: [], count: 0 };
     }
   },

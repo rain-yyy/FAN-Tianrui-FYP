@@ -1,21 +1,17 @@
-优化一下数据库，现在数据库是依托。将和supabase的主要逻辑转移到后端来
 
-1. 创建一个优化方案（特别是要用创新
-现在只有少量的file找不到（.github folder需要处理一下， 剩下的看起来是幻觉导致的）
-2. 问答接口已经实现，但是还没有挂在fly上测试
 4. 优化前端的展示问题(展示的代码块展示``存在问题，看起来转意也有问题，然后图标还是存在报错，左下角存在大量恶心的报错)
-4. 加入gemini，替换openai api
-5. 加入google 登陆
-了解一下rank和embedding的区别
-给fly环境变量配置我的supabase key、
-控制同一个repo在cloudfare中只存一个json（复用）
+了解一下rank和embedding的区别）
 
 
 优化：
 
-2. 给vercel也加入github action
-github action 没有自动运行（无伤大雅
-加一个flyio的instruction 手册
-现在fly有一个问题就是，只有我调用的时候，才会打印log；
-license 不处理
-整理整理前端代码，里面估计有很多废物
+2. 把前端弄好
+3. 加入agent和rag并行
+4. 现在只有少量的file找不到（.github folder需要处理一下， 剩下的看起来是幻觉导致的）
+4. 处理数据库里的preview text和message count
+5. 更换问答的架构，对 GitHub 仓库做“静态分析 + LLM 生成文档”，构建一个带架构图的知识库，用户可以与这个“知识站点”对话，背后是图谱 + 代码语义搜索，通过perlerxity
+6. 有空把和supabase交互转移到后端
+7. 有空再继续优化wiki structure的生成
+8. 给vercel也加入github action github action 没有自动运行（无伤大雅
+9 license 不处理
+10. session打开不再开头位置

@@ -1,13 +1,12 @@
-from __future__ import annotations
-
 import os
+import logging
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Mapping, Optional, TYPE_CHECKING
 
-from dotenv import load_dotenv
 from langchain_core.documents import Document
-from src.clients.ai_client_factory import get_ai_client
-from src.prompts import get_rag_chat_prompt, RAG_CHAT_PROMPT, HYDE_PROMPT, RAG_CHAT_WITH_HISTORY_PROMPT
+from src.clients.ai_client_factory import get_ai_client, get_model_config
+from src.config import CONFIG
+from src.prompts import get_rag_chat_prompt, HYDE_PROMPT, RAG_CHAT_PROMPT, RAG_CHAT_WITH_HISTORY_PROMPT
 from src.ingestion.kb_loader import load_knowledge_base
 from src.core.retrieval import (
     RankedCandidate,
@@ -19,11 +18,9 @@ from src.core.retrieval import (
 
 from langchain_community.vectorstores import FAISS
 
-load_dotenv()
+# 初始化日志
+logger = logging.getLogger("app.chat")
 
-openai_key = os.getenv("OPENAI_API_KEY")
-
-DEFAULT_MODEL = "gpt-4o-mini-2024-07-18"
 VECTOR_STORE_PATH: str = os.getenv("VECTOR_STORE_PATH", "").strip()
 CATEGORY_TOP_K: Dict[str, int] = {
     "code": 5,
@@ -50,10 +47,12 @@ class CategoryRetrievalUnit:
     sparse_index: SparseBM25Index | None
 
 
-def _ensure_openai_key() -> None:
-    if not openai_key:
+def _ensure_api_key() -> None:
+    """检查 OpenRouter API Key 是否设置"""
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
         raise ValueError(
-            "OPENAI_API_KEY environment variable not set. Please set it before running."
+            "OPENROUTER_API_KEY environment variable not set. Please set it before running."
         )
 
 
@@ -72,7 +71,8 @@ def _generate_hyde_document(question: str) -> str:
         假设性答案文档，用于后续检索
     """
     try:
-        llm = get_ai_client("qwen", model="qwen-plus")
+        provider, model = get_model_config(CONFIG, "hyde_generation")
+        llm = get_ai_client(provider, model=model)
         
         messages = HYDE_PROMPT.format_messages(question=question)
         hyde_doc = llm.chat(messages, temperature=0.3, max_tokens=500)
@@ -80,11 +80,11 @@ def _generate_hyde_document(question: str) -> str:
         if not isinstance(hyde_doc, str):
             hyde_doc = str(hyde_doc)
         
-        print(f"[HyDE] 生成假设文档成功，长度: {len(hyde_doc)} 字符")
+        logger.info(f"[HyDE] 生成假设文档成功，长度: {len(hyde_doc)} 字符")
         return hyde_doc.strip()
         
     except Exception as e:
-        print(f"[HyDE] 生成假设文档失败: {e}，回退到原始问题")
+        logger.error(f"[HyDE] 生成假设文档失败: {e}，回退到原始问题")
         return question
 
 
@@ -184,7 +184,7 @@ def _load_vector_stores(
     stores: Dict[str, CategoryRetrievalUnit] = {}
     for category in categories:
         category_path = _resolve_category_path(root_path, category)
-        print(f"Loading vector store for '{category}' from {category_path} ...")
+        logger.info(f"Loading vector store for '{category}' from {category_path} ...")
         dense_store = load_knowledge_base(category_path)
         docs = _extract_store_documents(dense_store)
         sparse_index = SparseBM25Index.build(docs) if docs else None
@@ -366,7 +366,7 @@ def answer_question(
     if not question or not question.strip():
         raise ValueError("问题不能为空。")
 
-    _ensure_openai_key()
+    _ensure_api_key()
 
     root_path = _resolve_vector_store_root(db_path)
     top_k_plan = dict(category_top_k or CATEGORY_TOP_K)
@@ -452,12 +452,12 @@ def _answer_with_stores(
     Returns:
         包含答案和来源的字典
     """
-    _ensure_openai_key()
+    _ensure_api_key()
 
     # HyDE: 生成假设性文档用于检索
     retrieval_query = question
     if use_hyde:
-        print("[RAG] 使用 HyDE 增强检索...")
+        logger.info("[RAG] 使用 HyDE 增强检索...")
         hyde_doc = _generate_hyde_document(question)
         # 结合原始问题和假设文档进行检索
         retrieval_query = f"{question}\n\n{hyde_doc}"
@@ -481,11 +481,12 @@ def _answer_with_stores(
 
     context = _format_documents(docs)
     if not context:
-        print("Warning: No relevant context retrieved. The answer may be limited.")
+        logger.warning("No relevant context retrieved. The answer may be limited.")
     
-    llm = get_ai_client("qwen", model="qwen-plus")
+    provider, model = get_model_config(CONFIG, "rag_answer")
+    llm = get_ai_client(provider, model=model)
 
-    print("Calling AI model to generate answer...")
+    logger.info("Calling AI model to generate answer...")
     
     # 根据是否有对话历史选择不同的 prompt
     if conversation_history and len(conversation_history) > 0:

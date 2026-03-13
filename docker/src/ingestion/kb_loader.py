@@ -1,14 +1,10 @@
-from langchain_openai import OpenAIEmbeddings
+import logging
 from langchain_community.vectorstores import FAISS
-from dotenv import load_dotenv
-import os
 from pathlib import Path
 
-load_dotenv()
+from src.ingestion.embedding_utils import get_openrouter_embeddings
 
-
-openai_key = os.getenv("OPENAI_API_KEY")
-
+logger = logging.getLogger("app.ingestion.kb_loader")
 
 def _ensure_vector_store_exists(db_path: str) -> None:
     if not db_path:
@@ -23,24 +19,22 @@ def _ensure_vector_store_exists(db_path: str) -> None:
     if not index_file.exists() or not store_file.exists():
         raise FileNotFoundError(
             f"Vector store files missing under: {db_path}. "
-            "Please ensure index.faiss 和 index.pkl 已生成。"
+            "Please ensure index.faiss and index.pkl have been generated."
         )
 
 
 def load_knowledge_base(db_path: str) -> FAISS:
     """
-    从本地加载FAISS向量数据库和嵌入模型。
+    从本地加载 FAISS 向量数据库和嵌入模型。
+    使用 OpenRouter (baai/bge-m3) 进行 embedding。
     """
     _ensure_vector_store_exists(db_path)
 
-    print("Loading knowledge base...")
-    # 必须使用与创建时相同的嵌入模型
-    embeddings = OpenAIEmbeddings(
-        model="text-embedding-3-small",
-        openai_api_key=openai_key
-    )
-    
+    logger.info(f"Loading knowledge base from {db_path}...")
+    # 必须使用与创建时相同的嵌入模型（OpenRouter baai/bge-m3）
+    embeddings = get_openrouter_embeddings()
+
     db = FAISS.load_local(db_path, embeddings, allow_dangerous_deserialization=True)
 
-    print("Knowledge base loaded successfully.")
+    logger.info("Knowledge base loaded successfully.")
     return db

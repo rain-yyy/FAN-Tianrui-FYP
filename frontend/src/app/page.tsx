@@ -1,125 +1,128 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { User } from '@supabase/supabase-js';
 import { api, TaskStatusResponse } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import WikiViewer from '@/components/WikiViewer';
-import { supabase, supabaseApi } from '@/lib/supabase';
 import Auth from '@/components/Auth';
-import { 
-  Github, 
-  ArrowRight, 
-  Loader2, 
+import {
+  Github,
+  ArrowRight,
+  Loader2,
   Terminal,
   RotateCcw,
   History,
   LogOut,
   Clock,
-  ExternalLink,
-  ChevronRight
+  ChevronRight,
 } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-import { Session } from '@supabase/supabase-js';
+import { cn } from '@/lib/utils';
 
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+type HistoryItem = TaskStatusResponse;
+
+interface UserProfile {
+  id: string;
+  email?: string;
+  phone?: string;
 }
 
 export default function Home() {
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [url, setUrl] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
   const [status, setStatus] = useState<TaskStatusResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [health, setHealth] = useState<boolean | null>(null);
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Check health and session on mount
+  const buildUserProfile = useCallback((supabaseUser: User | null): UserProfile | null => {
+    if (!supabaseUser) return null;
+    return {
+      id: supabaseUser.id,
+      email: supabaseUser.email,
+      phone: supabaseUser.phone,
+    };
+  }, []);
+
+  const loadHistory = useCallback(async (userId: string) => {
+    try {
+      const { tasks } = await api.getTasks(userId);
+      setHistory(tasks);
+    } catch {
+      setHistory([]);
+    }
+  }, []);
+
+  const pollStatus = useCallback(async (id: string) => {
+    try {
+      const res = await api.getTaskStatus(id);
+      setStatus(res);
+
+      if (res.status === 'completed' || res.status === 'cached' || res.status === 'failed') {
+        if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+        if (user) {
+          await loadHistory(user.id);
+        }
+        return;
+      }
+
+      pollTimerRef.current = setTimeout(() => pollStatus(id), 2000);
+    } catch (error: unknown) {
+      console.error('Polling failed:', error);
+      pollTimerRef.current = setTimeout(() => pollStatus(id), 5000);
+    }
+  }, [loadHistory, user]);
+
   useEffect(() => {
     const init = async () => {
       const isOk = await api.checkHealth();
       setHealth(isOk);
 
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-
-      if (session) {
-        loadHistory(session.user.id);
-        loadProfile(session.user.id);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      setProfile(buildUserProfile(currentUser));
+      if (currentUser) {
+        loadHistory(currentUser.id);
       }
     };
+
     init();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) {
-        loadHistory(session.user.id);
-        loadProfile(session.user.id);
-      } else {
-        setProfile(null);
-        setHistory([]);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      const nextUser = nextSession?.user ?? null;
+      setUser(nextUser);
+      setProfile(buildUserProfile(nextUser));
+      if (nextUser) {
+        loadHistory(nextUser.id);
+        return;
       }
+      setHistory([]);
+      setShowHistory(false);
+      setTaskId(null);
+      setStatus(null);
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const loadProfile = async (userId: string) => {
-    const { data, error } = await supabaseApi.getProfile(userId);
-    if (!error && data) {
-      setProfile(data);
-    }
-  };
-
-  const loadHistory = async (userId: string) => {
-    const { data, error } = await supabaseApi.getTaskHistory(userId);
-    if (!error && data) {
-      setHistory(data);
-    }
-  };
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [buildUserProfile, loadHistory]);
 
   useEffect(() => {
-    // Restore task from localStorage if exists
     const savedTaskId = localStorage.getItem('wiki_gen_task_id');
-    if (savedTaskId) {
-      setTaskId(savedTaskId);
-      pollStatus(savedTaskId);
-    }
-  }, []);
-
-  // Polling logic
-  const pollStatus = async (id: string) => {
-    try {
-      const res = await api.getTaskStatus(id);
-      setStatus(res);
-
-      if (res.status === 'completed' || res.status === 'failed') {
-        if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
-        
-        // Sync final result to Supabase
-        if (session) {
-          await supabaseApi.syncTaskEnd(id, res.status, res.result);
-          if (res.status === 'completed' && res.result?.r2_structure_url && res.result?.r2_content_urls) {
-            // Also sync to repositories table
-            const repoUrl = localStorage.getItem('wiki_gen_repo_url') || '';
-            if (repoUrl) {
-              await supabaseApi.syncRepository(repoUrl, res.result.r2_structure_url, res.result.r2_content_urls);
-            }
-          }
-          loadHistory(session.user.id);
-        }
-      } else {
-        pollTimerRef.current = setTimeout(() => pollStatus(id), 2000);
-      }
-    } catch (error: any) {
-      console.error('Polling failed:', error);
-      pollTimerRef.current = setTimeout(() => pollStatus(id), 5000);
-    }
-  };
+    if (!savedTaskId) return;
+    setTaskId(savedTaskId);
+    pollStatus(savedTaskId);
+  }, [pollStatus]);
 
   useEffect(() => {
     return () => {
@@ -129,19 +132,16 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!url.trim() || !session) return;
+    if (!url.trim() || !user) return;
 
+    const normalizedInputUrl = url.trim();
     setIsSubmitting(true);
     setStatus(null);
     try {
-      const res = await api.createTask(url);
+      const res = await api.createTask(normalizedInputUrl, user.id);
       setTaskId(res.task_id);
       localStorage.setItem('wiki_gen_task_id', res.task_id);
-      localStorage.setItem('wiki_gen_repo_url', url);
-      
-      // Initial sync to Supabase
-      await supabaseApi.syncTaskStart(session.user.id, res.task_id, url);
-      
+      localStorage.setItem('wiki_gen_repo_url', normalizedInputUrl);
       pollStatus(res.task_id);
     } catch (error) {
       console.error('Submission failed:', error);
@@ -162,39 +162,38 @@ export default function Home() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    localStorage.removeItem('wiki_gen_task_id');
+    localStorage.removeItem('wiki_gen_repo_url');
   };
 
-  const handleSelectHistoryTask = (task: any) => {
-    if (task.status === 'completed' && task.result) {
-      setStatus({
-        task_id: task.task_id,
-        status: 'completed',
-        progress: 100,
-        current_step: 'Loaded from history',
-        created_at: task.created_at,
-        updated_at: task.created_at,
-        result: task.result,
-        error: null
-      });
-      setTaskId(task.task_id);
-      setShowHistory(false);
-    } else {
+  const handleSelectHistoryTask = (task: HistoryItem) => {
+    if ((task.status !== 'completed' && task.status !== 'cached') || !task.result) {
       alert('This task did not complete successfully.');
+      return;
     }
+
+    setStatus({
+      ...task,
+      progress: 100,
+      current_step: 'Loaded from history',
+    });
+    setTaskId(task.task_id);
+    setShowHistory(false);
   };
 
   const getStatusColor = (s: string) => {
     switch (s) {
       case 'completed': return 'text-green-500 bg-green-500/10 border-green-500/20';
+      case 'cached': return 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
       case 'failed': return 'text-red-500 bg-red-500/10 border-red-500/20';
       case 'processing': return 'text-blue-500 bg-blue-500/10 border-blue-500/20';
       default: return 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20';
     }
   };
 
-  const isCompleted = status?.status === 'completed' && status?.result?.r2_structure_url && status?.result?.r2_content_urls;
+  const isCompleted = (status?.status === 'completed' || status?.status === 'cached') && status?.result?.r2_structure_url && status?.result?.r2_content_urls;
 
-  if (!session) {
+  if (!user) {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden font-sans bg-[#020617]">
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
@@ -215,6 +214,7 @@ export default function Home() {
       </main>
     );
   }
+
   return (
     <main className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden font-sans">
       {/* Background Elements */}
@@ -224,13 +224,13 @@ export default function Home() {
       </div>
 
       <div className={cn(
-        "z-10 w-full transition-all duration-700 ease-in-out",
-        isCompleted ? "max-w-[1600px] h-screen flex flex-col p-4 md:p-8" : "max-w-3xl p-4 sm:p-24 space-y-12"
+        'z-10 w-full transition-all duration-700 ease-in-out',
+        isCompleted ? 'max-w-[1600px] h-screen flex flex-col p-4 md:p-8' : 'max-w-3xl p-4 sm:p-24 space-y-12',
       )}>
         {/* Header */}
-        <motion.div 
+        <motion.div
           layout
-          className={cn("text-center space-y-4 relative", isCompleted ? "flex items-center justify-between space-y-0 mb-6" : "")}
+          className={cn('text-center space-y-4 relative', isCompleted ? 'flex items-center justify-between space-y-0 mb-6' : '')}
         >
           {/* User Menu */}
           {!isCompleted && (
@@ -241,16 +241,18 @@ export default function Home() {
                   {profile.email || profile.phone}
                 </div>
               )}
-              <button 
+              <button
                 onClick={() => setShowHistory(!showHistory)}
                 className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-white bg-white/5 hover:bg-white/10 rounded-full transition-all border border-white/10"
+                aria-label="Show task history"
               >
                 <History className="w-3.5 h-3.5" />
                 History
               </button>
-              <button 
+              <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-red-400/80 hover:text-red-400 bg-red-400/5 hover:bg-red-400/10 rounded-full transition-all border border-red-400/10"
+                aria-label="Logout"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 Logout
@@ -259,51 +261,54 @@ export default function Home() {
           )}
 
           {isCompleted ? (
-             <>
-               <div className="flex items-center gap-4">
-                 <h1 className="text-2xl font-bold tracking-tight text-white">Project Wiki</h1>
-                 <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-secondary border border-border text-xs text-muted-foreground font-mono">
-                    <div className="w-2 h-2 rounded-full bg-green-500" />
-                    Generated
-                 </div>
-               </div>
-               <div className="flex items-center gap-3">
-                 <button 
-                    onClick={() => setShowHistory(!showHistory)}
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-                 >
-                   <History className="w-4 h-4" />
-                   History
-                 </button>
-                 <button 
-                    onClick={handleClear}
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-                 >
-                   <RotateCcw className="w-4 h-4" />
-                   New Project
-                 </button>
-                 <button 
-                    onClick={handleLogout}
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-red-400/80 hover:text-red-400 hover:bg-red-400/5 rounded-lg transition-colors"
-                 >
-                   <LogOut className="w-4 h-4" />
-                   Logout
-                 </button>
-               </div>
-             </>
-          ) : (
-             <>
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary border border-border text-xs text-muted-foreground font-mono mb-4">
-                  <div className={cn("w-2 h-2 rounded-full", health ? "bg-green-500 animate-pulse" : "bg-red-500")} />
-                  API SYSTEM: {health ? 'ONLINE' : 'OFFLINE'}
+            <>
+              <div className="flex items-center gap-4">
+                <h1 className="text-2xl font-bold tracking-tight text-white">Project Wiki</h1>
+                <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-secondary border border-border text-xs text-muted-foreground font-mono">
+                  <div className="w-2 h-2 rounded-full bg-green-500" />
+                  Generated
                 </div>
-                <h1 className="text-4xl md:text-6xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60">
-                  Project Wiki Generator
-                </h1>
-                <p className="text-lg text-muted-foreground max-w-xl mx-auto">
-                  Transform your GitHub repository into comprehensive documentation instantly using AI.
-                </p>
-             </>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowHistory(!showHistory)}
+                  className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                  aria-label="Toggle task history"
+                >
+                  <History className="w-4 h-4" />
+                  History
+                </button>
+                <button
+                  onClick={handleClear}
+                  className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                  aria-label="Start new project"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  New Project
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 px-4 py-2 text-sm text-red-400/80 hover:text-red-400 hover:bg-red-400/5 rounded-lg transition-colors"
+                  aria-label="Logout"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Logout
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary border border-border text-xs text-muted-foreground font-mono mb-4">
+                <div className={cn('w-2 h-2 rounded-full', health ? 'bg-green-500 animate-pulse' : 'bg-red-500')} />
+                API SYSTEM: {health ? 'ONLINE' : 'OFFLINE'}
+              </div>
+              <h1 className="text-4xl md:text-6xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60">
+                Project Wiki Generator
+              </h1>
+              <p className="text-lg text-muted-foreground max-w-xl mx-auto">
+                Transform your GitHub repository into comprehensive documentation instantly using AI.
+              </p>
+            </>
           )}
         </motion.div>
 
@@ -321,7 +326,7 @@ export default function Home() {
                   <History className="w-5 h-5 text-blue-400" />
                   Task History
                 </h2>
-                <button 
+                <button
                   onClick={() => setShowHistory(false)}
                   className="text-sm text-muted-foreground hover:text-white"
                 >
@@ -337,12 +342,14 @@ export default function Home() {
                   </div>
                 ) : (
                   history.map((item) => (
-                    <div 
+                    <div
                       key={item.id}
-                      onClick={() => item.status === 'completed' && handleSelectHistoryTask(item)}
+                      onClick={() => (item.status === 'completed' || item.status === 'cached') && handleSelectHistoryTask(item)}
                       className={cn(
-                        "group p-4 bg-secondary/40 border border-white/10 rounded-xl transition-all",
-                        item.status === 'completed' ? "hover:bg-secondary/60 cursor-pointer hover:border-blue-500/30" : "opacity-80"
+                        'group p-4 bg-secondary/40 border border-white/10 rounded-xl transition-all',
+                        item.status === 'completed' || item.status === 'cached'
+                          ? 'hover:bg-secondary/60 cursor-pointer hover:border-blue-500/30'
+                          : 'opacity-80',
                       )}
                     >
                       <div className="flex items-start justify-between">
@@ -356,12 +363,12 @@ export default function Home() {
                           <div className="flex items-center gap-3 text-xs text-muted-foreground">
                             <span>{new Date(item.created_at).toLocaleDateString()}</span>
                             <span>•</span>
-                            <span className={cn("capitalize", getStatusColor(item.status).split(' ')[0])}>
+                            <span className={cn('capitalize', getStatusColor(item.status).split(' ')[0])}>
                               {item.status}
                             </span>
                           </div>
                         </div>
-                        {item.status === 'completed' && (
+                        {(item.status === 'completed' || item.status === 'cached') && (
                           <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-white transition-colors" />
                         )}
                       </div>
@@ -381,7 +388,7 @@ export default function Home() {
             >
               {/* Input Form */}
               <div className="relative group">
-                 {!taskId || (status?.status === 'failed') ? (
+                {!taskId || (status?.status === 'failed') ? (
                   <form onSubmit={handleSubmit}>
                     <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-xl blur opacity-20 group-hover:opacity-30 transition duration-500" />
                     <div className="relative flex items-center bg-secondary/50 backdrop-blur-xl border border-white/10 rounded-xl p-2 transition-all focus-within:ring-1 focus-within:ring-blue-500/50">
@@ -398,26 +405,28 @@ export default function Home() {
                         type="submit"
                         disabled={isSubmitting || (taskId !== null && status?.status === 'processing') || !url.trim()}
                         className="bg-white text-black px-6 py-3 rounded-lg font-medium hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        aria-label="Generate documentation"
                       >
                         {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span className="flex items-center gap-2">Generate <ArrowRight className="w-4 h-4" /></span>}
                       </button>
                     </div>
                   </form>
-                 ) : (
-                   <div className="text-center p-8 border border-white/10 rounded-xl bg-secondary/30 backdrop-blur">
-                     <div className="flex flex-col items-center gap-4">
-                        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-                        <p className="text-muted-foreground">Task in progress...</p>
-                        <button 
-                          onClick={handleClear}
-                          className="mt-2 text-sm text-red-400 hover:text-red-300 transition-colors flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-red-500/10"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                          Cancel & Start New
-                        </button>
-                     </div>
-                   </div>
-                 )}
+                ) : (
+                  <div className="text-center p-8 border border-white/10 rounded-xl bg-secondary/30 backdrop-blur">
+                    <div className="flex flex-col items-center gap-4">
+                      <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                      <p className="text-muted-foreground">Task in progress...</p>
+                      <button
+                        onClick={handleClear}
+                        className="mt-2 text-sm text-red-400 hover:text-red-300 transition-colors flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-red-500/10"
+                        aria-label="Cancel task and start new"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Cancel & Start New
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Status Card */}
@@ -437,7 +446,7 @@ export default function Home() {
                         <div className="font-mono text-sm md:text-base text-white/80 truncate max-w-[200px] md:max-w-md">{status.task_id}</div>
                       </div>
                     </div>
-                    <div className={cn("px-3 py-1 rounded-full text-xs font-medium border uppercase tracking-wider", getStatusColor(status.status))}>
+                    <div className={cn('px-3 py-1 rounded-full text-xs font-medium border uppercase tracking-wider', getStatusColor(status.status))}>
                       {status.status}
                     </div>
                   </div>
@@ -448,7 +457,7 @@ export default function Home() {
                       <span className="text-white font-mono">{Math.round(status.progress)}%</span>
                     </div>
                     <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                      <motion.div 
+                      <motion.div
                         className="h-full bg-gradient-to-r from-blue-500 to-cyan-500"
                         initial={{ width: 0 }}
                         animate={{ width: `${status.progress}%` }}
@@ -456,18 +465,19 @@ export default function Home() {
                       />
                     </div>
                   </div>
-                  
+
                   {status.status === 'failed' && (
-                     <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-200 text-sm">
-                        Error: {status.error || 'Unknown error occurred'}
-                     </div>
+                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-200 text-sm">
+                      Error: {status.error || 'Unknown error occurred'}
+                    </div>
                   )}
 
-                  {(status.status === 'failed') && (
+                  {status.status === 'failed' && (
                     <div className="flex justify-center pt-4">
-                      <button 
+                      <button
                         onClick={handleClear}
                         className="text-muted-foreground hover:text-white text-sm transition-colors flex items-center gap-2"
+                        aria-label="Start new task"
                       >
                         Start New Task
                       </button>
@@ -479,19 +489,20 @@ export default function Home() {
           )}
 
           {isCompleted && !showHistory && (
-             <motion.div
-               key="wiki-viewer"
-               initial={{ opacity: 0, y: 20 }}
-               animate={{ opacity: 1, y: 0 }}
-               transition={{ duration: 0.5 }}
-               className="flex-1 min-h-0"
-             >
-                <WikiViewer 
-                  structureUrl={status.result!.r2_structure_url!} 
-                  contentUrls={status.result!.r2_content_urls!}
-                  repoUrl={status.result?.repo_url || localStorage.getItem('wiki_gen_repo_url') || url}
-                />
-             </motion.div>
+            <motion.div
+              key="wiki-viewer"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              className="flex-1 min-h-0"
+            >
+              <WikiViewer
+                userId={user.id}
+                structureUrl={status.result!.r2_structure_url!}
+                contentUrls={status.result!.r2_content_urls!}
+                repoUrl={status.result?.repo_url || localStorage.getItem('wiki_gen_repo_url') || url}
+              />
+            </motion.div>
           )}
         </AnimatePresence>
       </div>

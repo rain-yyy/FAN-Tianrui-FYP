@@ -148,6 +148,16 @@
         "env", "sample", "example",
         "adoc"
       ]
+    },
+    "ai_models": {
+      "provider": "openrouter",
+      "models": {
+        "hyde_generation": "google/gemini-2.5-flash",
+        "rag_answer": "qwen/qwen3-235b-a22b-2507",
+        "wiki_structure": "google/gemini-2.5-flash",
+        "wiki_content": "qwen/qwen3.5-flash-02-23",
+        "community_summary": "google/gemini-2.5-flash"
+      }
     }
   }
   

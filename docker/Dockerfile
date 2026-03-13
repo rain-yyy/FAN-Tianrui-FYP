@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # 使用轻量级的 Python 基础镜像
 FROM python:3.11-slim
 
@@ -9,9 +10,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# 先复制依赖文件并安装，利用 Docker 缓存
+# 先复制依赖文件并安装，利用 Docker 缓存 + pip 缓存挂载加速重构建
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
 # 将所有代码文件复制进镜像
 # 注意：在 docker-build 时，上下文应该是这个 docker/ 目录

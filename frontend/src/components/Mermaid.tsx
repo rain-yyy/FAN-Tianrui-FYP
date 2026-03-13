@@ -97,13 +97,13 @@ export default function Mermaid({ chart }: MermaidProps) {
         const id = `mermaid-${Math.random().toString(36).substring(2, 11)}`;
         
         // 尝试修复常见的语法问题
-        let chartToRender = fixMermaidSyntax(chart);
+        const chartToRender = fixMermaidSyntax(chart);
         
         // 渲染图表
         const { svg: renderedSvg } = await mermaid.render(id, chartToRender);
         setSvg(renderedSvg);
         setIsLoading(false);
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('Mermaid render error:', error);
         console.error('Original chart content:', chart);
         
@@ -113,7 +113,7 @@ export default function Mermaid({ chart }: MermaidProps) {
           const id = `mermaid-${Math.random().toString(36).substring(2, 11)}`;
           
           // 更激进的修复：将所有节点标签中的 @ 替换为 (at)
-          let aggressiveFix = chart.replace(/(\w+)\[([^\]]+)\]/g, (match, nodeId, label) => {
+          const aggressiveFix = chart.replace(/(\w+)\[([^\]]+)\]/g, (match, nodeId, label) => {
             if (label.includes('@')) {
               return `${nodeId}["${label.replace(/@/g, '(at)')}"]`;
             }

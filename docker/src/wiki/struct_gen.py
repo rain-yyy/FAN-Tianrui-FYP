@@ -4,20 +4,23 @@ import json
 import os
 import re
 import sys
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import dotenv
-from src.config import PROJECT_ROOT
-from src.clients.ai_client_factory import get_ai_client
+from src.config import PROJECT_ROOT, CONFIG
+from src.clients.ai_client_factory import get_ai_client, get_model_config
 from src.prompts import get_structure_prompt, STRUCTURE_PROMPT
 from src.ingestion.code_graph import CodeGraphBuilder
 from src.ingestion.community_engine import CommunityEngine
 from src.ingestion.file_processor import get_files_to_process
 
+# 初始化日志
+logger = logging.getLogger("app.wiki.struct_gen")
+
 dotenv.load_dotenv()
-openai_key = os.getenv("OPENAI_API_KEY")
 
 REPO_MAPPER_DIR = PROJECT_ROOT / "RepoMapper"
 
@@ -28,7 +31,7 @@ def _build_repo_map_context(repo_path: str, target_subdir: str = "src") -> str:
     """
     repo_mapper_dir = REPO_MAPPER_DIR
     if not repo_mapper_dir.exists():
-        print(f"Repo map directory missing: {repo_mapper_dir}")
+        logger.warning(f"Repo map directory missing: {repo_mapper_dir}")
         return ""
 
     repo_mapper_path = str(repo_mapper_dir)
@@ -39,7 +42,7 @@ def _build_repo_map_context(repo_path: str, target_subdir: str = "src") -> str:
         from RepoMapper.repomap import find_src_files
         from RepoMapper.repomap_class import RepoMap
     except ImportError as exc:
-        print(f"Repo map dependencies missing, skip context: {exc}")
+        logger.warning(f"Repo map dependencies missing, skip context: {exc}")
         return ""
 
     repo_root = Path(repo_path).resolve()
@@ -50,11 +53,11 @@ def _build_repo_map_context(repo_path: str, target_subdir: str = "src") -> str:
     try:
         candidate_files = find_src_files(str(search_root))
     except Exception as exc:  # noqa: BLE001 - 依赖库内部异常需吞掉
-        print(f"Repo map file discovery failed: {exc}")
+        logger.error(f"Repo map file discovery failed: {exc}")
         return ""
 
     if not candidate_files:
-        print("Repo map: no files discovered, skip context.")
+        logger.info("Repo map: no files discovered, skip context.")
         return ""
 
     resolved_files = [str(Path(path).resolve()) for path in candidate_files]
@@ -70,11 +73,11 @@ def _build_repo_map_context(repo_path: str, target_subdir: str = "src") -> str:
             other_files=resolved_files,
         )
     except Exception as exc:  # noqa: BLE001
-        print(f"Repo map generation failed: {exc}")
+        logger.error(f"Repo map generation failed: {exc}")
         return ""
 
     if not map_content:
-        print("Repo map returned empty content.")
+        logger.info("Repo map returned empty content.")
         return ""
 
     return map_content.strip()
@@ -87,7 +90,7 @@ def generate_wiki_structure(
     """
     调用 gpt 4o mini 生成分层 Wiki 目录并解析 JSON 响应。
     """
-    print("Generating wiki structure with AI...")
+    logger.info("Generating wiki structure with AI...")
 
     # 1. 加载 README 内容
     readme_path = os.path.join(repo_path, "README.md")
@@ -96,65 +99,53 @@ def generate_wiki_structure(
         with open(readme_path, "r", encoding="utf-8") as f:
             readme_content = f.read()
     else:
-        print("Warning: README.md not found. Context will be limited.")
+        logger.warning("README.md not found. Context will be limited.")
 
     # 2. 初始化模型
-    # TODO:测试换成qwen
-    llm = get_ai_client("qwen", model="qwen3-max-2026-01-23")
+    provider, model = get_model_config(CONFIG, "wiki_structure")
+    llm = get_ai_client(provider, model=model)
     current_date = datetime.utcnow().date().isoformat()
 
     # 2.1 准备 RepoMap 语境
     if repo_map is None:
-        print("Building repo map context...")
+        logger.info("Building repo map context...")
         repo_map = _build_repo_map_context(repo_path)
-        # print(repo_map)
-        print(f"Repo map context built: {len(repo_map)} tokens")
+        logger.info(f"Repo map context built: {len(repo_map)} characters")
 
     # 2.2 准备有效文件列表（用于约束 LLM 输出）
     config_path = PROJECT_ROOT / "config" / "repo_config.json"
     file_paths = get_files_to_process(repo_path, str(config_path))
 
-    # TODO 保存在本地，用于测试文件路径错误的问题（已修复）
-    with open("file_paths.json", "w", encoding="utf-8") as f:
-        json.dump(file_paths, f, indent=2, ensure_ascii=False)
-    # print("file_paths: ", file_paths)
-
-
+    # 暂时保存在本地，用于调试（可选）
+    # with open("file_paths.json", "w", encoding="utf-8") as f:
+    #     json.dump(file_paths, f, indent=2, ensure_ascii=False)
     
     if valid_file_list is None:
-        print("Building valid file list...")
-        # 将绝对路径转换为相对路径，使用 os.path.relpath 以处理 macOS 等系统中的路径前缀不一致（如 /var vs /private/var）
+        logger.info("Building valid file list...")
         repo_abs_path = os.path.abspath(repo_path)
         relative_paths = []
         for fp in file_paths:
             try:
-                # 使用 os.path.relpath 比 Path.relative_to 更鲁棒
                 rel = os.path.relpath(fp, repo_abs_path).replace("\\", "/")
-                # 过滤掉不在仓库目录下的路径（以 .. 开头的路径）
                 if not rel.startswith(".."):
                     relative_paths.append(rel)
             except (ValueError, TypeError):
                 continue
         
         valid_file_list = "\n".join(sorted(relative_paths))
-        print(f"Valid file list built: {len(relative_paths)} files")
+        logger.info(f"Valid file list built: {len(relative_paths)} files")
         
-    #TODO 保存在本地，用于测试文件路径错误的问题（已修复）  
-    with open("valid_file_list.json", "w", encoding="utf-8") as f:
-        json.dump(valid_file_list, f, indent=2, ensure_ascii=False)
-    # print("valid_file_list: ", valid_file_list)
-
     # 2.3 准备社区信息 (GraphRAG)
     if communities_info is None:
         try:
-            print("Building code graph and communities...")
+            logger.info("Building code graph and communities...")
             
             builder = CodeGraphBuilder()
             graph = builder.build_graph(repo_path, file_paths)
             
             engine = CommunityEngine(graph)
             communities = engine.run_leiden()
-            summaries = engine.generate_summaries(client_provider="deepseek")
+            summaries = engine.generate_summaries()
             
             # 格式化社区信息为字符串
             comm_list = []
@@ -165,13 +156,13 @@ def generate_wiki_structure(
                 comm_list.append(f"Community {cid}:\n- Summary: {summary}\n- Key Files: {', '.join(core_files)}")
             
             communities_info = "\n\n".join(comm_list)
-            print(f"Community info built: {len(communities_info)} chars")
+            logger.info(f"Community info built: {len(communities_info)} chars")
         except Exception as e:
-            print(f"Warning: Failed to build communities: {e}")
+            logger.error(f"Failed to build communities: {e}")
             communities_info = "No community information available."
 
     # 4. 调用 AI
-    print("Invoking AI model...")
+    logger.info("Invoking AI model...")
     messages = STRUCTURE_PROMPT.format_messages(
         file_tree=file_tree,
         readme_content=readme_content,
@@ -181,6 +172,7 @@ def generate_wiki_structure(
         valid_file_list=valid_file_list or ""
     )
     ai_message_content = llm.chat(messages, temperature=0.1)
+    
     if isinstance(ai_message_content, list):
         ai_message_content = "".join(
             part for part in ai_message_content if isinstance(part, str)
@@ -188,19 +180,22 @@ def generate_wiki_structure(
     if not isinstance(ai_message_content, str):
         raise ValueError("Unexpected AI response type; expected string content.")
 
-    print("AI response received.")
+    logger.info("AI response received.")
 
     # 4.1 将原始响应保存到文件，方便调试
     debug_dir = os.path.join(os.getcwd(), "wiki_structure_raw")
     os.makedirs(debug_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     debug_path = os.path.join(debug_dir, f"{timestamp}.json")
-    with open(debug_path, "w", encoding="utf-8") as f:
-        f.write(ai_message_content)
-    print(f"Raw AI response saved to: {debug_path}")
+    try:
+        with open(debug_path, "w", encoding="utf-8") as f:
+            f.write(ai_message_content)
+        logger.info(f"Raw AI response saved to: {debug_path}")
+    except Exception as e:
+        logger.warning(f"Failed to save raw AI response: {e}")
 
     # 5. 解析 JSON 输出
-    print("Parsing AI response...")
+    logger.info("Parsing AI response...")
     return parse_wiki_structure_json(ai_message_content, fallback_date=current_date)
 
 
@@ -231,7 +226,7 @@ def parse_wiki_structure_json(raw_json: str, *, fallback_date: str) -> Dict[str,
     if not isinstance(last_indexed, str):
         raise ValueError("Invalid JSON response: 'lastIndexed' 必须是字符串。")
 
-    print("Parsing complete.")
+    logger.info("Parsing complete.")
     return {
         "title": title,
         "description": description,

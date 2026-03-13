@@ -1,9 +1,13 @@
 import networkx as nx
 import leidenalg
 import igraph as ig
+import logging
 from typing import List, Dict, Any, Optional
-from src.clients.ai_client_factory import get_ai_client
+from src.clients.ai_client_factory import get_ai_client, get_model_config
+from src.config import CONFIG
 import json
+
+logger = logging.getLogger("app.ingestion.community_engine")
 
 class CommunityEngine:
     """
@@ -43,11 +47,12 @@ class CommunityEngine:
             
         return self.communities
 
-    def generate_summaries(self, client_provider: str = "deepseek"):
+    def generate_summaries(self):
         """
         为每个社区生成业务摘要。
         """
-        client = get_ai_client(client_provider)
+        provider, model = get_model_config(CONFIG, "community_summary")
+        client = get_ai_client(provider, model=model)
         
         for comm_id, nodes in self.communities.items():
             # 准备社区上下文
@@ -78,7 +83,7 @@ class CommunityEngine:
                 summary = client.chat([{"role": "user", "content": prompt}])
                 self.community_summaries[comm_id] = summary
             except Exception as e:
-                print(f"Error generating summary for community {comm_id}: {e}")
+                logger.error(f"Error generating summary for community {comm_id}: {e}")
                 self.community_summaries[comm_id] = "无法生成摘要。"
 
         return self.community_summaries

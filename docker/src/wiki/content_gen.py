@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import json
 import re
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Dict, Iterable, List, Sequence, Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 
 from src.clients.ai_client_base import BaseAIClient
-from src.clients.ai_client_factory import get_ai_client
+from src.clients.ai_client_factory import get_ai_client, get_model_config
+from src.config import CONFIG
 from src.prompts import get_wiki_section_prompt
 
+# 初始化日志
+logger = logging.getLogger("app.wiki.content_gen")
 
 @dataclass(slots=True)
 class WikiSection:
@@ -51,7 +55,11 @@ class WikiContentGenerator:
         self.json_output_dir = Path(json_output_dir).expanduser().resolve()
         self.json_output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.client = client or get_ai_client("deepseek")
+        if client is None:
+            provider, model = get_model_config(CONFIG, "wiki_content")
+            self.client = get_ai_client(provider, model=model)
+        else:
+            self.client = client
         self.prompt_template = prompt_template or get_wiki_section_prompt()
         self.max_file_chars = max_file_chars
         self.max_section_chars = max_section_chars
@@ -72,7 +80,7 @@ class WikiContentGenerator:
             try:
                 file_path = self._generate_section(structure, section)
             except Exception as exc:
-                print(f"[WARN] 生成章节 '{section.id}' 失败：{exc}")
+                logger.warning(f"生成章节 '{section.id}' 失败：{exc}")
                 continue
             if file_path:
                 generated_files.append(file_path)
@@ -146,17 +154,17 @@ class WikiContentGenerator:
         try:
             abs_path.relative_to(self.repo_root)
         except ValueError:
-            print(f"[WARN] 跳过越界文件：{rel_path}")
+            logger.warning(f"跳过越界文件：{rel_path}")
             return ""
 
         if not abs_path.exists() or not abs_path.is_file():
-            print(f"[WARN] 跳过不存在的文件：{rel_path}")
+            logger.warning(f"跳过不存在的文件：{rel_path}")
             return ""
 
         try:
             content = abs_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            print(f"[WARN] 文件编码无法解析，已跳过：{rel_path}")
+            logger.warning(f"文件编码无法解析，已跳过：{rel_path}")
             return ""
 
         snippet = content.strip()
@@ -211,7 +219,7 @@ class WikiContentGenerator:
         target_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        print(f"[INFO] 已写入章节 JSON：{section.id} -> {target_path}")
+        logger.info(f"已写入章节 JSON：{section.id} -> {target_path}")
         return target_path
 
     def _parse_llm_response(self, response: str) -> Dict[str, Any]:
