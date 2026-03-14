@@ -40,6 +40,37 @@ export interface ChatResponse {
   repo_url: string;
 }
 
+// ============ Agent Mode Types ============
+
+export interface AgentTrajectoryStep {
+  step: number;
+  icon?: string;
+  tool: string;
+  description: string;
+  success: boolean;
+  preview?: string;
+}
+
+export type AgentChatRequest = ChatRequest;
+
+export interface AgentChatResponse {
+  answer: string;
+  mermaid?: string | null;
+  sources: string[];
+  trajectory: AgentTrajectoryStep[];
+  confidence: number;
+  iterations: number;
+  chat_id: string;
+  repo_url: string;
+}
+
+export interface AgentStreamEvent {
+  type: 'planning' | 'tool_call' | 'evaluation' | 'synthesis' | 'complete' | 'error';
+  data: Record<string, unknown>;
+}
+
+export type ChatMode = 'rag' | 'agent';
+
 export interface AvailableRepo {
   repo_url: string | null;
   vector_store_path: string;
@@ -168,6 +199,116 @@ export const api = {
       return { repos: data.repos, count: data.repos.length };
     } catch {
       return { repos: [], count: 0 };
+    }
+  },
+
+  // ============ Agent Mode APIs ============
+
+  askAgentQuestion: async (request: AgentChatRequest): Promise<AgentChatResponse> => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/agent/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+
+      if (!res.ok) {
+        const status = res.status;
+        let detail = res.statusText;
+        try {
+          const errorData = await res.json();
+          detail = errorData.detail || detail;
+        } catch {
+          // ignore
+        }
+
+        if (status === 404) {
+          throw new Error('未找到该仓库的向量索引。请先生成文档后再使用 Agent 功能。');
+        } else if (status === 400) {
+          throw new Error(`请求无效: ${detail}`);
+        } else {
+          throw new Error(`Agent 请求失败: ${detail}`);
+        }
+      }
+      return res.json();
+    } catch (error) {
+      console.error('Agent question failed:', error);
+      throw error;
+    }
+  },
+
+  askAgentQuestionStream: async function* (
+    request: AgentChatRequest
+  ): AsyncGenerator<AgentStreamEvent, void, unknown> {
+    const res = await fetch(`${API_BASE_URL}/agent/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Agent stream request failed: ${res.statusText}`);
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentEventType: AgentStreamEvent['type'] = 'planning';
+    let currentDataLines: string[] = [];
+
+    const emitCurrentEvent = (): AgentStreamEvent | null => {
+      if (currentDataLines.length === 0) return null;
+      const rawData = currentDataLines.join('\n').trim();
+      currentDataLines = [];
+      if (!rawData) return null;
+      try {
+        const data = JSON.parse(rawData) as Record<string, unknown>;
+        return { type: currentEventType, data };
+      } catch {
+        return {
+          type: 'error',
+          data: { detail: 'Invalid SSE data payload', raw: rawData },
+        };
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed === '') {
+          const event = emitCurrentEvent();
+          if (event) {
+            yield event;
+          }
+          continue;
+        }
+
+        if (trimmed.startsWith('event:')) {
+          const rawType = trimmed.slice(6).trim() as AgentStreamEvent['type'];
+          currentEventType = rawType || 'planning';
+          continue;
+        }
+
+        if (trimmed.startsWith('data:')) {
+          currentDataLines.push(trimmed.slice(5).trim());
+        }
+      }
+    }
+
+    const tailEvent = emitCurrentEvent();
+    if (tailEvent) {
+      yield tailEvent;
     }
   },
 };

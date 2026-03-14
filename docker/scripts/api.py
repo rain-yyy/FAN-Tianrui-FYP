@@ -16,8 +16,11 @@ load_dotenv("../.env")
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+import json
 
 from src.storage.supabase_client import SupabaseClient
+from src.agent import run_agent, AgentRunner
 
 # 初始化日志
 from src.utils.logger import setup_logger
@@ -49,6 +52,27 @@ class TaskStatus(str, Enum):
     COMPLETED = "completed"
     CACHED = "cached"
     FAILED = "failed"
+
+
+def _to_jsonable_builtin(value: Any) -> Any:
+    """
+    将 numpy/自定义对象中的标量递归转换为 Python 原生可 JSON 序列化类型。
+    """
+    try:
+        import numpy as np  # 延迟导入，避免无依赖环境报错
+        numpy_scalar_types = (np.generic,)
+    except Exception:
+        numpy_scalar_types = tuple()
+
+    if isinstance(value, numpy_scalar_types):
+        return value.item()
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable_builtin(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_jsonable_builtin(v) for v in value]
+    if isinstance(value, Enum):
+        return value.value
+    return value
 
 
 # ============ API Endpoints ============
@@ -114,7 +138,7 @@ async def get_task_information_api(task_id: str):
     """
     查询任务信息
     """
-    logger.info(f"查询任务信息: {task_id}")
+    logger.debug(f"查询任务信息: {task_id}")
 
     supabase_client = SupabaseClient()
 
@@ -136,7 +160,7 @@ async def list_tasks_api(request: Request):
     if not user_id:
         raise HTTPException(status_code=400, detail="Missing user_id")
 
-    logger.info(f"列出所有任务: {user_id}")
+    logger.debug(f"列出所有任务: {user_id}")
     supabase_client = SupabaseClient()
     all_tasks = supabase_client.get_all_tasks(user_id)
     return {"tasks": all_tasks}
@@ -286,6 +310,239 @@ async def get_chat_messages_api(chat_id: str):
     supabase_client = SupabaseClient()
     messages = supabase_client.get_chat_messages(chat_id)
     return {"messages": messages}
+
+
+# ============ Agent Mode Endpoints ============
+
+@app.post("/agent/chat")
+async def agent_chat_api(request: Request):
+    """
+    Agent 模式问答接口
+    
+    与 RAG 模式不同，Agent 模式会：
+    1. 分析问题意图并制定探索计划
+    2. 迭代式收集上下文（使用 RAG、代码图谱、文件读取等工具）
+    3. 自我反思评估信息充分性
+    4. 生成带有 Mermaid 图表和精确溯源的答案
+    
+    Request Body:
+        question: 用户问题
+        repo_url: 仓库 URL
+        user_id: 用户 ID
+        chat_id: 会话 ID（可选，不传则创建新会话）
+        conversation_history: 对话历史（可选）
+        current_page_context: 当前页面上下文（可选）
+        
+    Response:
+        answer: 最终答案
+        mermaid: Mermaid 图表代码（可选）
+        sources: 引用来源列表
+        trajectory: Agent 推理轨迹
+        confidence: 置信度分数
+        iterations: 迭代次数
+        chat_id: 会话 ID
+        repo_url: 仓库 URL
+    """
+    try:
+        data = await request.json()
+        question = data.get("question")
+        repo_url = data.get("repo_url")
+        user_id = data.get("user_id")
+        chat_id = data.get("chat_id")
+        conversation_history = data.get("conversation_history")
+        current_page_context = data.get("current_page_context")
+
+        if not question or not repo_url or not user_id:
+            raise HTTPException(status_code=400, detail="Missing question, repo_url or user_id")
+
+        supabase_client = SupabaseClient()
+        
+        if not chat_id:
+            chat_session = supabase_client.create_chat_history(user_id, repo_url)
+            if not chat_session:
+                raise HTTPException(status_code=500, detail="创建会话失败")
+            chat_id = chat_session["id"]
+        
+        supabase_client.add_chat_message(chat_id, "user", question)
+
+        repo_info = supabase_client.get_repo_information(repo_url)
+        if not repo_info or not repo_info.get("vector_store_path"):
+            raise HTTPException(
+                status_code=404,
+                detail="未找到该仓库的向量索引。请先通过 /generate 接口生成文档。"
+            )
+        
+        vector_store_path = repo_info["vector_store_path"]
+        graph_path = repo_info.get("graph_path")
+        repo_root = repo_info.get("repo_root")
+        
+        enhanced_question = question
+        if current_page_context:
+            enhanced_question = f"[当前页面上下文: {current_page_context}]\n\n用户问题: {question}"
+        
+        logger.info(f"Agent 模式问答开始: question={question[:50]}... repo_url={repo_url}")
+        
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: run_agent(
+                question=enhanced_question,
+                repo_url=repo_url,
+                vector_store_path=vector_store_path,
+                graph_path=graph_path,
+                repo_root=repo_root,
+                conversation_history=conversation_history,
+                max_iterations=5
+            )
+        )
+        
+        answer = str(result.get("answer", ""))
+        sources = list(result.get("sources", []))
+        mermaid = result.get("mermaid")
+        trajectory = result.get("trajectory", [])
+        confidence = float(result.get("confidence", 0.0))
+        iterations = int(result.get("iterations", 0))
+
+        metadata = {
+            "sources": sources,
+            "mermaid": mermaid,
+            "trajectory": trajectory,
+            "confidence": confidence,
+            "iterations": iterations,
+            "mode": "agent"
+        }
+        metadata = _to_jsonable_builtin(metadata)
+        supabase_client.add_chat_message(
+            chat_id, 
+            "assistant", 
+            answer, 
+            metadata
+        )
+        
+        logger.info(f"Agent 模式问答完成: iterations={iterations}, confidence={confidence:.2f}")
+        
+        return _to_jsonable_builtin({
+            "answer": answer,
+            "mermaid": mermaid,
+            "sources": sources,
+            "trajectory": trajectory,
+            "confidence": confidence,
+            "iterations": iterations,
+            "chat_id": chat_id,
+            "repo_url": repo_url
+        })
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Agent 问答过程中发生异常:")
+        raise HTTPException(status_code=500, detail=f"Agent 问答失败: {str(e)}")
+
+
+@app.post("/agent/chat/stream")
+async def agent_chat_stream_api(request: Request):
+    """
+    Agent 模式流式问答接口 (Server-Sent Events)
+    
+    实时返回 Agent 的思考过程和工具调用轨迹。
+    
+    Request Body:
+        与 /agent/chat 相同
+        
+    Response (SSE):
+        event: planning | tool_call | evaluation | synthesis | complete | error
+        data: JSON 格式的事件数据
+    """
+    try:
+        data = await request.json()
+        question = data.get("question")
+        repo_url = data.get("repo_url")
+        user_id = data.get("user_id")
+        chat_id = data.get("chat_id")
+        conversation_history = data.get("conversation_history")
+        current_page_context = data.get("current_page_context")
+
+        if not question or not repo_url or not user_id:
+            raise HTTPException(status_code=400, detail="Missing question, repo_url or user_id")
+
+        supabase_client = SupabaseClient()
+
+        if not chat_id:
+            chat_session = supabase_client.create_chat_history(user_id, repo_url)
+            if not chat_session:
+                raise HTTPException(status_code=500, detail="创建会话失败")
+            chat_id = chat_session["id"]
+
+        supabase_client.add_chat_message(chat_id, "user", question)
+        
+        repo_info = supabase_client.get_repo_information(repo_url)
+        if not repo_info or not repo_info.get("vector_store_path"):
+            raise HTTPException(
+                status_code=404,
+                detail="未找到该仓库的向量索引。请先通过 /generate 接口生成文档。"
+            )
+        
+        vector_store_path = repo_info["vector_store_path"]
+        graph_path = repo_info.get("graph_path")
+        repo_root = repo_info.get("repo_root")
+        
+        enhanced_question = question
+        if current_page_context:
+            enhanced_question = f"[当前页面上下文: {current_page_context}]\n\n用户问题: {question}"
+
+        async def event_generator():
+            runner = AgentRunner(
+                vector_store_path=vector_store_path,
+                graph_path=graph_path,
+                repo_root=repo_root,
+                max_iterations=5
+            )
+
+            async for event in runner.run_streaming(
+                question=enhanced_question,
+                repo_url=repo_url,
+                conversation_history=conversation_history
+            ):
+                if event.event_type == "final_result":
+                    payload = _to_jsonable_builtin(event.data)
+                    payload["chat_id"] = chat_id
+                    payload["repo_url"] = repo_url
+
+                    answer = str(payload.get("answer", ""))
+                    sources = list(payload.get("sources", []))
+                    metadata = _to_jsonable_builtin({
+                        "sources": sources,
+                        "mermaid": payload.get("mermaid"),
+                        "trajectory": payload.get("trajectory", []),
+                        "confidence": float(payload.get("confidence", 0.0)),
+                        "iterations": int(payload.get("iterations", 0)),
+                        "mode": "agent",
+                    })
+                    supabase_client.add_chat_message(chat_id, "assistant", answer, metadata)
+
+                    yield f"event: complete\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                elif event.event_type == "error":
+                    payload = _to_jsonable_builtin(event.data)
+                    yield f"event: error\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                else:
+                    payload = _to_jsonable_builtin(event.data)
+                    yield f"event: {event.event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Agent 流式问答过程中发生异常:")
+        raise HTTPException(status_code=500, detail=f"Agent 流式问答失败: {str(e)}")
 
 
 if __name__ == "__main__":

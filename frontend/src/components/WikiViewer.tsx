@@ -67,9 +67,9 @@ const SidebarItem = React.memo(({
         className={cn(
           "w-full text-left px-3 py-2 rounded-lg text-sm transition-all duration-200 flex items-center gap-2",
           isSelected
-            ? "bg-primary/20 text-blue-300 font-medium"
-            : "text-muted-foreground hover:bg-white/5 hover:text-white",
-          depth > 0 && "ml-4 border-l border-white/10"
+            ? "bg-fuchsia-500/15 text-fuchsia-200 font-medium border border-fuchsia-300/25"
+            : "text-zinc-400 hover:bg-white/5 hover:text-white border border-transparent",
+          depth > 0 && "ml-4 border-l border-white/15"
         )}
         aria-label={`Select ${item.title}`}
       >
@@ -306,7 +306,7 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl 
   if (loading && !structure.length) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+        <Loader2 className="w-8 h-8 text-fuchsia-300 animate-spin" />
       </div>
     );
   }
@@ -321,11 +321,11 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl 
 
   return (
     <>
-      <div className="flex h-[80vh] w-full max-w-[1400px] bg-secondary/30 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
-        <aside className="hidden md:flex w-64 lg:w-72 flex-col border-r border-white/10 bg-black/20">
-          <div className="p-4 border-b border-white/10">
+      <div className="flex h-[80vh] w-full max-w-[1400px] bg-[linear-gradient(150deg,rgba(21,14,42,0.72),rgba(10,10,24,0.72))] backdrop-blur-2xl border border-white/15 rounded-3xl overflow-hidden shadow-[0_30px_100px_rgba(76,29,149,0.35)]">
+        <aside className="hidden md:flex w-64 lg:w-72 flex-col border-r border-white/15 bg-black/25">
+          <div className="p-4 border-b border-white/15">
             <h2 className="font-semibold text-white/90 flex items-center gap-2">
-              <Book className="w-5 h-5 text-blue-400" />
+              <Book className="w-5 h-5 text-fuchsia-300" />
               Documentation
             </h2>
           </div>
@@ -343,10 +343,10 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl 
           </nav>
         </aside>
 
-        <div className="md:hidden absolute top-0 left-0 right-0 h-14 bg-secondary/80 border-b border-white/10 flex items-center px-4 z-20 backdrop-blur">
+        <div className="md:hidden absolute top-0 left-0 right-0 h-14 bg-black/45 border-b border-white/15 flex items-center px-4 z-20 backdrop-blur-xl">
           <button 
             onClick={() => setMobileMenuOpen(true)} 
-            className="p-2 -ml-2 text-white/70"
+            className="p-2 -ml-2 text-zinc-200"
             aria-label="Open menu"
           >
             <Menu className="w-6 h-6" />
@@ -368,9 +368,9 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl 
                 initial={{ x: '-100%' }}
                 animate={{ x: 0 }}
                 exit={{ x: '-100%' }}
-                className="absolute top-0 bottom-0 left-0 w-64 bg-secondary border-r border-white/10 z-40 md:hidden flex flex-col"
+                className="absolute top-0 bottom-0 left-0 w-64 bg-[linear-gradient(160deg,rgba(16,11,31,0.98),rgba(9,8,20,0.98))] border-r border-white/15 z-40 md:hidden flex flex-col"
               >
-                <div className="p-4 border-b border-white/10 flex justify-between items-center">
+                <div className="p-4 border-b border-white/15 flex justify-between items-center">
                   <h2 className="font-semibold text-white/90">Documentation</h2>
                   <button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu">
                     <ChevronLeft className="w-5 h-5" />
@@ -395,19 +395,19 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl 
 
         <main className="flex-1 relative overflow-hidden flex flex-col bg-transparent">
           {loadingPage && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/10 backdrop-blur-sm z-10">
-              <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-sm z-10">
+              <Loader2 className="w-8 h-8 text-fuchsia-300 animate-spin" />
             </div>
           )}
 
           <div className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar scroll-smooth">
             {pageContent ? (
               <div className="max-w-4xl mx-auto space-y-8 pb-10 mt-10 md:mt-0">
-                <div className="space-y-2 border-b border-white/10 pb-6">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                <div className="space-y-2 border-b border-white/15 pb-6">
+                  <div className="flex items-center gap-2 text-sm text-zinc-400 mb-2">
                     {pageContent.breadcrumb.split('/').map((part, i, arr) => (
                       <React.Fragment key={i}>
-                        <span className={i === arr.length - 1 ? "text-blue-400" : ""}>{part.trim()}</span>
+                        <span className={i === arr.length - 1 ? "text-fuchsia-200" : ""}>{part.trim()}</span>
                         {i < arr.length - 1 && <ChevronRight className="w-3 h-3 opacity-50" />}
                       </React.Fragment>
                     ))}
@@ -417,7 +417,7 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl 
                   </h1>
                 </div>
 
-                <div className="prose prose-invert prose-lg max-w-none prose-headings:font-bold prose-headings:text-white prose-p:text-gray-300 prose-a:text-blue-400 hover:prose-a:text-blue-300 prose-code:text-blue-200 prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-img:rounded-xl">
+                <div className="prose prose-invert prose-lg max-w-none prose-headings:font-bold prose-headings:text-white prose-p:text-zinc-300 prose-a:text-fuchsia-300 hover:prose-a:text-fuchsia-200 prose-code:text-cyan-200 prose-pre:bg-black/45 prose-pre:border prose-pre:border-white/15 prose-img:rounded-xl">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeHighlight]}
@@ -428,7 +428,7 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl 
 
                 {pageContent.content.mermaid && (
                   <div className="my-8">
-                    <div className="text-sm text-muted-foreground mb-2 font-mono uppercase tracking-widest text-xs">Workflow Diagram</div>
+                    <div className="text-sm text-zinc-400 mb-2 font-mono uppercase tracking-widest text-xs">Workflow Diagram</div>
                     <Mermaid chart={pageContent.content.mermaid} />
                   </div>
                 )}
@@ -437,10 +437,10 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl 
                   {pageContent.content.sections.map((section, idx) => (
                     <section key={idx} className="scroll-mt-20">
                       <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2 group">
-                        <span className="w-1 h-6 bg-blue-500 rounded-full group-hover:h-8 transition-all duration-300"/>
+                        <span className="w-1 h-6 bg-gradient-to-b from-fuchsia-400 to-cyan-400 rounded-full group-hover:h-8 transition-all duration-300"/>
                         {section.heading}
                       </h2>
-                      <div className="prose prose-invert prose-lg max-w-none prose-p:text-gray-300 prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10">
+                      <div className="prose prose-invert prose-lg max-w-none prose-p:text-zinc-300 prose-pre:bg-black/45 prose-pre:border prose-pre:border-white/15">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           rehypePlugins={[rehypeHighlight]}
@@ -453,7 +453,7 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl 
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <div className="flex flex-col items-center justify-center h-full text-zinc-400">
                 <FileText className="w-12 h-12 mb-4 opacity-20" />
                 <p>Select a page to view content</p>
               </div>

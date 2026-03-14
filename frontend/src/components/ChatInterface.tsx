@@ -10,10 +10,15 @@ import {
   Zap,
   X,
   ArrowLeft,
-  CheckCircle2
+  CheckCircle2,
+  Bot,
+  Search,
+  GitBranch,
+  FileCode,
+  Map
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { api, ChatMessage, ChatResponse } from '@/lib/api';
+import { api, ChatMessage, ChatResponse, AgentChatResponse, ChatMode } from '@/lib/api';
 import { MessageItem, DisplayMessage } from './MessageItem';
 
 interface ChatInterfaceProps {
@@ -30,11 +35,15 @@ export default function ChatInterface({
   currentPageTitle 
 }: ChatInterfaceProps) {
   const [mode, setMode] = useState<'bar' | 'full'>('bar');
+  const [chatMode, setChatMode] = useState<ChatMode>('rag');
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState<string>('');
   const [scannedFiles, setScannedFiles] = useState<string[]>([]);
   const [chatId, setChatId] = useState<string | undefined>(undefined);
+  const [lastTrajectory, setLastTrajectory] = useState<DisplayMessage['trajectory']>([]);
+  const [liveAgentLogs, setLiveAgentLogs] = useState<string[]>([]);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -90,34 +99,144 @@ export default function ChatInterface({
       role: 'user',
       content: question,
       timestamp: new Date(),
+      mode: chatMode,
     };
     setMessages(prev => [...prev, userMessage]);
 
     setIsLoading(true);
-    setScannedFiles([]); 
+    setScannedFiles([]);
+    setLiveAgentLogs([]);
+    setLoadingStatus(chatMode === 'agent' ? '分析问题意图...' : 'Thinking...');
 
     try {
-      const response: ChatResponse = await api.askQuestion({
-        user_id: userId,
-        question,
-        repo_url: repoUrl,
-        chat_id: chatId,
-        conversation_history: buildConversationHistory(),
-        current_page_context: currentPageContext,
-      });
-      setChatId(response.chat_id);
+      if (chatMode === 'agent') {
+        // Agent mode (streaming)
+        setLoadingStatus('Agent 正在规划探索路径...');
 
-      const assistantMessage: DisplayMessage = {
-        id: generateId(),
-        role: 'assistant',
-        content: response.answer,
-        timestamp: new Date(),
-        sources: response.sources,
-      };
-      setMessages(prev => [...prev, assistantMessage]);
-      
-      if (response.sources) {
-        setScannedFiles(response.sources);
+        const appendLiveLog = (line: string) => {
+          setLiveAgentLogs(prev => [...prev.slice(-7), line]);
+        };
+
+        let finalResponse: AgentChatResponse | null = null;
+        for await (const event of api.askAgentQuestionStream({
+          user_id: userId,
+          question,
+          repo_url: repoUrl,
+          chat_id: chatId,
+          conversation_history: buildConversationHistory(),
+          current_page_context: currentPageContext,
+        })) {
+          if (event.type === 'planning') {
+            const status = String(event.data.status || '正在分析问题...');
+            setLoadingStatus(status);
+            appendLiveLog(`🧭 ${status}`);
+            continue;
+          }
+
+          if (event.type === 'tool_call') {
+            const status = String(event.data.status || '');
+            if (status === 'start') {
+              const tools = Array.isArray(event.data.tools) ? event.data.tools : [];
+              const names = tools
+                .map((item) => (item && typeof item === 'object' && 'tool' in item ? String(item.tool) : null))
+                .filter(Boolean)
+                .join(' + ');
+              const line = names ? `并行执行工具: ${names}` : '开始执行工具...';
+              setLoadingStatus(line);
+              appendLiveLog(`🔧 ${line}`);
+            } else if (status === 'done') {
+              const elapsed = Number(event.data.elapsed_ms || 0);
+              const line = `工具执行完成 (${elapsed}ms)`;
+              setLoadingStatus(line);
+              appendLiveLog(`✅ ${line}`);
+            } else {
+              const line = '执行工具中...';
+              setLoadingStatus(line);
+              appendLiveLog(`🔍 ${line}`);
+            }
+            continue;
+          }
+
+          if (event.type === 'evaluation') {
+            const status = String(event.data.status || '');
+            if (status === 'done') {
+              const confidence = Number(event.data.confidence ?? 0);
+              const percentage = Number.isFinite(confidence) ? Math.round(confidence * 100) : 0;
+              const line = `评估上下文充分性（置信度 ${percentage}%）`;
+              setLoadingStatus(line);
+              appendLiveLog(`📊 ${line}`);
+            }
+            continue;
+          }
+
+          if (event.type === 'synthesis') {
+            const line = String(event.data.status || '') === 'done'
+              ? '答案合成完成'
+              : '正在生成最终答案...';
+            setLoadingStatus(line);
+            appendLiveLog(`🧠 ${line}`);
+            continue;
+          }
+
+          if (event.type === 'error') {
+            const errorDetail = String(event.data.error || event.data.detail || 'Agent stream failed');
+            throw new Error(errorDetail);
+          }
+
+          if (event.type === 'complete') {
+            finalResponse = event.data as unknown as AgentChatResponse;
+          }
+        }
+
+        if (!finalResponse) {
+          throw new Error('Agent 未返回最终结果');
+        }
+
+        setChatId(finalResponse.chat_id);
+
+        const assistantMessage: DisplayMessage = {
+          id: generateId(),
+          role: 'assistant',
+          content: finalResponse.answer,
+          timestamp: new Date(),
+          sources: finalResponse.sources,
+          mode: 'agent',
+          mermaid: finalResponse.mermaid,
+          trajectory: finalResponse.trajectory,
+          confidence: finalResponse.confidence,
+          iterations: finalResponse.iterations,
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+        setLastTrajectory(finalResponse.trajectory);
+        
+        if (finalResponse.sources) {
+          setScannedFiles(finalResponse.sources);
+        }
+      } else {
+        // RAG mode
+        const response: ChatResponse = await api.askQuestion({
+          user_id: userId,
+          question,
+          repo_url: repoUrl,
+          chat_id: chatId,
+          conversation_history: buildConversationHistory(),
+          current_page_context: currentPageContext,
+        });
+        setChatId(response.chat_id);
+
+        const assistantMessage: DisplayMessage = {
+          id: generateId(),
+          role: 'assistant',
+          content: response.answer,
+          timestamp: new Date(),
+          sources: response.sources,
+          mode: 'rag',
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+        
+        if (response.sources) {
+          setScannedFiles(response.sources);
+        }
       }
 
     } catch (err) {
@@ -129,10 +248,13 @@ export default function ChatInterface({
         content: errorMessage,
         timestamp: new Date(),
         isError: true,
+        mode: chatMode,
       };
       setMessages(prev => [...prev, errorDisplayMessage]);
     } finally {
       setIsLoading(false);
+      setLoadingStatus('');
+      setLiveAgentLogs([]);
     }
   };
 
@@ -163,11 +285,26 @@ export default function ChatInterface({
             className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 w-full max-w-2xl px-4"
           >
             <div className="relative group">
-              <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <div className="relative bg-[#0A0A0A]/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col transition-all focus-within:ring-1 focus-within:ring-blue-500/50">
+              <div className={cn(
+                "absolute inset-0 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500",
+                chatMode === 'agent' 
+                  ? "bg-gradient-to-r from-purple-500/20 to-fuchsia-500/20" 
+                  : "bg-gradient-to-r from-blue-500/20 to-purple-500/20"
+              )} />
+              <div className={cn(
+                "relative bg-[#0A0A0A]/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col transition-all focus-within:ring-1",
+                chatMode === 'agent' ? "focus-within:ring-purple-500/50" : "focus-within:ring-blue-500/50"
+              )}>
                 <div className="flex items-end gap-2 p-3">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500/10 mb-1 shrink-0">
-                    <Sparkles className="w-4 h-4 text-blue-400" />
+                  <div className={cn(
+                    "flex items-center justify-center w-8 h-8 rounded-lg mb-1 shrink-0",
+                    chatMode === 'agent' ? "bg-purple-500/10" : "bg-blue-500/10"
+                  )}>
+                    {chatMode === 'agent' ? (
+                      <Bot className="w-4 h-4 text-purple-400" />
+                    ) : (
+                      <Sparkles className="w-4 h-4 text-blue-400" />
+                    )}
                   </div>
                   <textarea
                     ref={inputRef}
@@ -185,7 +322,9 @@ export default function ChatInterface({
                     className={cn(
                       "p-2 rounded-lg transition-all mb-0.5",
                       inputValue.trim() && !isLoading
-                        ? "bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-500/20"
+                        ? chatMode === 'agent'
+                          ? "bg-purple-600 text-white hover:bg-purple-500 shadow-lg shadow-purple-500/20"
+                          : "bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-500/20"
                         : "bg-white/5 text-muted-foreground cursor-not-allowed"
                     )}
                     aria-label="Send message"
@@ -194,10 +333,28 @@ export default function ChatInterface({
                   </button>
                 </div>
                 <div className="px-4 pb-2 flex items-center gap-3 text-[10px] text-muted-foreground/70">
-                  <div className="flex items-center gap-1">
-                    <Zap className="w-3 h-3 text-yellow-500/70" />
-                    <span>Fast Model</span>
-                  </div>
+                  {/* Mode Toggle */}
+                  <button
+                    onClick={() => setChatMode(chatMode === 'rag' ? 'agent' : 'rag')}
+                    className={cn(
+                      "flex items-center gap-1.5 px-2 py-1 rounded-full transition-all",
+                      chatMode === 'agent' 
+                        ? "bg-purple-500/20 text-purple-300 border border-purple-500/30" 
+                        : "bg-blue-500/10 text-blue-400/80 border border-transparent hover:border-blue-500/30"
+                    )}
+                  >
+                    {chatMode === 'agent' ? (
+                      <>
+                        <Bot className="w-3 h-3" />
+                        <span>Agent 模式</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-3 h-3" />
+                        <span>RAG 模式</span>
+                      </>
+                    )}
+                  </button>
                   {currentPageTitle && (
                     <div className="flex items-center gap-1 max-w-[200px] truncate">
                       <FileText className="w-3 h-3 text-blue-400/70" />
@@ -237,13 +394,37 @@ export default function ChatInterface({
                   </>
                 )}
               </div>
-              <button 
-                onClick={() => setMode('bar')}
-                className="p-2 text-muted-foreground hover:text-white transition-colors"
-                aria-label="Close chat"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-3">
+                {/* Mode Toggle in Full View */}
+                <button
+                  onClick={() => setChatMode(chatMode === 'rag' ? 'agent' : 'rag')}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                    chatMode === 'agent' 
+                      ? "bg-purple-500/20 text-purple-300 border border-purple-500/30" 
+                      : "bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20"
+                  )}
+                >
+                  {chatMode === 'agent' ? (
+                    <>
+                      <Bot className="w-3.5 h-3.5" />
+                      <span>Agent 模式</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>RAG 模式</span>
+                    </>
+                  )}
+                </button>
+                <button 
+                  onClick={() => setMode('bar')}
+                  className="p-2 text-muted-foreground hover:text-white transition-colors"
+                  aria-label="Close chat"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </header>
 
             <div className="flex-1 flex overflow-hidden">
@@ -257,10 +438,26 @@ export default function ChatInterface({
                   
                   {isLoading && (
                     <div className="max-w-3xl mx-auto pl-12">
-                      <div className="flex items-center gap-2 text-muted-foreground text-sm animate-pulse">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Thinking...</span>
+                      <div className={cn(
+                        "flex items-center gap-2 text-sm",
+                        chatMode === 'agent' ? "text-purple-300" : "text-muted-foreground"
+                      )}>
+                        {chatMode === 'agent' ? (
+                          <Bot className="w-4 h-4 animate-pulse" />
+                        ) : (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        )}
+                        <span>{loadingStatus || 'Thinking...'}</span>
                       </div>
+                      {chatMode === 'agent' && liveAgentLogs.length > 0 && (
+                        <div className="mt-3 space-y-1">
+                          {liveAgentLogs.map((log, index) => (
+                            <div key={`${log}-${index}`} className="text-xs text-zinc-400 font-mono">
+                              {log}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                   <div ref={messagesEndRef} className="h-4" />
@@ -287,7 +484,9 @@ export default function ChatInterface({
                           className={cn(
                             "p-1.5 rounded-lg transition-all",
                             inputValue.trim() && !isLoading
-                              ? "bg-blue-600 text-white hover:bg-blue-500"
+                              ? chatMode === 'agent'
+                                ? "bg-purple-600 text-white hover:bg-purple-500"
+                                : "bg-blue-600 text-white hover:bg-blue-500"
                               : "bg-white/5 text-muted-foreground cursor-not-allowed"
                           )}
                           aria-label="Send follow-up"
@@ -301,10 +500,11 @@ export default function ChatInterface({
               </div>
 
               <aside className="hidden lg:flex w-80 border-l border-white/10 bg-white/[0.02] flex-col">
+                {/* Sources Section */}
                 <div className="p-4 border-b border-white/5">
                   <h3 className="text-sm font-medium text-white/80 flex items-center gap-2">
                     <FileText className="w-4 h-4 text-blue-400" />
-                    Relevant Sources
+                    引用来源
                   </h3>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
@@ -324,10 +524,56 @@ export default function ChatInterface({
                     </div>
                   ) : (
                     <div className="text-center py-8 text-muted-foreground/40 text-xs">
-                      No sources scanned yet.
+                      暂无引用来源
                     </div>
                   )}
                 </div>
+                
+                {/* Agent Trajectory Section (only show in Agent mode) */}
+                {chatMode === 'agent' && lastTrajectory && lastTrajectory.length > 0 && (
+                  <>
+                    <div className="p-4 border-t border-white/5">
+                      <h3 className="text-sm font-medium text-white/80 flex items-center gap-2">
+                        <Bot className="w-4 h-4 text-purple-400" />
+                        Agent 探索轨迹
+                      </h3>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 custom-scrollbar max-h-64">
+                      <div className="space-y-2">
+                        {lastTrajectory.map((step, idx) => (
+                          <div 
+                            key={idx}
+                            className={cn(
+                              "flex items-start gap-2 p-2 rounded-lg transition-colors",
+                              step.success ? "bg-white/[0.02]" : "bg-red-500/5"
+                            )}
+                          >
+                            <div className={cn(
+                              "w-5 h-5 rounded flex items-center justify-center shrink-0 mt-0.5",
+                              step.success ? "bg-purple-500/20 text-purple-300" : "bg-red-500/20 text-red-300"
+                            )}>
+                              {step.tool === 'rag_search' && <Search className="w-3 h-3" />}
+                              {step.tool === 'code_graph' && <GitBranch className="w-3 h-3" />}
+                              {step.tool === 'file_read' && <FileCode className="w-3 h-3" />}
+                              {step.tool === 'repo_map' && <Map className="w-3 h-3" />}
+                              {!['rag_search', 'code_graph', 'file_read', 'repo_map'].includes(step.tool) && (
+                                <Sparkles className="w-3 h-3" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[10px] font-mono text-zinc-500">
+                                Step {step.step}: {step.tool}
+                              </div>
+                              <div className="text-xs text-zinc-400 truncate">
+                                {step.description}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
               </aside>
             </div>
           </motion.div>
