@@ -5,9 +5,7 @@ CREATE TABLE public.chat_history (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
   repo_url text NOT NULL,
-  r2_chat_url text,
   preview_text text,
-  message_count integer DEFAULT 0 CHECK (message_count >= 0),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   title text,
@@ -40,6 +38,7 @@ CREATE TABLE public.repositories (
   r2_content_urls ARRAY,
   last_updated timestamp with time zone NOT NULL DEFAULT now(),
   vector_store_path text,
+  description text,
   CONSTRAINT repositories_pkey PRIMARY KEY (repo_url)
 );
 CREATE TABLE public.tasks (

@@ -130,11 +130,16 @@ class SupabaseClient:
         if not self.client:
             return False
         try:
-            self.client.table("tasks").update({
+            response = self.client.table("tasks").update({
                 "progress": progress,
                 "current_step": current_step,
                 "last_updated": "now()"
             }).eq("task_id", task_id).execute()
+            
+            # If no data returned, it means no rows were updated (task likely deleted)
+            if not response.data:
+                return False
+                
             return True
         except Exception as e:
             print(f"[Supabase] Error updating task progress: {e}")
@@ -157,25 +162,37 @@ class SupabaseClient:
             if error is not None:
                 update_data["error"] = error
             
-            self.client.table("tasks").update(update_data).eq("task_id", task_id).execute()
+            response = self.client.table("tasks").update(update_data).eq("task_id", task_id).execute()
+            
+            # If no data returned, it means no rows were updated (task likely deleted)
+            if not response.data:
+                return False
+
             return True
         except Exception as e:
             print(f"[Supabase] Error updating task status: {e}")
             return False
 
-    def delete_task(self, task_id: str):
+    def delete_task(self, task_id: str, user_id: str):
         """
         Delete a task from Supabase.
+        Only deletes if task belongs to the given user.
         """
         if not self.client:
             return False
         try:
-            # Check if task is processing
-            task = self.get_task(task_id)
-            if task and task.get("status") == "processing":
+            task = (
+                self.client.table("tasks")
+                .select("task_id, user_id, status")
+                .eq("task_id", task_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            if not task.data or len(task.data) == 0:
                 return False
-                
-            self.client.table("tasks").delete().eq("task_id", task_id).execute()
+
+            self.client.table("tasks").delete().eq("task_id", task_id).eq("user_id", user_id).execute()
             return True
         except Exception as e:
             print(f"[Supabase] Error deleting task: {e}")
@@ -288,7 +305,7 @@ class SupabaseClient:
 
     # ============ Chat Related Methods ============
 
-    def create_chat_history(self, user_id: str, repo_url: str, title: Optional[str] = None):
+    def create_chat_history(self, user_id: str, repo_url: str, title: Optional[str] = None, preview_text: Optional[str] = None):
         """
         Create a new chat history session.
         """
@@ -301,8 +318,7 @@ class SupabaseClient:
                 "user_id": user_id,
                 "repo_url": repo_url,
                 "title": title or f"Chat about {repo_url.split('/')[-1]}",
-                "created_at": "now()",
-                "updated_at": "now()"
+                "preview_text": preview_text or "New Chat",
             }
             response = self.client.table("chat_history").insert(data).execute()
             if response.data:
@@ -315,6 +331,7 @@ class SupabaseClient:
     def get_user_chat_history(self, user_id: str):
         """
         Get all chat history sessions for a user.
+        Returns list with chat_id alias (chat_history.id is the chat identifier).
         """
         if not self.client:
             return []
@@ -324,7 +341,11 @@ class SupabaseClient:
                 .eq("user_id", user_id)\
                 .order("updated_at", desc=True)\
                 .execute()
-            return response.data
+            # Ensure chat_id is present for frontend compatibility (id === chat_id)
+            return [
+                {**row, "chat_id": row.get("id")} if "chat_id" not in row else row
+                for row in (response.data or [])
+            ]
         except Exception as e:
             print(f"[Supabase] Error getting user chat history: {e}")
             return []
@@ -373,7 +394,37 @@ class SupabaseClient:
         except Exception as e:
             print(f"[Supabase] Error adding chat message: {e}")
             return None
-    def update_repository_information(self, repo_url: str, r2_structure_url: Optional[str], r2_content_urls: Optional[List[str]], vector_store_path: Optional[str]):
+
+    def delete_chat_history(self, chat_id: str, user_id: str) -> bool:
+        """
+        Delete a chat history session and its messages.
+        Only deletes if the chat belongs to the given user.
+        Must delete chat_messages first (child) then chat_history (parent).
+        """
+        if not self.client:
+            return False
+        try:
+            # Verify chat belongs to user
+            chat_row = (
+                self.client.table("chat_history")
+                .select("id, user_id")
+                .eq("id", chat_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+            if not chat_row.data or len(chat_row.data) == 0:
+                return False
+
+            # Delete child records first (chat_messages)
+            self.client.table("chat_messages").delete().eq("chat_id", chat_id).execute()
+            # Delete parent record (chat_history)
+            self.client.table("chat_history").delete().eq("id", chat_id).execute()
+            return True
+        except Exception as e:
+            print(f"[Supabase] Error deleting chat history: {e}")
+            return False
+
+    def update_repository_information(self, repo_url: str, r2_structure_url: Optional[str], r2_content_urls: Optional[List[str]], vector_store_path: Optional[str], description: Optional[str] = None):
         """
         Update repository information in Supabase using upsert.
         """
@@ -394,6 +445,8 @@ class SupabaseClient:
                 data["r2_content_urls"] = r2_content_urls
             if vector_store_path is not None:
                 data["vector_store_path"] = vector_store_path
+            if description is not None:
+                data["description"] = description
 
             self.client.table("repositories").upsert(data).execute()
             print(f"[Supabase] Upserted repository information for {repo_url}")

@@ -38,14 +38,21 @@ DEFAULT_WIKI_SECTION_JSON_OUTPUT: Path = PROJECT_ROOT / "wiki_section_json"
 
 # Vector store 根目录 (Fly.io 持久化卷挂载点或本地开发目录)
 VECTOR_STORE_ROOT: Path = Path(os.getenv("VECTOR_STORE_PATH", str(PROJECT_ROOT / "vector_stores")))
+# 默认使用项目内 data/repos，本地开发可写；Docker 通过 REPO_STORE_PATH=/data/repos 覆盖
+REPO_STORE_ROOT: Path = Path(os.getenv("REPO_STORE_PATH", str(PROJECT_ROOT / "data" / "repos"))).expanduser()
 
 
 def _update_progress(task_id: Optional[str], progress: float, step: str):
     """内部辅助函数，同步更新任务进度到 Supabase"""
     if task_id:
         try:
-            SupabaseClient().update_task_progress(task_id, progress, step)
+            success = SupabaseClient().update_task_progress(task_id, progress, step)
+            if not success:
+                logger.warning(f"Task {task_id} not found (likely deleted), aborting...")
+                raise InterruptedError(f"Task {task_id} was deleted.")
         except Exception as e:
+            if isinstance(e, InterruptedError):
+                raise
             logger.warning(f"更新任务进度失败: {e}")
 
 
@@ -185,8 +192,20 @@ def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output
     """
     if repo_path and Path(repo_path).exists():
         try:
-            shutil.rmtree(repo_path)
-            logger.info(f"[清理] 已删除克隆的仓库目录: {repo_path}")
+            repo_path_obj = Path(repo_path).expanduser().resolve()
+            repo_store_root = REPO_STORE_ROOT.resolve()
+            is_persistent_repo = False
+            try:
+                repo_path_obj.relative_to(repo_store_root)
+                is_persistent_repo = True
+            except ValueError:
+                is_persistent_repo = False
+
+            if is_persistent_repo:
+                logger.info(f"[清理] 跳过删除持久化仓库目录: {repo_path_obj}")
+            else:
+                shutil.rmtree(repo_path_obj)
+                logger.info(f"[清理] 已删除克隆的仓库目录: {repo_path_obj}")
         except Exception as e:
             logger.warning(f"[清理警告] 删除仓库目录失败: {repo_path}, 错误: {e}")
 
@@ -205,6 +224,45 @@ def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output
             logger.warning(f"[清理警告] 删除 wiki_section_json 目录失败: {json_output_dir}, 错误: {e}")
 
 
+def _generate_repo_description(repo_path: str, repo_url: str) -> str:
+    """
+    Generate a short description for the repository using LLM.
+    """
+    try:
+        # Try to read README
+        readme_content = ""
+        repo_dir = Path(repo_path)
+        for name in ["README.md", "readme.md", "README.txt", "readme.txt"]:
+            readme_path = repo_dir / name
+            if readme_path.exists():
+                try:
+                    readme_content = readme_path.read_text(encoding="utf-8", errors="replace")[:2000]
+                    break
+                except Exception:
+                    continue
+        
+        provider, model = get_model_config(CONFIG, "chat") # Use chat model for description
+        client = get_ai_client(provider, model=model)
+        
+        prompt = f"""
+Based on the following repository information, generate a very concise description (max 20 words) for this project.
+Focus on its main purpose and functionality. Do not include phrases like "This repository contains" or "This project is". Just the description.
+
+Repository URL: {repo_url}
+README Excerpt:
+{readme_content}
+
+Description:
+"""
+        messages = [{"role": "user", "content": prompt}]
+        response = client.chat(messages, temperature=0.3, max_tokens=100)
+        description = response.strip().strip('"').strip("'")
+        return description
+    except Exception as e:
+        logger.warning(f"Failed to generate repo description: {e}")
+        return f"Repository: {repo_url.split('/')[-1]}"
+
+
 async def execute_generation_task(task_id: str, url_link: str):
     """
     后台异步执行 Wiki 生成任务
@@ -216,7 +274,9 @@ async def execute_generation_task(task_id: str, url_link: str):
 
     try:
         # 更新状态为处理中
-        supabase_client.update_task_status(task_id, TaskStatus.PROCESSING)
+        if not supabase_client.update_task_status(task_id, TaskStatus.PROCESSING):
+            logger.info(f"Task {task_id} not found (deleted) at start, aborting.")
+            return
 
         # 获取默认路径
         config_path = CONFIG_PATH.expanduser().resolve()
@@ -282,10 +342,22 @@ async def execute_generation_task(task_id: str, url_link: str):
         supabase_client.update_task_status(task_id, TaskStatus.COMPLETED, result=result)
 
         logger.info(f"任务 {task_id} 执行完成")
+        
+        # 5. 生成仓库简短描述
+        description = await loop.run_in_executor(
+            None,
+            lambda: _generate_repo_description(repo_path, url_link)
+        )
+        logger.info(f"生成仓库描述: {description}")
+
         # 同步supabase repository表
-        success = supabase_client.update_repository_information(url_link, r2_structure_url, r2_content_urls,vector_store_path)
+        success = supabase_client.update_repository_information(url_link, r2_structure_url, r2_content_urls, vector_store_path, description)
         if not success:
             logger.error(f"同步supabase repository表失败: {url_link}")
+
+    except InterruptedError:
+        logger.info(f"任务 {task_id} 被用户中断（删除），停止后台处理")
+        # 任务记录已删除，无需更新状态
 
     except Exception as e:
         logger.exception(f"任务 {task_id} 执行过程中发生异常:")

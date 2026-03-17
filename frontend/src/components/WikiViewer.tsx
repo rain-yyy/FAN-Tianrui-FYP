@@ -42,6 +42,8 @@ interface WikiViewerProps {
   structureUrl: string;
   contentUrls: string[];
   repoUrl?: string;
+  initialChatId?: string;
+  onChatLoaded?: () => void;
 }
 
 // --- Helper Components ---
@@ -65,7 +67,7 @@ const SidebarItem = React.memo(({
       <button
         onClick={() => onSelect(item.id)}
         className={cn(
-          "w-full text-left px-3 py-2 rounded-lg text-sm transition-all duration-200 flex items-center gap-2",
+          "w-[90%] text-left px-3 py-2 rounded-lg text-sm transition-all duration-200 flex items-center gap-2",
           isSelected
             ? "bg-fuchsia-500/15 text-fuchsia-200 font-medium border border-fuchsia-300/25"
             : "text-zinc-400 hover:bg-white/5 hover:text-white border border-transparent",
@@ -169,7 +171,7 @@ const parseContentSafely = (rawContent: unknown): WikiPageContent['content'] => 
 
 // --- Main Component ---
 
-export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl }: WikiViewerProps) {
+export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl, initialChatId, onChatLoaded }: WikiViewerProps) {
   const [structure, setStructure] = useState<WikiStructureItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pageContent, setPageContent] = useState<WikiPageContent | null>(null);
@@ -468,6 +470,8 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl 
           repoUrl={repoUrl}
           currentPageContext={currentPageContext}
           currentPageTitle={pageContent?.title}
+          initialChatId={initialChatId}
+          onChatLoaded={onChatLoaded}
         />
       )}
     </>

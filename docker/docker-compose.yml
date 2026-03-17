@@ -18,7 +18,12 @@ services:
       - PYTHONPATH=/app
       - HOST=0.0.0.0
       - PORT=8000
+      - VECTOR_STORE_PATH=/data/vector_stores
+      - REPO_STORE_PATH=/data/repos
     restart: always
     volumes:
-      - ./vector_stores:/app/vector_stores
-    
+      # 持久化卷（与 Fly.io 一致）：/data 下包含 vector_stores 与 repos
+      # 首次运行请执行: mkdir -p data/vector_stores data/repos
+      # 若曾使用旧版 ./vector_stores，请迁移: cp -r vector_stores/* data/vector_stores/
+      - ./data:/data
+

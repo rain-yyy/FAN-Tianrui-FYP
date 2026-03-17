@@ -17,6 +17,7 @@ primary_region = "sin"
   HOST = "0.0.0.0"
   PORT = "8000"
   VECTOR_STORE_PATH = "/data/vector_stores"
+  REPO_STORE_PATH = "/data/repos"
 
 [http_service]
   # 内部端口（你的应用监听的端口）

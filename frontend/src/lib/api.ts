@@ -1,5 +1,25 @@
-//TODO : 记得改回来
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000' || 'https://cityu-fyp-testapi.tianruifan21.workers.dev';
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').trim() || 'http://localhost:8000';
+
+/**
+ * Normalize repo URL for consistent comparison with backend-stored URLs.
+ * Matches backend _normalize_repo_url behavior for common cases.
+ */
+export const normalizeRepoUrl = (url: string): string => {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim().toLowerCase();
+  if (!trimmed) return '';
+  const withoutGit = trimmed.replace(/\.git\/?$/i, '').replace(/\/+$/, '');
+  try {
+    const parsed = new URL(withoutGit.startsWith('http') ? withoutGit : `https://${withoutGit}`);
+    const pathParts = parsed.pathname.split('/').filter(Boolean);
+    if (pathParts.length >= 2) {
+      return `${parsed.protocol}//${parsed.host}/${pathParts[0]}/${pathParts[1]}`;
+    }
+  } catch {
+    // Fallback for malformed URLs
+  }
+  return withoutGit;
+};
 
 export interface HealthResponse {
   status: string;
@@ -49,7 +69,11 @@ export interface AgentTrajectoryStep {
   description: string;
   success: boolean;
   preview?: string;
+  arguments?: Record<string, unknown>;
+  result?: string;
 }
+
+export type ConfidenceLevel = 'confirmed' | 'likely' | 'unknown';
 
 export type AgentChatRequest = ChatRequest;
 
@@ -59,9 +83,14 @@ export interface AgentChatResponse {
   sources: string[];
   trajectory: AgentTrajectoryStep[];
   confidence: number;
+  confidence_level: ConfidenceLevel;
   iterations: number;
+  anchors_count: number;
+  evidence_count: number;
+  caveats: string[];
   chat_id: string;
   repo_url: string;
+  error?: string | null;
 }
 
 export interface AgentStreamEvent {
@@ -70,6 +99,26 @@ export interface AgentStreamEvent {
 }
 
 export type ChatMode = 'rag' | 'agent';
+
+export interface ChatHistoryItem {
+  id: string;
+  chat_id: string;
+  user_id: string;
+  repo_url: string;
+  created_at: string;
+  updated_at: string;
+  title?: string;
+  message_count?: number;
+}
+
+export interface ChatHistoryMessage {
+  id: string;
+  chat_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+  metadata?: Record<string, unknown>;
+}
 
 export interface AvailableRepo {
   repo_url: string | null;
@@ -119,7 +168,9 @@ const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
     } catch {
       // ignore json parsing error and use status text
     }
-    throw new Error(detail || 'Request failed');
+    const err = new Error(detail || 'Request failed') as Error & { statusCode?: number };
+    err.statusCode = res.status;
+    throw err;
   }
 
   return res.json() as Promise<T>;
@@ -158,6 +209,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ user_id }),
     });
+  },
+
+  deleteTask: async (taskId: string, userId: string): Promise<boolean> => {
+    const url = `/task/${encodeURIComponent(taskId)}?user_id=${encodeURIComponent(userId)}`;
+    const res = await fetch(`${API_BASE_URL}${url}`, { method: 'DELETE' });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const errorData = await res.json() as { detail?: string };
+        detail = errorData.detail || detail;
+      } catch {
+        // ignore
+      }
+      throw new Error(detail || '删除失败');
+    }
+    return true;
   },
 
   askQuestion: async (request: ChatRequest): Promise<ChatResponse> => {
@@ -199,6 +266,65 @@ export const api = {
       return { repos: data.repos, count: data.repos.length };
     } catch {
       return { repos: [], count: 0 };
+    }
+  },
+
+  getChatHistory: async (userId: string): Promise<ChatHistoryItem[]> => {
+    try {
+      const data = await requestJson<{ history: ChatHistoryItem[] }>(`/chat/history?user_id=${encodeURIComponent(userId)}`, { method: 'GET' });
+      const raw = data.history || [];
+      return raw.map((item) => ({
+        ...item,
+        chat_id: item.chat_id ?? item.id,
+      }));
+    } catch (error) {
+      console.error('[api] getChatHistory failed:', error);
+      return [];
+    }
+  },
+
+  getChatMessages: async (chatId: string): Promise<ChatHistoryMessage[]> => {
+    try {
+      const data = await requestJson<{ messages: ChatHistoryMessage[] }>(`/chat/messages/${encodeURIComponent(chatId)}`, { method: 'GET' });
+      return data.messages || [];
+    } catch (error) {
+      console.error('[api] getChatMessages failed:', error);
+      return [];
+    }
+  },
+
+  deleteChatHistory: async (chatId: string, userId: string): Promise<boolean> => {
+    const url = `/chat/history/${encodeURIComponent(chatId)}?user_id=${encodeURIComponent(userId)}`;
+    const res = await fetch(`${API_BASE_URL}${url}`, { method: 'DELETE' });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const errorData = await res.json() as { detail?: string };
+        detail = errorData.detail || detail;
+      } catch {
+        // ignore
+      }
+      throw new Error(detail || '删除失败');
+    }
+    return true;
+  },
+
+  getFileContent: async (repoUrl: string, filePath: string): Promise<string> => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/file/content`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_url: repoUrl, file_path: filePath }),
+      });
+
+      if (!res.ok) {
+         throw new Error(`Failed to fetch file: ${res.statusText}`);
+      }
+      const data = await res.json();
+      return data.content;
+    } catch (error) {
+      console.error('Failed to get file content:', error);
+      throw error;
     }
   },
 

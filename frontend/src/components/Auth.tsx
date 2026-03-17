@@ -15,7 +15,7 @@ export default function Auth() {
 
     setGoogleLoading(true);
     try {
-      const redirectTo = window.location.origin;
+      const redirectTo = `${window.location.origin}/app/dashboard`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {

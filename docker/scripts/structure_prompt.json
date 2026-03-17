@@ -1,4 +1,3 @@
 {
-  "question": ""
-} the project ingests and analyzes GitHub repositories, including cloning, authentication, and API usage"
+  "question": "OCR pipeline architecture from PDF input to structured text output"
 }

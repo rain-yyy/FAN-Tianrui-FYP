@@ -39,10 +39,14 @@ export default function Mermaid({ chart }: MermaidProps) {
         if (!mermaidInitialized) {
           mermaid.initialize({
             startOnLoad: false,
+            suppressErrorRendering: true,
             theme: 'dark',
             securityLevel: 'loose',
             fontFamily: 'var(--font-sans)',
           });
+          mermaid.parseError = (err) => {
+             console.error('Mermaid parse error:', err);
+          };
           mermaidInitialized = true;
         }
         
@@ -148,17 +152,9 @@ export default function Mermaid({ chart }: MermaidProps) {
   }
 
   if (isError) {
-    return (
-      <div className="p-4 border border-red-500/20 text-red-400 text-sm rounded bg-red-500/10">
-        <div className="font-semibold mb-2">图表渲染失败</div>
-        <details className="text-xs mt-2">
-          <summary className="cursor-pointer">查看错误详情</summary>
-          <pre className="mt-2 p-2 bg-black/20 rounded overflow-auto max-h-32">
-            {chart}
-          </pre>
-        </details>
-      </div>
-    );
+    // 渲染失败时，仅在控制台记录错误，不在界面显示明显的错误提示
+    // 用户要求："I as a developer will check logs, instead of showing this big ugly prompt to the user"
+    return null;
   }
 
   if (!svg) {

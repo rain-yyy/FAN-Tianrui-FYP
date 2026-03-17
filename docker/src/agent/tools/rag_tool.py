@@ -54,7 +54,15 @@ class RAGSearchTool:
     RAG 语义检索工具
     
     封装现有的 FAISS + BM25 混合检索能力，支持 HyDE 增强。
+    
+    性能优化：
+    - HyDE 结果缓存（同一查询只生成一次）
+    - 短查询（<30字符）跳过 HyDE
+    - 支持轻量模式（禁用 HyDE）
     """
+    
+    HYDE_CACHE_SIZE = 32
+    HYDE_MIN_QUERY_LENGTH = 30
     
     def __init__(self, vector_store_path: str, use_hyde: bool = True):
         """
@@ -68,6 +76,7 @@ class RAGSearchTool:
         self.use_hyde = use_hyde
         self.stores: Dict[str, CategoryRetrievalUnit] = {}
         self._loaded = False
+        self._hyde_cache: Dict[str, str] = {}
     
     def _ensure_loaded(self) -> None:
         """确保向量库已加载"""
@@ -135,20 +144,43 @@ class RAGSearchTool:
                 ))
         return extracted
     
+    def _should_use_hyde(self, query: str) -> bool:
+        """判断是否应该使用 HyDE（性能优化）"""
+        if len(query.strip()) < self.HYDE_MIN_QUERY_LENGTH:
+            return False
+        simple_patterns = ["what is", "where is", "how to", "list all", "show me"]
+        query_lower = query.lower()
+        for pattern in simple_patterns:
+            if query_lower.startswith(pattern):
+                return False
+        return True
+    
     def _generate_hyde_document(self, question: str) -> str:
-        """使用 HyDE 生成假设性文档"""
+        """使用 HyDE 生成假设性文档（带缓存）"""
+        cache_key = question[:200]
+        if cache_key in self._hyde_cache:
+            logger.info(f"[HyDE] Cache hit for query: {question[:50]}...")
+            return self._hyde_cache[cache_key]
+        
         try:
             provider, model = get_model_config(CONFIG, "hyde_generation")
             llm = get_ai_client(provider, model=model)
             
             messages = HYDE_PROMPT.format_messages(question=question)
-            hyde_doc = llm.chat(messages, temperature=0.3, max_tokens=500)
+            hyde_doc = llm.chat(messages, temperature=0.3, max_tokens=400)
             
             if not isinstance(hyde_doc, str):
                 hyde_doc = str(hyde_doc)
             
+            hyde_doc = hyde_doc.strip()
+            
+            if len(self._hyde_cache) >= self.HYDE_CACHE_SIZE:
+                oldest_key = next(iter(self._hyde_cache))
+                del self._hyde_cache[oldest_key]
+            self._hyde_cache[cache_key] = hyde_doc
+            
             logger.info(f"[HyDE] Generated hypothetical document: {len(hyde_doc)} chars")
-            return hyde_doc.strip()
+            return hyde_doc
             
         except Exception as e:
             logger.error(f"[HyDE] Failed to generate: {e}")
@@ -185,9 +217,11 @@ class RAGSearchTool:
             should_use_hyde = use_hyde if use_hyde is not None else self.use_hyde
             retrieval_query = query
             
-            if should_use_hyde:
+            if should_use_hyde and self._should_use_hyde(query):
                 hyde_doc = self._generate_hyde_document(query)
                 retrieval_query = f"{query}\n\n{hyde_doc}"
+            elif should_use_hyde:
+                logger.info(f"[HyDE] Skipped for short/simple query: {query[:50]}...")
             
             candidates = self._gather_hybrid_candidates(
                 retrieval_query,

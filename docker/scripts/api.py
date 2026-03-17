@@ -1,4 +1,5 @@
 import sys
+import os
 import uuid
 import asyncio
 import logging
@@ -21,14 +22,73 @@ import json
 
 from src.storage.supabase_client import SupabaseClient
 from src.agent import run_agent, AgentRunner
+from src.config import CONFIG
+from src.clients.ai_client_factory import get_ai_client, get_model_config
 
 # 初始化日志
 from src.utils.logger import setup_logger
+from src.utils.repo_utils import get_repo_hash, get_repo_name
 logger = setup_logger("api")
 
 # 导入业务逻辑和管理模块
-from src.core.wiki_pipeline import execute_generation_task, VECTOR_STORE_ROOT
+from src.core.wiki_pipeline import execute_generation_task, VECTOR_STORE_ROOT, REPO_STORE_ROOT
 from src.core.chat import answer_question
+
+
+def _normalize_vector_store_path(raw_path: Optional[str], repo_url: str) -> str:
+    """
+    规范化向量库路径，确保从持久化卷正确加载。
+    兼容 Supabase 中可能存在的旧路径（如 /app/vector_stores/xxx）。
+    """
+    if not raw_path or not raw_path.strip():
+        raise ValueError("vector_store_path 为空")
+    path_str = raw_path.strip()
+    # 旧版本地 Docker 可能存储了 /app/vector_stores/xxx，映射到当前 VECTOR_STORE_ROOT
+    if path_str.startswith("/app/vector_stores/"):
+        suffix = path_str[len("/app/vector_stores/"):].lstrip("/")
+        path_str = str(VECTOR_STORE_ROOT / suffix) if suffix else str(VECTOR_STORE_ROOT / get_repo_name(repo_url))
+    elif path_str == "/app/vector_stores":
+        path_str = str(VECTOR_STORE_ROOT / get_repo_name(repo_url))
+    return path_str
+
+
+def _resolve_repo_roots(repo_info: Dict[str, Any], repo_url: str) -> List[Path]:
+    roots: List[Path] = []
+
+    repo_root = repo_info.get("repo_root")
+    if repo_root:
+        roots.append(Path(str(repo_root)).expanduser())
+
+    # 当前推荐路径：/data/repos/<repo_hash>
+    roots.append(REPO_STORE_ROOT / get_repo_hash(repo_url))
+    # 历史兼容：/data/repos/<repo_name>
+    roots.append(REPO_STORE_ROOT / get_repo_name(repo_url))
+
+    deduped: List[Path] = []
+    seen = set()
+    for root in roots:
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(root)
+    return deduped
+
+
+def _resolve_path_under_root(root: Path, input_path: str) -> Optional[Path]:
+    root_resolved = root.expanduser().resolve()
+    raw = Path(input_path).expanduser()
+
+    if raw.is_absolute():
+        target = raw.resolve()
+    else:
+        target = (root_resolved / raw).resolve()
+
+    try:
+        target.relative_to(root_resolved)
+    except ValueError:
+        return None
+    return target
 
 app = FastAPI(
     title="Project Wiki Generation API",
@@ -76,6 +136,33 @@ def _to_jsonable_builtin(value: Any) -> Any:
 
 
 # ============ API Endpoints ============
+
+
+def _generate_chat_preview(question: str) -> str:
+    """
+    Generate a short preview text (title) for the chat session using LLM.
+    """
+    try:
+        provider, model = get_model_config(CONFIG, "chat")
+        client = get_ai_client(provider, model=model)
+        
+        prompt = f"""
+Summarize the following user question into a very short phrase (3-5 words) to be used as a chat title.
+Do not include "User asks" or "Question about" or similar phrases. Just the topic.
+Do not use quotes.
+
+Question: {question}
+
+Title:
+"""
+        messages = [{"role": "user", "content": prompt}]
+        response = client.chat(messages, temperature=0.3, max_tokens=20)
+        title = response.strip().strip('"').strip("'")
+        return title
+    except Exception as e:
+        logger.warning(f"Failed to generate chat preview: {e}")
+        return f"Chat: {question[:20]}..."
+
 
 @app.post("/generate")
 async def generate_wiki(request: Request):
@@ -167,27 +254,77 @@ async def list_tasks_api(request: Request):
 
 
 @app.delete("/task/{task_id}")
-async def delete_task_api(task_id: str):
+async def delete_task_api(task_id: str, user_id: str):
     """
-    删除已完成或失败的任务记录
+    删除任务记录（包括进行中、已完成或失败的任务）
     """
+    if not task_id or not user_id:
+        raise HTTPException(status_code=400, detail="Missing task_id or user_id")
     logger.info(f"删除任务: {task_id}")
     supabase_client = SupabaseClient()
-    success = supabase_client.delete_task(task_id)
+    success = supabase_client.delete_task(task_id, user_id)
     if not success:
-        # Check if task exists first
         task = supabase_client.get_task(task_id)
         if not task:
             raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
-        else:
-            raise HTTPException(status_code=400, detail="不能删除正在处理中的任务")
+        if task.get("user_id") != user_id:
+            raise HTTPException(status_code=404, detail="Task not found or unauthorized")
+        raise HTTPException(status_code=500, detail="删除任务失败")
 
-    return {"message": f"任务 {task_id} 已删除"}
+    return {"success": True}
 
 
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+
+@app.post("/file/content")
+async def get_file_content_api(request: Request):
+    """
+    读取指定仓库的文件内容
+    """
+    try:
+        data = await request.json()
+        repo_url = data.get("repo_url")
+        file_path = data.get("file_path")
+
+        if not repo_url or not file_path:
+            raise HTTPException(status_code=400, detail="Missing repo_url or file_path")
+
+        supabase_client = SupabaseClient()
+        repo_info = supabase_client.get_repo_information(repo_url) or {}
+        candidate_roots = _resolve_repo_roots(repo_info, repo_url)
+
+        for root in candidate_roots:
+            if not root.exists() or not root.is_dir():
+                continue
+
+            target_path = _resolve_path_under_root(root, file_path)
+            if not target_path:
+                continue
+            if not target_path.exists() or not target_path.is_file():
+                continue
+
+            try:
+                content = target_path.read_text(encoding="utf-8", errors="replace")
+                return {"content": content}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "File not found under repository root. "
+                "Please ensure repo is generated and stored under REPO_STORE_PATH."
+            ),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("获取文件内容失败:")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/chat")
@@ -211,7 +348,14 @@ async def chat_with_repo_api(request: Request):
         
         # 1. 如果没有 chat_id，创建一个新的会话
         if not chat_id:
-            chat_session = supabase_client.create_chat_history(user_id, repo_url)
+            # Generate preview text
+            loop = asyncio.get_event_loop()
+            preview_text = await loop.run_in_executor(
+                None,
+                lambda: _generate_chat_preview(question)
+            )
+            
+            chat_session = supabase_client.create_chat_history(user_id, repo_url, title=preview_text, preview_text=preview_text)
             if not chat_session:
                 raise HTTPException(status_code=500, detail="创建会话失败")
             chat_id = chat_session["id"]
@@ -227,8 +371,10 @@ async def chat_with_repo_api(request: Request):
                 detail="未找到该仓库的向量索引。请先通过 /generate 接口生成文档。"
             )
         
-        vector_store_path = repo_info["vector_store_path"]
-        
+        vector_store_path = _normalize_vector_store_path(
+            repo_info["vector_store_path"], repo_url
+        )
+
         # 4. 构建增强问题（包含上下文信息）
         enhanced_question = question
         if current_page_context:
@@ -312,6 +458,21 @@ async def get_chat_messages_api(chat_id: str):
     return {"messages": messages}
 
 
+@app.delete("/chat/history/{chat_id}")
+async def delete_chat_history_api(chat_id: str, user_id: str):
+    """
+    删除指定会话及其消息。
+    仅当 chat 属于该 user_id 时才可删除。
+    """
+    if not chat_id or not user_id:
+        raise HTTPException(status_code=400, detail="Missing chat_id or user_id")
+    supabase_client = SupabaseClient()
+    ok = supabase_client.delete_chat_history(chat_id, user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Chat not found or unauthorized")
+    return {"success": True}
+
+
 # ============ Agent Mode Endpoints ============
 
 @app.post("/agent/chat")
@@ -358,7 +519,14 @@ async def agent_chat_api(request: Request):
         supabase_client = SupabaseClient()
         
         if not chat_id:
-            chat_session = supabase_client.create_chat_history(user_id, repo_url)
+            # Generate preview text
+            loop = asyncio.get_event_loop()
+            preview_text = await loop.run_in_executor(
+                None,
+                lambda: _generate_chat_preview(question)
+            )
+
+            chat_session = supabase_client.create_chat_history(user_id, repo_url, title=preview_text, preview_text=preview_text)
             if not chat_session:
                 raise HTTPException(status_code=500, detail="创建会话失败")
             chat_id = chat_session["id"]
@@ -372,7 +540,9 @@ async def agent_chat_api(request: Request):
                 detail="未找到该仓库的向量索引。请先通过 /generate 接口生成文档。"
             )
         
-        vector_store_path = repo_info["vector_store_path"]
+        vector_store_path = _normalize_vector_store_path(
+            repo_info["vector_store_path"], repo_url
+        )
         graph_path = repo_info.get("graph_path")
         repo_root = repo_info.get("repo_root")
         
@@ -468,7 +638,14 @@ async def agent_chat_stream_api(request: Request):
         supabase_client = SupabaseClient()
 
         if not chat_id:
-            chat_session = supabase_client.create_chat_history(user_id, repo_url)
+            # Generate preview text
+            loop = asyncio.get_event_loop()
+            preview_text = await loop.run_in_executor(
+                None,
+                lambda: _generate_chat_preview(question)
+            )
+
+            chat_session = supabase_client.create_chat_history(user_id, repo_url, title=preview_text, preview_text=preview_text)
             if not chat_session:
                 raise HTTPException(status_code=500, detail="创建会话失败")
             chat_id = chat_session["id"]
@@ -482,7 +659,9 @@ async def agent_chat_stream_api(request: Request):
                 detail="未找到该仓库的向量索引。请先通过 /generate 接口生成文档。"
             )
         
-        vector_store_path = repo_info["vector_store_path"]
+        vector_store_path = _normalize_vector_store_path(
+            repo_info["vector_store_path"], repo_url
+        )
         graph_path = repo_info.get("graph_path")
         repo_root = repo_info.get("repo_root")
         

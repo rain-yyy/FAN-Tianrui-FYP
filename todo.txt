@@ -1,23 +1,21 @@
 
-4. 优化前端的展示问题(展示的代码块展示``存在问题，看起来转意也有问题，然后图标还是存在报错，左下角存在大量恶心的报错)
-了解一下rank和embedding的区别）
+了解一下rank和embedding的区别, 优化使用的模型
 
 
 优化：
 3. 加入agent和rag并行，需要仔细检查一下agent的逻辑
-    列出所有history有问题，不应该给用户展示那种状态，rag列出的source实在是狗屎，history的file点开要可以跳转到文件
-    而且怎么一直在轮训列出所有任务，这是不对的
-    参考一下加入gitnexus左侧的代码展示和代码图（maybe直接复用）
+    rag列出的source实在是狗屎，history的file点开要可以跳转到文件 <<<--
     agent模式展示的调用太丑了，同时也不能这么展示，太恶心了，要和cursor和perplexity一样
     agent还是太慢了，而且图表渲染也有问题，
 4. 现在只有少量的file找不到（.github folder需要处理一下， 剩下的看起来是幻觉导致的）
-4. 处理数据库里的preview text和message count
-5. 更换问答的架构，对 GitHub 仓库做“静态分析 + LLM 生成文档”，构建一个带架构图的知识库，用户可以与这个“知识站点”对话，背后是图谱 + 代码语义搜索，通过perlerxity
-6. 有空把和supabase交互转移到后端
 7. 有空再继续优化wiki structure的生成
 8. 给vercel也加入github action github action 没有自动运行（无伤大雅
-9 license 不处理
-10. session打开不在开头位置
+9. license 不处理
+11. 控制生成wiki和agent回复的语言，agent回复还有点问题
+13. 换一下聊天的ui <<<--
+14. 删除processing task的时候，也要触发api去强制终止任务, 删除task也需要有提示
+15. 修改各种交互的语言
+16. wiki生成的速度太慢了
 
 
 完成的
