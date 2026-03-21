@@ -6,15 +6,18 @@ Agent 工具集模块
 - 代码知识图谱查询工具
 - 文件读取工具
 - 仓库结构概览工具
+- Grep 文本搜索工具
 """
 
 from src.agent.tools.rag_tool import RAGSearchTool
 from src.agent.tools.graph_tool import CodeGraphTool
 from src.agent.tools.file_tool import FileReadTool, RepoMapTool
+from src.agent.tools.grep_tool import GrepSearchTool
 
 __all__ = [
     "RAGSearchTool",
     "CodeGraphTool", 
     "FileReadTool",
     "RepoMapTool",
+    "GrepSearchTool",
 ]

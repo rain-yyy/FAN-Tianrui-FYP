@@ -71,6 +71,9 @@ export interface AgentTrajectoryStep {
   preview?: string;
   arguments?: Record<string, unknown>;
   result?: string;
+  duration_ms?: number;
+  metrics?: Record<string, unknown>;
+  used_fallback?: boolean;
 }
 
 export type ConfidenceLevel = 'confirmed' | 'likely' | 'unknown';
@@ -94,7 +97,28 @@ export interface AgentChatResponse {
 }
 
 export interface AgentStreamEvent {
-  type: 'planning' | 'tool_call' | 'evaluation' | 'synthesis' | 'complete' | 'error';
+  type: 'planning' | 'tool_call' | 'evaluation' | 'synthesis' | 'answer_delta' | 'complete' | 'error';
+  data: Record<string, unknown>;
+}
+
+// Tool call detail for live display
+export interface LiveToolStep {
+  tool: string;
+  description: string;
+  query?: string;
+  pattern?: string;
+  operation?: string;
+  symbol_name?: string;
+  file_path?: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  elapsed_ms?: number;
+  success?: boolean;
+  metrics?: Record<string, unknown>;
+}
+
+// RAG streaming event types
+export interface RagStreamEvent {
+  type: 'retrieval_start' | 'hyde_generated' | 'retrieval_done' | 'answer_delta' | 'answer_done' | 'complete' | 'error';
   data: Record<string, unknown>;
 }
 
@@ -211,6 +235,22 @@ export const api = {
     });
   },
 
+  cancelTask: async (taskId: string): Promise<boolean> => {
+    const url = `/task/${encodeURIComponent(taskId)}/cancel`;
+    const res = await fetch(`${API_BASE_URL}${url}`, { method: 'POST' });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const errorData = await res.json() as { detail?: string };
+        detail = errorData.detail || detail;
+      } catch {
+        // ignore
+      }
+      throw new Error(detail || 'Failed to cancel task');
+    }
+    return true;
+  },
+
   deleteTask: async (taskId: string, userId: string): Promise<boolean> => {
     const url = `/task/${encodeURIComponent(taskId)}?user_id=${encodeURIComponent(userId)}`;
     const res = await fetch(`${API_BASE_URL}${url}`, { method: 'DELETE' });
@@ -222,7 +262,7 @@ export const api = {
       } catch {
         // ignore
       }
-      throw new Error(detail || '删除失败');
+      throw new Error(detail || 'Delete failed');
     }
     return true;
   },
@@ -246,11 +286,11 @@ export const api = {
         }
 
         if (status === 404) {
-          throw new Error('未找到该仓库的向量索引。请先生成文档后再使用聊天功能。');
+          throw new Error('No vector index for this repo. Generate documentation first, then try chat again.');
         } else if (status === 400) {
-          throw new Error(`请求无效: ${detail}`);
+          throw new Error(`Invalid request: ${detail}`);
         } else {
-          throw new Error(`聊天请求失败: ${detail}`);
+          throw new Error(`Chat request failed: ${detail}`);
         }
       }
       return res.json();
@@ -304,7 +344,7 @@ export const api = {
       } catch {
         // ignore
       }
-      throw new Error(detail || '删除失败');
+      throw new Error(detail || 'Delete failed');
     }
     return true;
   },
@@ -349,11 +389,11 @@ export const api = {
         }
 
         if (status === 404) {
-          throw new Error('未找到该仓库的向量索引。请先生成文档后再使用 Agent 功能。');
+          throw new Error('No vector index for this repo. Generate documentation first, then try Agent again.');
         } else if (status === 400) {
-          throw new Error(`请求无效: ${detail}`);
+          throw new Error(`Invalid request: ${detail}`);
         } else {
-          throw new Error(`Agent 请求失败: ${detail}`);
+          throw new Error(`Agent request failed: ${detail}`);
         }
       }
       return res.json();
@@ -437,4 +477,81 @@ export const api = {
       yield tailEvent;
     }
   },
+
+  // RAG Streaming API
+  askQuestionStream: async function* (
+    request: ChatRequest
+  ): AsyncGenerator<RagStreamEvent, void, unknown> {
+    const res = await fetch(`${API_BASE_URL}/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+
+    if (!res.ok) {
+      throw new Error(`RAG stream request failed: ${res.statusText}`);
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentEventType: RagStreamEvent['type'] = 'retrieval_start';
+    let currentDataLines: string[] = [];
+
+    const emitCurrentEvent = (): RagStreamEvent | null => {
+      if (currentDataLines.length === 0) return null;
+      const rawData = currentDataLines.join('\n').trim();
+      currentDataLines = [];
+      if (!rawData) return null;
+      try {
+        const data = JSON.parse(rawData) as Record<string, unknown>;
+        return { type: currentEventType, data };
+      } catch {
+        return {
+          type: 'error',
+          data: { detail: 'Invalid SSE data payload', raw: rawData },
+        };
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed === '') {
+          const event = emitCurrentEvent();
+          if (event) {
+            yield event;
+          }
+          continue;
+        }
+
+        if (trimmed.startsWith('event:')) {
+          const rawType = trimmed.slice(6).trim() as RagStreamEvent['type'];
+          currentEventType = rawType || 'retrieval_start';
+          continue;
+        }
+
+        if (trimmed.startsWith('data:')) {
+          currentDataLines.push(trimmed.slice(5).trim());
+        }
+      }
+    }
+
+    const tailEvent = emitCurrentEvent();
+    if (tailEvent) {
+      yield tailEvent;
+    }
+  },
+
 };

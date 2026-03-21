@@ -93,19 +93,22 @@ class R2Client:
         """Generate date string in format YYYYMMDD."""
         return datetime.now().strftime("%Y%m%d")
 
-    def _get_r2_path(self, repo_url: str, filename: str) -> str:
+    def _get_r2_path(self, repo_url: str, filename: str, task_id: str | None = None) -> str:
         """
         Generate R2 object path.
 
         Args:
             repo_url: Repository URL or path
             filename: File name or relative path
+            task_id: Optional task ID for concurrency isolation
 
         Returns:
             R2 object key (path)
         """
         repo_name = self._extract_repo_name(repo_url)
         date = self._generate_date()
+        if task_id:
+            return f"{repo_name}/{date}_{task_id}/{filename}"
         return f"{repo_name}/{date}/{filename}"
 
     def upload_file(
@@ -287,6 +290,7 @@ def upload_wiki_to_r2(
     wiki_structure: dict,
     structure_local_path: Optional[Path] = None,
     content_dir: Optional[Path] = None,
+    task_id: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[List[str]]]:
     """
     Upload wiki structure and content files to R2.
@@ -296,6 +300,7 @@ def upload_wiki_to_r2(
         wiki_structure: Wiki structure dictionary
         structure_local_path: Local path to wiki_structure.json (optional, will upload dict if not provided)
         content_dir: Local directory containing content JSON files (optional)
+        task_id: Optional task ID for path isolation
 
     Returns:
         Tuple of (structure_url, content_urls) or (None, None) if upload fails
@@ -307,10 +312,13 @@ def upload_wiki_to_r2(
         print("[INFO] Skipping R2 upload, will return local paths instead.")
         return None, None
 
-    # Generate base path
+    # Generate base path with task_id isolation
     repo_name = client._extract_repo_name(repo_url)
     date = client._generate_date()
-    base_path = f"{repo_name}/{date}"
+    if task_id:
+        base_path = f"{repo_name}/{date}_{task_id}"
+    else:
+        base_path = f"{repo_name}/{date}"
 
     # Upload wiki structure
     structure_key = f"{base_path}/wiki_structure.json"

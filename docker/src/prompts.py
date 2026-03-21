@@ -4,6 +4,13 @@ from dataclasses import dataclass
 from typing import Dict, List, Any
 import json
 
+# All LLM-facing product outputs (RAG, wiki, HyDE, structure) are fixed to English.
+OUTPUT_LANGUAGE_EN = """
+## Output language (strict)
+- The product is **English-only**: write **every** user-visible sentence in **English**—no Chinese, Japanese, or other languages for explanations, titles, summaries, or bullet points.
+- If the user writes in another language, **still respond in English**; keep code identifiers and string literals exactly as in the source.
+"""
+
 @dataclass(frozen=True)
 class PromptDefinition:
 
@@ -126,6 +133,8 @@ STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
             - The main execution paths, data flow, and module boundaries.
             - The architectural pieces that explain how the system actually works.
 
+            """ + OUTPUT_LANGUAGE_EN.strip() + """
+
             Final quality filter before you answer:
             - Ask of every candidate node: "Would most engineers care about this when trying to understand the project?"
             - If the answer is no, omit it.
@@ -187,7 +196,8 @@ Provide the best possible answer directly, without listing evidence sources or f
 - Accurately answering the user's question
 - Providing actionable technical insights
 - Highlighting potential risks or considerations (when applicable)
-""",
+"""
+    + OUTPUT_LANGUAGE_EN,
     human="""
 <RETRIEVED_CONTEXT>
 {context}
@@ -214,7 +224,8 @@ This hypothetical document will be used to improve semantic search retrieval. Ge
 4. Is written as if it were part of the actual codebase documentation
 
 Keep the response focused and technical. Do not include disclaimers or meta-commentary.
-""",
+"""
+    + OUTPUT_LANGUAGE_EN,
     human="""
 Generate a hypothetical technical documentation snippet that would answer this question:
 
@@ -251,7 +262,8 @@ Provide the best possible answer directly, without listing evidence sources or f
 - Providing actionable technical insights
 - Referencing previous discussion points when relevant
 - Highlighting potential risks or considerations (when applicable)
-""",
+"""
+    + OUTPUT_LANGUAGE_EN,
     human="""
 <RETRIEVED_CONTEXT>
 {context}
@@ -272,42 +284,43 @@ Please provide your answer directly, considering the conversation context.
 WIKI_SECTION_PROMPT: PromptDefinition = PromptDefinition(
     name="wiki-section-writer",
     system="""
-你是一名资深技术写作者兼系统架构师，需要基于提供的文件上下文为既定的 wiki 章节撰写清晰、结构化的内容，并补充能够概括章节核心流程或组件关系的 Mermaid 图。
+You are a senior technical writer and software architect. Draft a clear, structured wiki section from the supplied file context, and add a Mermaid diagram that summarizes the most important flows or component relationships for this section.
 
-创作原则：
-- 语气保持专业、客观，优先强调架构职责、依赖关系与关键配置。
-- 结构层次清晰，概览在前，细节分节展开，必要时使用列表或引用提高可读性。
-- Mermaid 图需覆盖章节最重要的流程或组件关系，做到节点命名明确，避免冗余装饰。
-- 遇到缺失信息时，可结合章节标题和已有上下文做适度推断，但要保持技术合理性。
-- **重要：Mermaid 语法要求**：
-  * 节点标签如果包含特殊字符（如 @、#、$、& 等），必须用双引号包裹，例如：`A["user@example.com"]` 而不是 `A[user@example.com]`
-  * 节点 ID 只能包含字母、数字和下划线，不能包含特殊字符
-  * 确保所有语法符合 Mermaid 规范，避免解析错误
-""",
+Writing principles:
+- Professional, objective tone; emphasize architectural responsibilities, dependencies, and key configuration.
+- Clear hierarchy: overview first, then subsections; use lists or short quotes where they improve readability.
+- The Mermaid diagram should cover the section's most important flows or relationships; node names must be explicit; avoid decorative clutter.
+- When information is missing, you may infer modestly from the section title and context, but keep claims technically plausible.
+- **Mermaid syntax**:
+  * If a node label contains special characters (e.g. @, #, $, &), wrap the label in double quotes, e.g. `A["user@example.com"]`, not `A[user@example.com]`.
+  * Node IDs may only use letters, digits, and underscores.
+  * Ensure valid Mermaid so parsers do not fail.
+"""
+    + OUTPUT_LANGUAGE_EN,
     human="""
-文档标题：{doc_title}
-文档描述：{doc_description}
-当前章节：{breadcrumb}
-章节 ID：{section_id}
+Document title: {doc_title}
+Document description: {doc_description}
+Current section (breadcrumb): {breadcrumb}
+Section id: {section_id}
 
-请基于下列文件内容生成该章节，严格遵循输出 JSON 的结构约束。
+Generate this section from the file content below. Follow the JSON output schema exactly.
 
 <OUTPUT_SCHEMA_HINT>
-以 JSON 形式返回，字段要求：
+Return a single JSON object with:
 {{
-  "intro": "章节概览，聚焦于业务价值与关键组件",
+  "intro": "Section overview: business value and key components (English prose)",
   "sections": [
-    {{"heading": "小节标题", "body": "成段描述，可使用列表与引用"}}
+    {{"heading": "Subsection title", "body": "Paragraphs; lists and short quotes allowed"}}
   ],
-  "mermaid": "仅包含 Mermaid 代码，不要包裹 ```。节点标签包含特殊字符时必须用双引号包裹，例如：A[\"text@domain.com\"]"
+  "mermaid": "Raw Mermaid only, no ``` fences. Quote labels with special characters, e.g. A[\"text@domain.com\"]"
 }}
 </OUTPUT_SCHEMA_HINT>
 
-==== 关联文件内容开始 ====
+==== Source file content (start) ====
 {context}
-==== 关联文件内容结束 ====
+==== Source file content (end) ====
 
-请只返回 JSON 字符串，不要添加额外解释。
+Return only the JSON string, with no extra commentary.
 """,
 )
 
@@ -362,6 +375,7 @@ def get_rag_chat_with_history_prompt() -> ChatPromptTemplate:
 
 __all__ = [
     "PromptDefinition",
+    "OUTPUT_LANGUAGE_EN",
     "STRUCTURE_PROMPT",
     "RAG_CHAT_PROMPT",
     "WIKI_SECTION_PROMPT",

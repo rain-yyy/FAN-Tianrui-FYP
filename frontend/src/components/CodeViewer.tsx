@@ -25,8 +25,7 @@ import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { Loader2 } from 'lucide-react';
 
-// 由于没有安装 react-syntax-highlighter，我们回退使用 react-markdown + rehype-highlight
-// 或者更简单，我们直接用 react-markdown 渲染代码块
+// Markdown body: remark-gfm + rehype-highlight for fenced code blocks.
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 
@@ -38,7 +37,7 @@ interface ParsedSource {
   lineRange?: { start: number; end: number };
   symbolName?: string;
   category?: string;
-  content?: string; // 如果有预加载的内容
+  content?: string; // Optional preloaded file body
 }
 
 interface CodeViewerProps {
@@ -107,7 +106,7 @@ export default function CodeViewer({ isOpen, onClose, sources, initialSourceInde
     }
   }, [isOpen, selectedIndex, sources, repoUrl]);
 
-  // 过滤文件列表
+  // Filter file list by search query.
   const filteredSources = sources.filter(s => 
     s.filePath.toLowerCase().includes(searchQuery.toLowerCase()) ||
     s.fileName.toLowerCase().includes(searchQuery.toLowerCase())
@@ -115,7 +114,7 @@ export default function CodeViewer({ isOpen, onClose, sources, initialSourceInde
 
   const selectedSource = sources[selectedIndex];
   
-  // 构建 Markdown 代码块以便渲染
+  // Build a fenced markdown code block for preview.
   const markdownContent = selectedSource 
     ? `\`\`\`${selectedSource.extension || 'text'}\n${codeContent}\n\`\`\``
     : '';
@@ -254,7 +253,7 @@ export default function CodeViewer({ isOpen, onClose, sources, initialSourceInde
                 </div>
               ) : selectedSource ? (
                 <div className="text-sm font-mono leading-relaxed">
-                   {/* 这里使用 ReactMarkdown 渲染代码块，或者如果以后引入了 syntax-highlighter 可以在这里替换 */}
+                   {/* Body rendered with ReactMarkdown + rehype-highlight */}
                    <div className="prose prose-invert max-w-none prose-pre:bg-transparent prose-pre:m-0 prose-pre:p-4 prose-code:bg-transparent prose-code:text-sm">
                      <ReactMarkdown
                         remarkPlugins={[remarkGfm]}

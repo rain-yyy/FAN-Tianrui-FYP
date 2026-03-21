@@ -455,6 +455,44 @@ class SupabaseClient:
             print(f"[Supabase] Error updating repository information (upsert): {e}")
             return False
 
+    # ============ Profile Related Methods ============
+
+    def get_profile(self, user_id: str) -> Optional[dict]:
+        """
+        Get a user's profile from Supabase.
+        """
+        if not self.client:
+            return None
+        try:
+            response = self.client.table("profiles").select("*").eq("id", user_id).execute()
+            if response.data:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"[Supabase] Error getting profile: {e}")
+            return None
+
+    def upsert_profile_preferences(self, user_id: str, theme: Optional[str] = None) -> bool:
+        """
+        Update a user's theme preference.
+        """
+        if not self.client:
+            return False
+        try:
+            data: dict = {"id": user_id, "updated_at": "now()"}
+            if theme is not None:
+                if theme not in ("light", "dark"):
+                    return False
+                data["theme"] = theme
+            else:
+                return False
+
+            self.client.table("profiles").upsert(data).execute()
+            return True
+        except Exception as e:
+            print(f"[Supabase] Error upserting profile preferences: {e}")
+            return False
+
 
 def update_repo_vector_path(repo_url: str, vector_store_path: str):
     """

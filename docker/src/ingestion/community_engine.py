@@ -69,22 +69,21 @@ class CommunityEngine:
 
             context = "\n".join(node_details[:30]) # 限制数量避免过长
             
-            prompt = f"""你是一个资深的架构师。请分析以下代码实体列表（属于同一个逻辑业务社区），并简要概括这个社区负责的业务功能。
-要求：
-1. 语言简洁，不超过 100 字。
-2. 重点说明该社区在整个项目中的逻辑定位。
+            prompt = f"""You are a senior software architect. The following list groups code entities that belong to one logical business community in the repository.
 
-代码实体列表：
+Write a brief summary (at most ~100 words) of what this community is responsible for and how it fits into the overall project.
+
+Entity list:
 {context}
 
-请直接返回摘要内容。"""
+Return only the summary text, in English."""
 
             try:
                 summary = client.chat([{"role": "user", "content": prompt}])
                 self.community_summaries[comm_id] = summary
             except Exception as e:
                 logger.error(f"Error generating summary for community {comm_id}: {e}")
-                self.community_summaries[comm_id] = "无法生成摘要。"
+                self.community_summaries[comm_id] = "Unable to generate summary."
 
         return self.community_summaries
 

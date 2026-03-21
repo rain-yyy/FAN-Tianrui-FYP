@@ -9,7 +9,7 @@ export default function Auth() {
 
   const handleGoogleLogin = async () => {
     if (!isSupabaseConfigured) {
-      alert('缺少 Supabase 配置，请检查 NEXT_PUBLIC_SUPABASE_URL 和 NEXT_PUBLIC_SUPABASE_ANON_KEY');
+      alert('Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
       return;
     }
 
@@ -28,9 +28,9 @@ export default function Auth() {
       }
     } catch (error: unknown) {
       if (error instanceof Error) {
-        alert(`Google 登录失败: ${error.message}`);
+        alert(`Google sign-in failed: ${error.message}`);
       } else {
-        alert('Google 登录失败，请稍后重试');
+        alert('Google sign-in failed. Please try again.');
       }
     } finally {
       setGoogleLoading(false);
@@ -42,7 +42,7 @@ export default function Auth() {
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-bold text-white">Welcome Back</h2>
         <p className="text-muted-foreground text-sm">
-          使用 Google 账号登录后即可继续生成和查看 Wiki
+          Sign in with Google to generate and view wikis
         </p>
       </div>
 

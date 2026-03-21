@@ -8,6 +8,7 @@ WORKDIR /app
 # 安装系统依赖 (git 是必须的，用于克隆仓库)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # 先复制依赖文件并安装，利用 Docker 缓存 + pip 缓存挂载加速重构建

@@ -156,13 +156,18 @@ const SourceChip = ({
 };
 
 export const SourcesPanel = ({ sources, onSourceClick, compact = true }: SourcesPanelProps) => {
-  const parsedSources = useMemo(() => sources.map(parseSource), [sources]);
+  const parsedSources = useMemo(
+    () => sources
+      .filter((s) => s && s.toLowerCase() !== 'unknown' && !s.endsWith(':unknown'))
+      .map(parseSource),
+    [sources]
+  );
   
   if (sources.length === 0) {
     if (compact) return null;
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
-        <p className="text-sm text-zinc-500">暂无引用来源</p>
+        <p className="text-sm text-zinc-500">No sources</p>
       </div>
     );
   }

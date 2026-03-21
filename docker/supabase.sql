@@ -28,6 +28,8 @@ CREATE TABLE public.profiles (
   phone text,
   full_name text,
   avatar_url text,
+  language text NOT NULL DEFAULT 'en' CHECK (language IN ('zh', 'en')),
+  theme text NOT NULL DEFAULT 'dark' CHECK (theme IN ('light', 'dark')),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
   CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)

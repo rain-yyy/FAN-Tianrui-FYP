@@ -15,10 +15,13 @@ import {
   Trash2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { api, normalizeRepoUrl, ChatMessage, ChatResponse, AgentChatResponse, ChatMode, ChatHistoryItem, AgentTrajectoryStep } from '@/lib/api';
+import { api, normalizeRepoUrl, ChatMessage, ChatResponse, AgentChatResponse, ChatMode, ChatHistoryItem, AgentTrajectoryStep, LiveToolStep } from '@/lib/api';
 import { MessageItem, DisplayMessage } from './MessageItem';
 import SourcesPanel, { parseSource } from './SourcesPanel';
 import CodeViewer from './CodeViewer';
+import { LiveStepFlow, LiveStep } from './LiveStepFlow';
+import { t } from '@/lib/i18n';
+import { useAuth } from '@/providers/AuthProvider';
 
 interface ChatInterfaceProps {
   userId: string;
@@ -62,6 +65,8 @@ export default function ChatInterface({
   const [loadingStatus, setLoadingStatus] = useState<string>('');
   const [chatId, setChatId] = useState<string | undefined>(undefined);
   const [liveAgentLogs, setLiveAgentLogs] = useState<string[]>([]);
+  const [liveSteps, setLiveSteps] = useState<LiveStep[]>([]);
+  const [streamingAnswer, setStreamingAnswer] = useState<string>('');
   const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -266,28 +271,41 @@ export default function ChatInterface({
 
     setIsLoading(true);
     setLiveAgentLogs([]);
-    setLoadingStatus(chatMode === 'agent' ? '分析问题意图...' : 'Thinking...');
+    setLiveSteps([]);
+    setStreamingAnswer('');
+    setLoadingStatus(chatMode === 'agent' ? t('analyzingStatus') : t('retrievingDocs'));
+
+    // Helper to add a live step
+    const addStep = (step: LiveStep) => {
+      setLiveSteps(prev => {
+        const existing = prev.find(s => s.id === step.id);
+        if (existing) {
+          return prev.map(s => s.id === step.id ? step : s);
+        }
+        return [...prev, step];
+      });
+    };
+
+    // Helper to update step status
+    const updateStep = (id: string, updates: Partial<LiveStep>) => {
+      setLiveSteps(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+    };
 
     try {
       if (chatMode === 'agent') {
-        // Agent mode (streaming)
-        setLoadingStatus('Agent 正在规划探索路径...');
+        // Agent mode (streaming with detailed steps)
+        let stepCounter = 0;
 
-        const getToolFriendlyName = (toolName: string): string => {
-          const toolNameMap: Record<string, string> = {
-            'rag_search': '文档检索',
-            'code_graph': '代码结构分析',
-            'file_read': '文件内容读取',
-            'repo_map': '仓库结构扫描',
-          };
-          return toolNameMap[toolName] || toolName;
-        };
-
-        const appendLiveLog = (line: string) => {
-          setLiveAgentLogs(prev => [...prev.slice(-5), line]);
-        };
+        addStep({
+          id: 'planning',
+          type: 'planning',
+          status: 'running',
+          title: t('analyzingIntent'),
+          description: t('analyzingIntentDesc'),
+        });
 
         let finalResponse: AgentChatResponse | null = null;
+        
         for await (const event of api.askAgentQuestionStream({
           user_id: userId,
           question,
@@ -298,64 +316,135 @@ export default function ChatInterface({
         })) {
           if (event.type === 'planning') {
             const status = String(event.data.status || '');
-            const friendlyStatus = status === 'analyzing' 
-              ? '正在理解您的问题...' 
-              : status === 'planned' 
-                ? '已制定探索策略' 
-                : '正在分析问题...';
-            setLoadingStatus(friendlyStatus);
-            appendLiveLog(friendlyStatus);
+            const intent = String(event.data.intent || '');
+            const entities = (event.data.entities as string[]) || [];
+            
+            if (status === 'planned' || status === 'direct_answer') {
+              updateStep('planning', {
+                status: 'done',
+                title: t('analysisDone'),
+                description: intent ? `${t('intentLabel')}: ${intent}` : undefined,
+                details: entities.length > 0 ? `${t('keyEntities')}: ${entities.slice(0, 3).join(', ')}` : undefined,
+              });
+            } else if (status === 'analyzing') {
+              updateStep('planning', {
+                description: t('understandingQuestion'),
+              });
+            }
             continue;
           }
 
           if (event.type === 'tool_call') {
             const status = String(event.data.status || '');
+            const iteration = Number(event.data.iteration || 1);
+            const tools = (event.data.tools as Array<{ tool: string; description?: string; query?: string; pattern?: string; file_path?: string; symbol_name?: string; operation?: string }>)|| [];
+            
             if (status === 'start') {
-              const tools = Array.isArray(event.data.tools) ? event.data.tools : [];
-              const friendlyNames = tools
-                .map((item) => {
-                  if (item && typeof item === 'object' && 'tool' in item) {
-                    return getToolFriendlyName(String(item.tool));
-                  }
-                  return null;
-                })
-                .filter(Boolean);
-              const line = friendlyNames.length > 0 
-                ? `正在${friendlyNames.join('、')}...` 
-                : '正在收集相关信息...';
-              setLoadingStatus(line);
-              appendLiveLog(line);
+              // Add new steps for each tool
+              for (const toolInfo of tools) {
+                stepCounter++;
+                const stepId = `tool_${iteration}_${stepCounter}`;
+                addStep({
+                  id: stepId,
+                  type: 'tool',
+                  status: 'running',
+                  title: toolInfo.description || toolInfo.tool,
+                  description: toolInfo.query || toolInfo.pattern || toolInfo.file_path || toolInfo.symbol_name || undefined,
+                  tool: {
+                    tool: toolInfo.tool,
+                    description: toolInfo.description || '',
+                    query: toolInfo.query,
+                    pattern: toolInfo.pattern,
+                    file_path: toolInfo.file_path,
+                    symbol_name: toolInfo.symbol_name,
+                    operation: toolInfo.operation,
+                    status: 'running',
+                  },
+                });
+              }
             } else if (status === 'done') {
-              const line = '已获取相关代码上下文';
-              setLoadingStatus(line);
-              appendLiveLog(line);
-            } else {
-              const line = '正在深入分析代码...';
-              setLoadingStatus(line);
-              appendLiveLog(line);
+              const elapsedMs = Number(event.data.elapsed_ms || 0);
+              const results = (event.data.results as Array<{
+                tool: string;
+                success: boolean;
+                duration_ms?: number;
+                metrics?: Record<string, unknown>;
+              }>) || [];
+              
+              // Update all running tool steps to done
+              setLiveSteps(prev => prev.map(s => {
+                if (s.type === 'tool' && s.status === 'running') {
+                  const result = results.find(r => s.tool?.tool === r.tool);
+                  const perToolMs = typeof result?.duration_ms === 'number' ? result.duration_ms : elapsedMs;
+                  return {
+                    ...s,
+                    status: 'done' as const,
+                    elapsed_ms: perToolMs,
+                    tool: s.tool ? {
+                      ...s.tool,
+                      status: 'done' as const,
+                      success: result?.success ?? true,
+                      elapsed_ms: perToolMs,
+                      metrics: result?.metrics,
+                    } : undefined,
+                  };
+                }
+                return s;
+              }));
             }
             continue;
           }
 
           if (event.type === 'evaluation') {
             const status = String(event.data.status || '');
-            if (status === 'done') {
+            const iteration = Number(event.data.iteration || 1);
+            
+            if (status === 'start') {
+              addStep({
+                id: `eval_${iteration}`,
+                type: 'evaluation',
+                status: 'running',
+                title: t('evaluatingInfo'),
+                description: t('evaluatingDesc'),
+              });
+            } else if (status === 'done') {
               const isSufficient = Boolean(event.data.is_sufficient);
-              const line = isSufficient 
-                ? '已收集到足够的信息' 
-                : '正在补充更多相关代码...';
-              setLoadingStatus(line);
-              appendLiveLog(line);
+              const confidence = String(event.data.confidence_level || '');
+              const missingCount = Number(event.data.missing_count || 0);
+              
+              updateStep(`eval_${iteration}`, {
+                status: 'done',
+                title: isSufficient ? t('infoSufficient') : t('needMoreInfo'),
+                description: confidence ? `${t('confidenceLabel')}: ${confidence}` : undefined,
+                details: missingCount > 0 ? t('missingItems', { n: missingCount }) : undefined,
+              });
             }
             continue;
           }
 
           if (event.type === 'synthesis') {
-            const line = String(event.data.status || '') === 'done'
-              ? '正在整理答案...'
-              : '正在生成答案...';
-            setLoadingStatus(line);
-            appendLiveLog(line);
+            const status = String(event.data.status || '');
+            
+            if (status === 'start') {
+              addStep({
+                id: 'synthesis',
+                type: 'synthesis',
+                status: 'running',
+                title: t('synthesisingAnswer'),
+                description: t('synthesisingDesc'),
+              });
+            } else if (status === 'done') {
+              updateStep('synthesis', {
+                status: 'done',
+                title: t('answerDone'),
+              });
+            }
+            continue;
+          }
+
+          if (event.type === 'answer_delta') {
+            const delta = String(event.data.delta || '');
+            setStreamingAnswer(prev => prev + delta);
             continue;
           }
 
@@ -370,7 +459,7 @@ export default function ChatInterface({
         }
 
         if (!finalResponse) {
-          throw new Error('Agent 未返回最终结果');
+          throw new Error(t('agentNoResult'));
         }
 
         setChatId(finalResponse.chat_id);
@@ -385,30 +474,139 @@ export default function ChatInterface({
           mode: 'agent',
           mermaid: finalResponse.mermaid,
           trajectory: finalResponse.trajectory,
+          isNew: false, // Don't use typewriter effect since we already streamed
         };
         setMessages(prev => [...prev, assistantMessage]);
+        
       } else {
-        // RAG mode
-        const response: ChatResponse = await api.askQuestion({
-          user_id: userId,
-          question,
-          repo_url: repoUrl,
-          chat_id: chatId,
-          conversation_history: buildConversationHistory(),
-          current_page_context: currentPageContext,
+        // RAG mode with streaming
+        addStep({
+          id: 'retrieval',
+          type: 'retrieval',
+          status: 'running',
+          title: t('retrievalTitle'),
+          description: t('retrievalDesc'),
         });
-        setChatId(response.chat_id);
-        loadChatHistory();
 
-        const assistantMessage: DisplayMessage = {
-          id: generateId(),
-          role: 'assistant',
-          content: response.answer,
-          timestamp: new Date(),
-          sources: response.sources,
-          mode: 'rag',
-        };
-        setMessages(prev => [...prev, assistantMessage]);
+        let finalAnswer = '';
+        let finalSources: string[] = [];
+        let responseChatId = chatId;
+
+        try {
+          for await (const event of api.askQuestionStream({
+            user_id: userId,
+            question,
+            repo_url: repoUrl,
+            chat_id: chatId,
+            conversation_history: buildConversationHistory(),
+            current_page_context: currentPageContext,
+          })) {
+            if (event.type === 'retrieval_start') {
+              updateStep('retrieval', {
+                description: `${t('retrievalQuery')}: ${String(event.data.query || '').slice(0, 50)}...`,
+              });
+              continue;
+            }
+
+            if (event.type === 'hyde_generated') {
+              addStep({
+                id: 'hyde',
+                type: 'hyde',
+                status: 'done',
+                title: t('hydeTitle'),
+                description: t('hydeDesc'),
+              });
+              continue;
+            }
+
+            if (event.type === 'retrieval_done') {
+              const docCount = Number(event.data.doc_count || 0);
+              const sources = (event.data.sources as string[]) || [];
+              updateStep('retrieval', {
+                status: 'done',
+                title: t('foundDocs', { n: docCount }),
+                description: sources.length > 0 ? sources.slice(0, 2).join(', ') : undefined,
+              });
+              
+              addStep({
+                id: 'generation',
+                type: 'synthesis',
+                status: 'running',
+                title: t('generatingAnswer'),
+                description: t('generatingAnswerDesc'),
+              });
+              continue;
+            }
+
+            if (event.type === 'answer_delta') {
+              const delta = String(event.data.delta || '');
+              finalAnswer += delta;
+              setStreamingAnswer(prev => prev + delta);
+              continue;
+            }
+
+            if (event.type === 'answer_done') {
+              finalAnswer = String(event.data.answer || finalAnswer);
+              finalSources = (event.data.sources as string[]) || [];
+              updateStep('generation', {
+                status: 'done',
+                title: t('answerDone'),
+              });
+              continue;
+            }
+
+            if (event.type === 'complete') {
+              responseChatId = String(event.data.chat_id || chatId);
+              finalSources = (event.data.sources as string[]) || finalSources;
+              continue;
+            }
+
+            if (event.type === 'error') {
+              throw new Error(String(event.data.error || 'RAG stream failed'));
+            }
+          }
+
+          setChatId(responseChatId);
+          loadChatHistory();
+
+          const assistantMessage: DisplayMessage = {
+            id: generateId(),
+            role: 'assistant',
+            content: finalAnswer,
+            timestamp: new Date(),
+            sources: finalSources,
+            mode: 'rag',
+            isNew: false, // Don't use typewriter since we streamed
+          };
+          setMessages(prev => [...prev, assistantMessage]);
+          
+        } catch (streamError) {
+          // Fallback to non-streaming API if streaming fails
+          console.warn('Streaming failed, falling back to blocking API:', streamError);
+          
+          const response: ChatResponse = await api.askQuestion({
+            user_id: userId,
+            question,
+            repo_url: repoUrl,
+            chat_id: chatId,
+            conversation_history: buildConversationHistory(),
+            current_page_context: currentPageContext,
+          });
+          
+          setChatId(response.chat_id);
+          loadChatHistory();
+
+          const assistantMessage: DisplayMessage = {
+            id: generateId(),
+            role: 'assistant',
+            content: response.answer,
+            timestamp: new Date(),
+            sources: response.sources,
+            mode: 'rag',
+            isNew: true,
+          };
+          setMessages(prev => [...prev, assistantMessage]);
+        }
       }
 
     } catch (err) {
@@ -427,6 +625,8 @@ export default function ChatInterface({
       setIsLoading(false);
       setLoadingStatus('');
       setLiveAgentLogs([]);
+      setLiveSteps([]);
+      setStreamingAnswer('');
     }
   };
 
@@ -445,7 +645,7 @@ export default function ChatInterface({
 
   const handleDeleteChat = async (historyItem: ChatHistoryItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!userId || !window.confirm('确定要删除这个对话吗？此操作无法撤销。')) return;
+    if (!userId || !window.confirm(t('deleteConfirmDialog'))) return;
 
     const effectiveChatId = historyItem.chat_id ?? historyItem.id;
     setDeletingChatId(effectiveChatId);
@@ -458,7 +658,7 @@ export default function ChatInterface({
       }
     } catch (error) {
       console.error('Failed to delete chat:', error);
-      alert('删除失败，请重试');
+      alert(t('deleteConfirm'));
     } finally {
       setDeletingChatId(null);
     }
@@ -480,7 +680,7 @@ export default function ChatInterface({
             <button
               onClick={() => setMode('open')}
               className="inline-flex items-center gap-2.5 rounded-full border border-fuchsia-300/40 bg-black/80 px-5 py-3.5 text-base font-medium text-fuchsia-100 shadow-xl shadow-fuchsia-500/20 backdrop-blur-xl hover:bg-black hover:scale-105 hover:shadow-fuchsia-500/40 transition-all duration-300"
-              aria-label="打开聊天侧边栏"
+              aria-label="Open chat sidebar"
             >
               <MessageSquare className="w-5 h-5" />
               Chat
@@ -510,7 +710,7 @@ export default function ChatInterface({
                 <button
                   onClick={() => setShowHistorySidebar((prev) => !prev)}
                   className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-white transition-colors"
-                  aria-label="切换历史侧栏"
+                  aria-label="Toggle history sidebar"
                 >
                   <History className="w-4 h-4" />
                   <span className="font-mono">{repoName}</span>
@@ -534,7 +734,7 @@ export default function ChatInterface({
             </header>
 
             <div className="flex-1 flex overflow-hidden">
-              {/* 左侧历史记录侧边栏 */}
+              {/* Chat history sidebar */}
               <aside className={cn(
                 "w-64 border-r border-white/10 bg-[#0A0A0A] flex-col transition-all duration-300",
                 showHistorySidebar ? "hidden sm:flex" : "hidden"
@@ -542,12 +742,12 @@ export default function ChatInterface({
                 <div className="p-3 border-b border-white/5 flex items-center justify-between">
                   <h3 className="text-sm font-medium text-white/80 flex items-center gap-2">
                     <History className="w-4 h-4 text-purple-400" />
-                    对话历史
+                    {t('chatHistory')}
                   </h3>
                   <button
                     onClick={handleNewChat}
                     className="p-1.5 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 active:scale-95 transition-all"
-                    aria-label="新建对话"
+                    aria-label="New chat"
                   >
                     <Plus className="w-4 h-4" />
                   </button>
@@ -560,8 +760,8 @@ export default function ChatInterface({
                   ) : chatHistory.length === 0 ? (
                     <div className="text-center py-8">
                       <MessageSquare className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-                      <p className="text-xs text-zinc-500">暂无对话记录</p>
-                      <p className="text-xs text-zinc-600 mt-1">开始提问后将保存对话</p>
+                      <p className="text-xs text-zinc-500">{t('noChatHistory')}</p>
+                      <p className="text-xs text-zinc-600 mt-1">{t('startChatHint')}</p>
                     </div>
                   ) : (
                     chatHistory.map((item) => {
@@ -576,7 +776,7 @@ export default function ChatInterface({
                             ? "bg-purple-500/20 border border-purple-500/30"
                             : "hover:bg-white/5 border border-transparent"
                         )}
-                        aria-label={`加载对话 ${item.title || effectiveChatId.slice(0, 8)}`}
+                        aria-label={`Load chat ${item.title || effectiveChatId.slice(0, 8)}`}
                       >
                         <div className="flex items-center gap-2">
                           <MessageSquare className={cn(
@@ -587,7 +787,7 @@ export default function ChatInterface({
                             "text-sm truncate flex-1",
                             chatId === effectiveChatId ? "text-purple-200" : "text-zinc-400 group-hover:text-zinc-300"
                           )}>
-                            {item.title || `对话 ${effectiveChatId.slice(0, 8)}`}
+                            {item.title || `${t('chatDefault')} ${effectiveChatId.slice(0, 8)}`}
                           </span>
                           
                           {/* Delete Button */}
@@ -604,7 +804,7 @@ export default function ChatInterface({
                           </button>
                         </div>
                         <div className="mt-1 text-[10px] text-zinc-600 ml-6">
-                          {new Date(item.created_at).toLocaleDateString('zh-CN', { 
+                          {new Date(item.created_at).toLocaleDateString('en-US', { 
                             month: 'short', 
                             day: 'numeric',
                             hour: '2-digit',
@@ -618,108 +818,111 @@ export default function ChatInterface({
                 </div>
               </aside>
 
-              {/* 中间聊天区域 */}
-              <div className="flex-1 flex flex-col min-w-0 relative">
-                <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 custom-scrollbar">
+              {/* Main chat area */}
+              <div className="flex-1 flex flex-col min-w-0 relative bg-[#050505]">
+                <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 custom-scrollbar scroll-smooth">
                   {isChatLoading && (
                     <div className="flex flex-col items-center justify-center h-full text-center">
                       <Loader2 className="w-8 h-8 text-purple-400 animate-spin mb-4" />
-                      <p className="text-sm text-zinc-500">正在加载对话...</p>
+                      <p className="text-sm text-zinc-500">{t('loadingChat')}</p>
                     </div>
                   )}
                   {messages.length === 0 && !isLoading && !isChatLoading && (
-                    <div className="flex flex-col items-center justify-center h-full text-center">
-                      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500/20 to-blue-500/20 flex items-center justify-center mb-4">
+                    <div className="flex flex-col items-center justify-center h-full text-center px-4">
+                      <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-purple-500/10 to-blue-500/10 border border-white/5 flex items-center justify-center mb-6 shadow-xl">
                         {chatMode === 'agent' ? (
                           <Bot className="w-8 h-8 text-purple-400" />
                         ) : (
                           <Sparkles className="w-8 h-8 text-blue-400" />
                         )}
                       </div>
-                      <h2 className="text-xl font-semibold text-white/90 mb-2">
-                        {chatMode === 'agent' ? 'Agent 模式' : '快速问答'}
+                      <h2 className="text-2xl font-semibold text-white/90 mb-3">
+                        {chatMode === 'agent' ? t('agentDeepAnalysis') : t('quickQA')}
                       </h2>
-                      <p className="text-sm text-zinc-500 max-w-md">
+                      <p className="text-[15px] text-zinc-400 max-w-md leading-relaxed">
                         {chatMode === 'agent' 
-                          ? '我会深入分析代码结构，追踪调用链，为您提供全面的代码理解'
-                          : '快速搜索文档和代码，回答您的问题'}
+                          ? t('agentDesc')
+                          : t('ragDesc')}
                       </p>
                     </div>
                   )}
-                  {messages.map((message) => (
-                    <div key={message.id} className="max-w-3xl mx-auto">
-                      <MessageItem message={message} repoUrl={currentRepoUrl} />
-                    </div>
-                  ))}
+                  <div className="space-y-2">
+                    {messages.map((message) => (
+                      <div key={message.id} className="max-w-3xl mx-auto px-2 md:px-0">
+                        <MessageItem message={message} repoUrl={currentRepoUrl} />
+                      </div>
+                    ))}
+                  </div>
                   
                   {isLoading && (
-                    <div className="max-w-3xl mx-auto pl-12">
-                      <div className={cn(
-                        "flex items-center gap-2 text-sm",
-                        chatMode === 'agent' ? "text-purple-300" : "text-muted-foreground"
-                      )}>
-                        {chatMode === 'agent' ? (
-                          <Bot className="w-4 h-4 animate-pulse" />
-                        ) : (
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                    <div className="max-w-3xl mx-auto px-2 md:px-0 mt-4">
+                      <div className="ml-2 md:ml-12 p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                        <LiveStepFlow 
+                          steps={liveSteps}
+                          isAgent={chatMode === 'agent'}
+                          currentPhase={loadingStatus}
+                          streamingAnswer={streamingAnswer}
+                        />
+                        {liveSteps.length === 0 && (
+                          <div className={cn(
+                            "flex items-center gap-3 text-sm",
+                            chatMode === 'agent' ? "text-purple-400" : "text-blue-400"
+                          )}>
+                            {chatMode === 'agent' ? (
+                              <Bot className="w-4 h-4 animate-pulse" />
+                            ) : (
+                              <Sparkles className="w-4 h-4 animate-pulse" />
+                            )}
+                            <span className="font-medium tracking-wide">{loadingStatus || 'Thinking...'}</span>
+                          </div>
                         )}
-                        <span>{loadingStatus || 'Thinking...'}</span>
                       </div>
-                      {chatMode === 'agent' && liveAgentLogs.length > 0 && (
-                        <div className="mt-3 space-y-1">
-                          {liveAgentLogs.map((log, index) => (
-                            <div key={`${log}-${index}`} className="text-xs text-zinc-400 font-mono">
-                              {log}
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   )}
                   <div ref={messagesEndRef} className="h-4" />
                 </div>
 
-                <div className="p-4 md:p-6 border-t border-white/5 bg-[#0A0A0A]">
+                <div className="p-4 md:p-6 bg-gradient-to-t from-[#0A0A0A] via-[#0A0A0A] to-transparent shrink-0">
                   <div className="max-w-3xl mx-auto relative space-y-3">
-                    <div className="relative bg-white/5 border border-white/10 rounded-xl overflow-hidden focus-within:ring-1 focus-within:ring-blue-500/50 transition-all">
+                    <div className="relative bg-[#1A1A1A] border border-white/10 rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-purple-500/30 focus-within:border-purple-500/50 transition-all shadow-lg">
                       <textarea
                         ref={fullViewInputRef}
                         value={inputValue}
                         onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
                         placeholder={chatMode === 'agent' ? "Ask Agent to analyze code..." : "Ask a question..."}
-                        className="w-full bg-transparent border-none outline-none text-sm text-white placeholder:text-muted-foreground resize-none px-4 py-3 max-h-[200px]"
+                        className="w-full bg-transparent border-none outline-none text-[15px] text-white placeholder:text-zinc-500 resize-none px-4 py-3.5 max-h-[200px] leading-relaxed"
                         rows={1}
                         disabled={isLoading}
                         aria-label="Follow-up question"
                       />
-                      <div className="flex items-center justify-between px-2 pb-2">
+                      <div className="flex items-center justify-between px-3 pb-3">
                         {/* Mode Switcher inside Input Area */}
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => handleSetChatMode('rag')}
                             className={cn(
-                              "flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium transition-all border",
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all border",
                               chatMode === 'rag'
                                 ? "bg-blue-500/20 text-blue-300 border-blue-500/30"
                                 : "text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-white/5"
                             )}
-                            title="快速回答模式"
+                            title="Quick answer mode"
                           >
-                            <Sparkles className="w-3 h-3" />
+                            <Sparkles className="w-3.5 h-3.5" />
                             <span>Chat</span>
                           </button>
                           <button
                             onClick={() => handleSetChatMode('agent')}
                             className={cn(
-                              "flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium transition-all border",
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all border",
                               chatMode === 'agent'
                                 ? "bg-purple-500/20 text-purple-300 border-purple-500/30"
                                 : "text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-white/5"
                             )}
-                            title="Agent 深度模式"
+                            title="Agent deep analysis mode"
                           >
-                            <Bot className="w-3 h-3" />
+                            <Bot className="w-3.5 h-3.5" />
                             <span>Agent</span>
                           </button>
                         </div>
@@ -729,12 +932,12 @@ export default function ChatInterface({
                             onClick={handleSendMessage}
                             disabled={!inputValue.trim() || isLoading}
                             className={cn(
-                              "p-1.5 rounded-lg transition-all",
+                              "p-2 rounded-xl transition-all shadow-sm",
                               inputValue.trim() && !isLoading
                                 ? chatMode === 'agent'
-                                  ? "bg-purple-600 text-white hover:bg-purple-500"
-                                  : "bg-blue-600 text-white hover:bg-blue-500"
-                                : "bg-white/5 text-muted-foreground cursor-not-allowed"
+                                  ? "bg-purple-600 text-white hover:bg-purple-500 hover:shadow-purple-500/25"
+                                  : "bg-blue-600 text-white hover:bg-blue-500 hover:shadow-blue-500/25"
+                                : "bg-white/5 text-zinc-600 cursor-not-allowed"
                             )}
                             aria-label="Send follow-up"
                           >

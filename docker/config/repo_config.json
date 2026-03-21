@@ -156,8 +156,17 @@
         "rag_answer": "qwen/qwen3-235b-a22b-2507",
         "wiki_structure": "google/gemini-2.5-flash",
         "wiki_content": "qwen/qwen3.5-flash-02-23",
-        "community_summary": "google/gemini-2.5-flash"
+        "community_summary": "google/gemini-2.5-flash",
+        "chat_title": "google/gemini-2.5-flash",
+        "agent_planner": "google/gemini-2.5-flash",
+        "agent_tool_router": "google/gemini-2.5-flash",
+        "agent_evaluator": "google/gemini-2.5-flash",
+        "agent_synthesizer": "qwen/qwen3-235b-a22b-2507",
+        "agent_session_compressor": "google/gemini-2.5-flash"
       }
+    },
+    "wiki_generation": {
+      "content_concurrency": 3
     }
   }
   

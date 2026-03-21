@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -10,6 +10,29 @@ import Mermaid from './Mermaid';
 import ChatInterface from './ChatInterface';
 import { cn } from '@/lib/utils';
 import 'highlight.js/styles/github-dark.css';
+
+// Simple in-memory cache for wiki content
+const contentCache = new Map<string, { content: WikiPageContent; timestamp: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+const getCachedContent = (key: string): WikiPageContent | null => {
+  const cached = contentCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.timestamp > CACHE_TTL_MS) {
+    contentCache.delete(key);
+    return null;
+  }
+  return cached.content;
+};
+
+const setCachedContent = (key: string, content: WikiPageContent): void => {
+  // Limit cache size
+  if (contentCache.size > 50) {
+    const oldestKey = contentCache.keys().next().value;
+    if (oldestKey) contentCache.delete(oldestKey);
+  }
+  contentCache.set(key, { content, timestamp: Date.now() });
+};
 
 // --- Types ---
 
@@ -185,12 +208,24 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl,
     setMobileMenuOpen(false);
   }, []);
 
+  // Track if structure has been loaded to avoid re-fetching
+  const structureLoadedRef = useRef(false);
+  const lastStructureUrlRef = useRef<string>('');
+
   useEffect(() => {
+    // Only fetch structure once per URL change
+    if (structureLoadedRef.current && lastStructureUrlRef.current === structureUrl) {
+      return;
+    }
+
     const fetchStructure = async () => {
       try {
         setLoading(true);
         const targetUrl = transformUrl(structureUrl);
-        const res = await fetch(`${targetUrl}?t=${Date.now()}`);
+        // Use browser cache, don't add timestamp
+        const res = await fetch(targetUrl, {
+          cache: 'default',
+        });
         if (!res.ok) throw new Error('Failed to fetch structure');
         let data = await res.json();
 
@@ -219,6 +254,10 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl,
         });
 
         setStructure(normalized);
+        structureLoadedRef.current = true;
+        lastStructureUrlRef.current = structureUrl;
+        
+        // Only set initial selectedId if none is set
         if (normalized.length > 0 && !selectedId) {
           setSelectedId(normalized[0].id);
         }
@@ -230,7 +269,7 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl,
     };
 
     if (structureUrl) fetchStructure();
-  }, [structureUrl, selectedId]);
+  }, [structureUrl]); // Removed selectedId from dependencies
 
   const findItemById = useCallback((items: WikiStructureItem[], id: string): WikiStructureItem | null => {
     for (const item of items) {
@@ -248,7 +287,6 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl,
 
     const fetchPage = async () => {
       try {
-        setLoadingPage(true);
         const item = findItemById(structure, selectedId);
         if (!item) throw new Error('Page not found in structure');
 
@@ -273,12 +311,29 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl,
         if (!matchedUrl) throw new Error(`Content URL not found for ${expectedFilename}`);
 
         const transformedUrl = transformUrl(matchedUrl);
-        const res = await fetch(`${transformedUrl}?t=${Date.now()}`);
+        const cacheKey = `${transformedUrl}`;
+
+        // Check cache first
+        const cachedContent = getCachedContent(cacheKey);
+        if (cachedContent) {
+          setPageContent(cachedContent);
+          return;
+        }
+
+        // Cache miss, fetch from network
+        setLoadingPage(true);
+        const res = await fetch(transformedUrl, {
+          cache: 'default', // Use browser cache
+        });
         if (!res.ok) throw new Error('Failed to fetch page content');
         const data = await res.json();
 
         const parsedContent = parseContentSafely(data.content);
-        setPageContent({ ...data, content: parsedContent });
+        const pageData: WikiPageContent = { ...data, content: parsedContent };
+        
+        // Store in cache
+        setCachedContent(cacheKey, pageData);
+        setPageContent(pageData);
       } catch {
         setError('Failed to load page content.');
       } finally {
@@ -291,17 +346,41 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl,
 
   const currentPageContext = useMemo(() => {
     if (!pageContent) return undefined;
-    const contextParts = [
-      `当前页面: ${pageContent.title}`,
-      `路径: ${pageContent.breadcrumb}`,
-    ];
-    if (pageContent.content.intro) {
-      const introPreview = pageContent.content.intro.substring(0, 300);
-      contextParts.push(`页面简介: ${introPreview}${pageContent.content.intro.length > 300 ? '...' : ''}`);
+    
+    // Build a compact context with only essential information
+    const contextParts: string[] = [];
+    
+    // Page title and path (most important)
+    contextParts.push(`Page: ${pageContent.title}`);
+    if (pageContent.breadcrumb) {
+      contextParts.push(`Path: ${pageContent.breadcrumb}`);
     }
+    
+    // Related files (important for code understanding)
     if (pageContent.files?.length > 0) {
-      contextParts.push(`关联文件: ${pageContent.files.slice(0, 5).join(', ')}`);
+      const topFiles = pageContent.files.slice(0, 3);
+      contextParts.push(`Related files: ${topFiles.join(', ')}`);
     }
+    
+    // Only include intro if it's short and meaningful (avoid long intros)
+    if (pageContent.content.intro) {
+      const firstSentence = pageContent.content.intro.split(/[.!?。！？]\s*/)[0];
+      if (firstSentence && firstSentence.length < 150) {
+        contextParts.push(`Summary: ${firstSentence.trim()}`);
+      }
+    }
+    
+    // Section headings as keywords (compact)
+    if (pageContent.content.sections?.length > 0) {
+      const headings = pageContent.content.sections
+        .slice(0, 4)
+        .map(s => s.heading)
+        .join(', ');
+      if (headings) {
+        contextParts.push(`Sections: ${headings}`);
+      }
+    }
+    
     return contextParts.join('\n');
   }, [pageContent]);
 

@@ -11,9 +11,9 @@ export default function NotFoundPage() {
           <Compass className="w-6 h-6 text-fuchsia-200" />
         </div>
         <h1 className="text-3xl font-bold text-white">404</h1>
-        <p className="text-zinc-300">页面不存在，已提供路由级兜底。</p>
+        <p className="text-zinc-300">This page does not exist.</p>
         <Link to="/app/dashboard" className="inline-flex text-sm px-3 py-1.5 rounded-lg border border-white/20 hover:bg-white/10">
-          返回 Dashboard
+          Back to Dashboard
         </Link>
       </div>
     </div>

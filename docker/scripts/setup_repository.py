@@ -21,9 +21,10 @@ def _repo_hash(repo_url_or_path: str) -> str:
     return f"{repo_name}_{url_hash}"
 
 
-def setup_repository(repo_url_or_path: str) -> str:
+def setup_repository(repo_url_or_path: str, task_id: str | None = None) -> str:
     """
-    将远程地址克隆到本地，并返回本地路径
+    将远程地址克隆到本地，并返回本地路径。
+    当 task_id 不为空时，使用 task_id 级子目录隔离，避免并发任务互删。
     """
 
     print(f"Setting up repository for: {repo_url_or_path}")
@@ -37,6 +38,9 @@ def setup_repository(repo_url_or_path: str) -> str:
 
         REPO_STORE_ROOT.mkdir(parents=True, exist_ok=True)
         repo_dir_name = _repo_hash(repo_url_or_path)
+        if task_id:
+            # 使用 task_id 级子目录，不同任务互不干扰
+            repo_dir_name = f"{repo_dir_name}_{task_id}"
         repo_dir = (REPO_STORE_ROOT / repo_dir_name).resolve()
 
         # 保持目录可重复使用：每次拉取前清理旧目录，避免脏状态

@@ -39,3 +39,8 @@ def load_config(config_path: Union[str, Path] = CONFIG_PATH) -> Dict[str, Any]:
 
 # 预加载全局配置供其他模块直接使用
 CONFIG = load_config()
+
+def get_wiki_content_concurrency(config: Dict[str, Any] | None = None) -> int:
+    """获取 wiki 正文生成并发数，默认 3"""
+    cfg = config or CONFIG
+    return cfg.get("wiki_generation", {}).get("content_concurrency", 3)

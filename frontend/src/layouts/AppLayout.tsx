@@ -1,11 +1,12 @@
 'use client';
 
-import { History, Home, LogOut, UserRound, FileCode2, User } from 'lucide-react';
+import { History, Home, LogOut, FileCode2, User } from 'lucide-react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/providers/AuthProvider';
 import { prefetchRouteModule } from '@/router/prefetch';
+import { t } from '@/lib/i18n';
 
 export default function AppLayout() {
   const { user, signOut } = useAuth();
@@ -59,7 +60,7 @@ export default function AppLayout() {
               }
             >
               <Home className="w-4 h-4" />
-              Dashboard
+              {t('dashboard')}
             </NavLink>
             <NavLink
               to="/app/history"
@@ -74,7 +75,7 @@ export default function AppLayout() {
               }
             >
               <History className="w-4 h-4" />
-              History
+              {t('history')}
             </NavLink>
           </nav>
         </div>
@@ -119,9 +120,9 @@ export default function AppLayout() {
             {isProfileOpen && (
               <div className="absolute right-0 mt-3 w-64 rounded-2xl border border-white/10 bg-[#121212]/95 backdrop-blur-xl shadow-2xl shadow-black/50 overflow-hidden py-1 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="px-4 py-4 border-b border-white/5 bg-white/[0.02]">
-                  <p className="text-xs text-zinc-400 font-medium mb-1">Signed in as</p>
+                  <p className="text-xs text-zinc-400 font-medium mb-1">{t('signedInAs')}</p>
                   <p className="text-sm font-semibold text-zinc-100 truncate flex items-center gap-2" title={identity}>
-                    <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div>
+                    <span className="inline-block w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)] shrink-0"></span>
                     {identity}
                   </p>
                 </div>
@@ -135,7 +136,7 @@ export default function AppLayout() {
                     className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-all font-medium group"
                   >
                     <LogOut className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-                    Sign out
+                    {t('signOut')}
                   </button>
                 </div>
               </div>

@@ -17,6 +17,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    document.documentElement.lang = 'en';
+  }, []);
+
+  useEffect(() => {
     const bootstrap = async () => {
       const {
         data: { session },

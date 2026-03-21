@@ -3,15 +3,19 @@ from __future__ import annotations
 import json
 import re
 import logging
+import threading
+import time
+import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Sequence, Optional
+from typing import Any, Callable, Dict, Iterable, List, Sequence, Optional, Tuple
 
 from langchain_core.prompts import ChatPromptTemplate
 
 from src.clients.ai_client_base import BaseAIClient
 from src.clients.ai_client_factory import get_ai_client, get_model_config
-from src.config import CONFIG
+from src.config import CONFIG, get_wiki_content_concurrency
 from src.prompts import get_wiki_section_prompt
 
 # 初始化日志
@@ -38,6 +42,7 @@ import networkx as nx
 class WikiContentGenerator:
     """
     将 wiki 目录树与仓库文件上下文交给 AI 模型，生成每个节点对应的内容与 Mermaid 架构图。
+    支持受控并发（线程池），每个工作线程独立获取 AI 客户端实例。
     """
 
     def __init__(
@@ -47,22 +52,37 @@ class WikiContentGenerator:
         json_output_dir: str | Path,
         output_dir: str | Path | None = None,  # 保留以兼容旧代码，但不再使用
         client: BaseAIClient | None = None,
+        client_factory: Callable[[], BaseAIClient] | None = None,
         prompt_template: ChatPromptTemplate | None = None,
         max_file_chars: int = 4000,
         max_section_chars: int = 16000,
+        max_concurrency: int | None = None,
+        progress_callback: Callable[[float, str], None] | None = None,
+        task_id: str | None = None,
     ) -> None:
         self.repo_root = Path(repo_root).expanduser().resolve()
         self.json_output_dir = Path(json_output_dir).expanduser().resolve()
         self.json_output_dir.mkdir(parents=True, exist_ok=True)
 
-        if client is None:
-            provider, model = get_model_config(CONFIG, "wiki_content")
-            self.client = get_ai_client(provider, model=model)
+        # 客户端工厂：并发时每个 worker 独立创建实例
+        if client_factory is not None:
+            self._client_factory = client_factory
+        elif client is not None:
+            # 单线程回退：直接使用传入的 client
+            self._client_factory = lambda: client
         else:
-            self.client = client
+            provider, model = get_model_config(CONFIG, "wiki_content")
+            self._client_factory = lambda: get_ai_client(provider, model=model)
+
+        # 保留 self.client 用于不需要并发的内部方法
+        self.client = client if client is not None else self._client_factory()
+
         self.prompt_template = prompt_template or get_wiki_section_prompt()
         self.max_file_chars = max_file_chars
         self.max_section_chars = max_section_chars
+        self.max_concurrency = max_concurrency or get_wiki_content_concurrency()
+        self.progress_callback = progress_callback
+        self.task_id = task_id or "unknown"
         self.graph: Optional[nx.DiGraph] = None
 
     def set_graph(self, graph: nx.DiGraph):
@@ -70,30 +90,105 @@ class WikiContentGenerator:
 
     def generate(self, structure: Dict[str, Any]) -> List[Path]:
         """
-        根据 wiki 目录结构依次生成内容，返回所有成功写入的 JSON 文件路径。
+        根据 wiki 目录结构并发生成内容，返回所有成功写入的 JSON 文件路径。
         """
         toc = structure.get("toc") or []
         sections = list(self._flatten_sections(toc))
+        total = len(sections)
+        if total == 0:
+            logger.info(f"[task={self.task_id}] 无章节需要生成")
+            return []
 
+        # Phase 5: 预处理文件名映射，在主线程中一次性完成，避免并发冲突
+        filename_map = self._build_filename_map(sections)
+
+        concurrency = min(self.max_concurrency, total)
+        logger.info(
+            f"[task={self.task_id}] 开始并发生成 wiki 正文: "
+            f"总章节数={total}, 并发上限={concurrency}"
+        )
+
+        # 线程安全的进度计数器
+        lock = threading.Lock()
+        counters = {"completed": 0, "failed": 0, "active": 0}
         generated_files: List[Path] = []
-        for section in sections:
+
+        def _worker(section: WikiSection) -> Tuple[WikiSection, Optional[Path]]:
+            """单个章节的生成 worker，每个 worker 独立获取 AI 客户端"""
+            worker_client = self._client_factory()
+
+            with lock:
+                counters["active"] += 1
+                active = counters["active"]
+                completed = counters["completed"]
+            logger.info(
+                f"[task={self.task_id}] 章节开始: section_id={section.id!r}, "
+                f"title={section.title!r}, "
+                f"active={active}, completed={completed}/{total}"
+            )
+            t0 = time.monotonic()
             try:
-                file_path = self._generate_section(structure, section)
+                file_path = self._generate_section(
+                    structure, section, client=worker_client,
+                    filename_override=filename_map.get(section.id),
+                )
+                elapsed = time.monotonic() - t0
+                with lock:
+                    counters["active"] -= 1
+                    counters["completed"] += 1
+                    completed_now = counters["completed"]
+                logger.info(
+                    f"[task={self.task_id}] 章节完成: section_id={section.id!r}, "
+                    f"耗时={elapsed:.1f}s, "
+                    f"文件={file_path.name if file_path else 'N/A'}, "
+                    f"完成={completed_now}/{total}"
+                )
+                # 推进进度: 50 -> 85 按章节完成比例线性推进
+                if self.progress_callback:
+                    progress = 50.0 + (completed_now / total) * 35.0
+                    self.progress_callback(
+                        progress,
+                        f"正在生成 Wiki 内容 ({completed_now}/{total})..."
+                    )
+                return section, file_path
             except Exception as exc:
-                logger.warning(f"生成章节 '{section.id}' 失败：{exc}")
-                continue
-            if file_path:
-                generated_files.append(file_path)
+                elapsed = time.monotonic() - t0
+                with lock:
+                    counters["active"] -= 1
+                    counters["failed"] += 1
+                    failed_now = counters["failed"]
+                logger.warning(
+                    f"[task={self.task_id}] 章节失败: section_id={section.id!r}, "
+                    f"耗时={elapsed:.1f}s, 异常={exc!r}, "
+                    f"累计失败={failed_now}"
+                )
+                return section, None
+
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = {pool.submit(_worker, sec): sec for sec in sections}
+            for future in as_completed(futures):
+                _, file_path = future.result()
+                if file_path:
+                    generated_files.append(file_path)
+
+        logger.info(
+            f"[task={self.task_id}] 正文生成完毕: "
+            f"成功={len(generated_files)}, 失败={counters['failed']}, 总数={total}"
+        )
         return generated_files
 
     def _generate_section(
         self,
         structure: Dict[str, Any],
         section: WikiSection,
+        *,
+        client: BaseAIClient | None = None,
+        filename_override: str | None = None,
     ) -> Path | None:
         """
         为单个章节构建上下文、调用 LLM，并将结果写入 JSON。
         """
+        used_client = client or self.client
         context = self._collect_file_context(section.files)
         if not context:
             context = "未能找到关联文件，请基于章节标题进行合理推断。"
@@ -110,9 +205,9 @@ class WikiContentGenerator:
             context=context,
         )
 
-        raw_response = self.client.chat(messages, max_tokens=1800)
+        raw_response = used_client.chat(messages, max_tokens=1800)
         parsed = self._parse_llm_response(raw_response)
-        return self._write_section_json(section, parsed)
+        return self._write_section_json(section, parsed, filename_override=filename_override)
 
     def _collect_file_context(self, files: Iterable[str]) -> str:
         """
@@ -202,7 +297,7 @@ class WikiContentGenerator:
             formatted.append({"role": role, "content": content})
         return formatted
 
-    def _write_section_json(self, section: WikiSection, data: Dict[str, Any]) -> Path:
+    def _write_section_json(self, section: WikiSection, data: Dict[str, Any], *, filename_override: str | None = None) -> Path:
         """
         将 LLM 输出和章节元数据写入独立 JSON，便于离线调试提示词。
         """
@@ -214,7 +309,7 @@ class WikiContentGenerator:
             "content": data,
         }
 
-        filename = self._safe_filename(section.id) + ".json"
+        filename = (filename_override or self._safe_filename(section.id)) + ".json"
         target_path = self.json_output_dir / filename
         target_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -260,7 +355,47 @@ class WikiContentGenerator:
         将章节 ID 转换为文件系统安全的文件名。
         """
         sanitized = re.sub(r"[^a-zA-Z0-9._-]+", "-", name.strip().lower())
+        # 去除首尾连字符
+        sanitized = sanitized.strip("-")
         return sanitized or "section"
+
+    @staticmethod
+    def _normalize_for_collision(name: str) -> str:
+        """
+        将文件名进一步规范化用于冲突检测：
+        - Unicode NFKD 标准化
+        - 大小写折叠
+        - 连续分隔符合并
+        """
+        normalized = unicodedata.normalize("NFKD", name).lower()
+        normalized = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+        return normalized or "section"
+
+    def _build_filename_map(self, sections: List[WikiSection]) -> Dict[str, str]:
+        """
+        在主线程中一次性为所有章节分配不冲突的文件名。
+        返回 {section.id: safe_filename_without_extension} 映射。
+        """
+        # 第一轮：生成基础名称
+        base_names: List[Tuple[str, str]] = []  # (section_id, base_name)
+        for sec in sections:
+            base_names.append((sec.id, self._safe_filename(sec.id)))
+
+        # 第二轮：检测规范化后的冲突并追加后缀
+        seen: Dict[str, int] = {}  # normalized_name -> 已分配的次数
+        result: Dict[str, str] = {}
+
+        for section_id, base_name in base_names:
+            norm = self._normalize_for_collision(base_name)
+            count = seen.get(norm, 0)
+            seen[norm] = count + 1
+            if count == 0:
+                result[section_id] = base_name
+            else:
+                # 追加稳定后缀
+                result[section_id] = f"{base_name}-{count + 1}"
+
+        return result
 
     def _flatten_sections(self, toc: Sequence[Dict[str, Any]], ancestors: List[str] | None = None) -> Iterable[WikiSection]:
         """

@@ -1,23 +1,17 @@
 
-了解一下rank和embedding的区别, 优化使用的模型
 
-
-优化：
-3. 加入agent和rag并行，需要仔细检查一下agent的逻辑
-    rag列出的source实在是狗屎，history的file点开要可以跳转到文件 <<<--
-    agent模式展示的调用太丑了，同时也不能这么展示，太恶心了，要和cursor和perplexity一样
-    agent还是太慢了，而且图表渲染也有问题，
+出一份完整的文档
+agent回复中的图表可以放大（当然在wiki中的也是）
+直接去掉rag，只保留agent模式，也删除agent有关的选择或者提示
+ 有空再继续优化wiki structure的生成
+3. 需要仔细检查一下agent的逻辑 
 4. 现在只有少量的file找不到（.github folder需要处理一下， 剩下的看起来是幻觉导致的）
-7. 有空再继续优化wiki structure的生成
-8. 给vercel也加入github action github action 没有自动运行（无伤大雅
 9. license 不处理
-11. 控制生成wiki和agent回复的语言，agent回复还有点问题
-13. 换一下聊天的ui <<<--
-14. 删除processing task的时候，也要触发api去强制终止任务, 删除task也需要有提示
-15. 修改各种交互的语言
-16. wiki生成的速度太慢了
+整理vercel和fly的部署参数
 
+对于小的项目，就不要embedding了，大的才embedding
+使用合适的rank和embedding模型
+调整rag变为agentic rag，配合证据卡片
+路径那些东西，还是有点没搞懂
 
-完成的
-1。缓存处理完成
-2. 后端整理完毕
+怎么选rank逻辑和embedding模型，优化一下使用的模型（可以用贵的）

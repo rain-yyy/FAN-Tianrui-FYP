@@ -29,6 +29,21 @@ class FileReadTool:
     def __init__(self, repo_root: str):
         self.repo_root = Path(repo_root)
         
+    def _resolve_safe_path(self, file_path: str) -> Tuple[Optional[Path], Optional[str]]:
+        """将相对路径解析到 repo_root 内，禁止绝对路径与路径穿越。"""
+        if not file_path or not str(file_path).strip():
+            return None, "empty_path"
+        root = self.repo_root.resolve()
+        raw = Path(file_path)
+        if raw.is_absolute():
+            return None, "absolute_path_not_allowed"
+        candidate = (root / raw).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None, "path_escapes_repo_root"
+        return candidate, None
+
     def execute(
         self,
         file_path: str,
@@ -42,10 +57,19 @@ class FileReadTool:
         返回的 ContextPiece 包含精确的行范围，可直接用于证据卡片。
         """
         try:
-            full_path = self.repo_root / file_path
-            
+            full_path, path_err = self._resolve_safe_path(file_path)
+            if path_err:
+                return ContextPiece(
+                    source="file_read",
+                    content=f"Invalid file path ({path_err}): {file_path}",
+                    file_path=file_path,
+                    relevance_score=0.0,
+                    metadata={"error": path_err},
+                )
+
             if not full_path.exists():
-                alt_paths = list(self.repo_root.rglob(f"*{file_path}"))
+                basename = Path(file_path).name
+                alt_paths = list(self.repo_root.rglob(f"*{basename}")) if basename else []
                 if alt_paths:
                     full_path = alt_paths[0]
                     file_path = str(full_path.relative_to(self.repo_root))
@@ -211,6 +235,7 @@ class RepoMapTool:
     
     def __init__(self, repo_root: str):
         self.repo_root = Path(repo_root)
+        self._cache: Dict[str, ContextPiece] = {}  # key: "sig={sig}&depth={depth}"
     
     def execute(
         self,
@@ -219,13 +244,12 @@ class RepoMapTool:
         max_files: int = 200
     ) -> ContextPiece:
         """
-        生成仓库结构概览
-        
-        增强版：
-        - 支持 TypeScript/TSX/JavaScript 签名提取
-        - 检测并标注入口点和配置文件
-        - 更丰富的元数据
+        生成仓库结构概览（带 LRU 缓存：相同参数复用结果）。
         """
+        cache_key = f"sig={include_signatures}&depth={max_depth}&files={max_files}"
+        if cache_key in self._cache:
+            logger.info("[RepoMap] Returning cached result")
+            return self._cache[cache_key]
         try:
             tree_lines = ["Repository Structure:", "=" * 50]
             file_stats: Dict[str, int] = {}
@@ -272,7 +296,7 @@ class RepoMapTool:
             
             content = "\n".join(tree_lines)
             
-            return ContextPiece(
+            result = ContextPiece(
                 source="repo_map",
                 content=content,
                 relevance_score=0.85,
@@ -283,6 +307,8 @@ class RepoMapTool:
                     "tech_stack": self._detect_tech_stack(file_stats, configs),
                 }
             )
+            self._cache[cache_key] = result
+            return result
             
         except Exception as e:
             logger.error(f"Failed to generate repo map: {e}")
@@ -518,7 +544,7 @@ class RepoMapTool:
                     
                     # React 组件（const X = () => 或 function X()）
                     elif ext in ['.tsx', '.jsx']:
-                        if stripped.startswith('const ') and '= (' in stripped or '= ()' in stripped:
+                        if stripped.startswith('const ') and ('= (' in stripped or '= ()' in stripped):
                             match = re.match(r'const (\w+)\s*[:=]', stripped)
                             if match and match.group(1)[0].isupper():
                                 signatures.append(f"  [{lang_tag}] [{rel_path}] component {match.group(1)}")

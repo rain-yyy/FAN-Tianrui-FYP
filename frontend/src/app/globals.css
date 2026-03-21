@@ -2,7 +2,7 @@
 @plugin "@tailwindcss/typography";
 
 :root {
-  /* Deep Space Theme */
+  /* Deep Space Theme (default dark) */
   --background: #050508;
   --foreground: #e2e8f0;
   
@@ -77,3 +77,4 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted-foreground);
 }
+

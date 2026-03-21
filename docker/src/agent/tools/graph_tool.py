@@ -50,13 +50,24 @@ class CodeGraphTool:
     
     # 关系类型标签
     RELATION_LABELS = {
-        "calls": "调用",
-        "contains": "包含",
-        "inherits": "继承",
-        "imports": "导入",
-        "references": "引用",
-        "implements": "实现",
+        "calls": "calls",
+        "contains": "contains",
+        "inherits": "inherits",
+        "imports": "imports",
+        "references": "references",
+        "implements": "implements",
     }
+
+    # 这些 operation 在「零命中」时应显著降分；get_all_symbols 等概览除外
+    _OPS_SENSITIVE_TO_EMPTY_HITS = frozenset({
+        "find_definition",
+        "find_callers",
+        "find_callees",
+        "get_class_hierarchy",
+        "get_file_symbols",
+        "find_imports",
+        "get_module_dependencies",
+    })
     
     def __init__(self, graph_path: Optional[str] = None):
         self.graph: nx.DiGraph = nx.DiGraph()
@@ -162,6 +173,16 @@ class CodeGraphTool:
         # 有错误则降低分数
         if metadata.get("error"):
             score = 0.0
+        
+        # 查询类操作若无命中，不应保持高 base 分（否则评估器误判「已成功检索」）
+        symbols = metadata.get("symbols_found")
+        if (
+            operation in self._OPS_SENSITIVE_TO_EMPTY_HITS
+            and score > 0
+            and isinstance(symbols, list)
+            and len(symbols) == 0
+        ):
+            score = min(score, 0.12)
         
         return score
     

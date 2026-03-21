@@ -1,7 +1,5 @@
 # Project Wiki Generation API 技术文档与架构解析
 
-> 与 `docs/explain.md` 内容一致；详细接口说明见 [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md)。
-
 ## 1. 项目概述
 
 本项目是一个高度自动化的 Wiki 生成与项目理解系统。它能够深度分析 Git 仓库（如 GitHub 项目），并将其转化为结构化的 Wiki 文档以及可交互的 RAG（检索增强生成）知识库，并支持 **Agent 多轮工具调用** 模式做更深度的代码理解。
@@ -34,7 +32,7 @@ Wiki 生成由 `docker/src/core/wiki_pipeline.py` 中的 `execute_generation_tas
 
 ## 3. API 端点（与实现对齐）
 
-详细请求/响应、SSE 事件表见 **[docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md)**。摘要如下：
+详细请求/响应、SSE 事件表见同目录 **[API_DOCUMENTATION.md](./API_DOCUMENTATION.md)**。摘要如下：
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -60,7 +58,7 @@ Wiki 生成由 `docker/src/core/wiki_pipeline.py` 中的 `execute_generation_tas
 - **认证**: Supabase Auth；`AuthProvider` 同步 profile 的 `language`/`theme` 到文档根 `lang` 与 `data-theme`。
 - **文案**: 轻量 i18n（`frontend/src/lib/i18n.ts`）随 locale 切换。
 
-路由拓扑见 `frontend/docs/页面拓扑清单.md`。
+路由拓扑见 [../frontend/docs/页面拓扑清单.md](../frontend/docs/页面拓扑清单.md)。
 
 ---
 
@@ -82,7 +80,7 @@ Wiki 生成由 `docker/src/core/wiki_pipeline.py` 中的 `execute_generation_tas
 ### 5.4 Agent（`docker/src/agent/`）
 
 - 规划 → 工具执行 ↔ 评估循环 → 合成；工具含 `rag_search`、`code_graph`、`file_read`、`repo_map`。  
-- 架构与事件详见 **[docs/AGENT_CHAT_ARCHITECTURE.md](docs/AGENT_CHAT_ARCHITECTURE.md)**。
+- 架构与事件详见 **[AGENT_CHAT_ARCHITECTURE.md](./AGENT_CHAT_ARCHITECTURE.md)**。
 
 ### 5.5 存储
 
@@ -103,7 +101,7 @@ Wiki 生成由 `docker/src/core/wiki_pipeline.py` 中的 `execute_generation_tas
   - `VECTOR_STORE_PATH`、`REPO_STORE_PATH`  
   - Supabase URL / Service Key（`SupabaseClient`）
 
-本地 Docker 常挂载 `./data:/data`，需存在 `data/vector_stores`、`data/repos`（详见 `docs/API_DOCUMENTATION.md` 与 compose 注释）。
+本地 Docker 常挂载 `./data:/data`，需存在 `data/vector_stores`、`data/repos`（详见 `API_DOCUMENTATION` 历史说明或 compose 注释）。
 
 ---
 

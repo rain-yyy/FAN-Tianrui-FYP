@@ -1,6 +1,8 @@
 import os
 import logging
-from dataclasses import dataclass
+import threading
+import time
+from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional, TYPE_CHECKING
 
 from langchain_core.documents import Document
@@ -40,11 +42,97 @@ RAG_PROMPT = get_rag_chat_prompt()
 # HyDE 配置
 HYDE_ENABLED = True  # 是否启用 HyDE
 
+# 缓存配置
+CACHE_TTL_SECONDS = 3600  # 1 小时缓存过期
+CACHE_MAX_ENTRIES = 10    # 最多缓存 10 个仓库的向量库
+
 
 @dataclass
 class CategoryRetrievalUnit:
     dense_store: "FAISS"
     sparse_index: SparseBM25Index | None
+
+
+@dataclass
+class CachedStoreEntry:
+    """缓存的向量库条目"""
+    stores: Dict[str, CategoryRetrievalUnit]
+    created_at: float = field(default_factory=time.time)
+    last_accessed: float = field(default_factory=time.time)
+    
+    def is_expired(self) -> bool:
+        return time.time() - self.created_at > CACHE_TTL_SECONDS
+    
+    def touch(self) -> None:
+        self.last_accessed = time.time()
+
+
+class VectorStoreCache:
+    """
+    进程级向量库缓存
+    
+    避免每次 RAG 请求都重新加载 FAISS 和重建 BM25 索引。
+    使用 LRU 策略管理缓存条目。
+    """
+    
+    def __init__(self, max_entries: int = CACHE_MAX_ENTRIES):
+        self._cache: Dict[str, CachedStoreEntry] = {}
+        self._lock = threading.RLock()
+        self._max_entries = max_entries
+    
+    def get(self, root_path: str) -> Optional[Dict[str, CategoryRetrievalUnit]]:
+        """获取缓存的向量库，如果不存在或已过期则返回 None"""
+        with self._lock:
+            entry = self._cache.get(root_path)
+            if entry is None:
+                return None
+            
+            if entry.is_expired():
+                logger.info(f"[VectorStoreCache] Cache expired for {root_path}")
+                del self._cache[root_path]
+                return None
+            
+            entry.touch()
+            logger.debug(f"[VectorStoreCache] Cache hit for {root_path}")
+            return entry.stores
+    
+    def put(self, root_path: str, stores: Dict[str, CategoryRetrievalUnit]) -> None:
+        """存入向量库缓存"""
+        with self._lock:
+            # LRU 清理：如果超过最大条目数，移除最久未访问的
+            if len(self._cache) >= self._max_entries and root_path not in self._cache:
+                oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k].last_accessed)
+                logger.info(f"[VectorStoreCache] Evicting LRU entry: {oldest_key}")
+                del self._cache[oldest_key]
+            
+            self._cache[root_path] = CachedStoreEntry(stores=stores)
+            logger.info(f"[VectorStoreCache] Cached stores for {root_path}, total entries: {len(self._cache)}")
+    
+    def invalidate(self, root_path: str) -> None:
+        """使指定路径的缓存失效"""
+        with self._lock:
+            if root_path in self._cache:
+                del self._cache[root_path]
+                logger.info(f"[VectorStoreCache] Invalidated cache for {root_path}")
+    
+    def clear(self) -> None:
+        """清空所有缓存"""
+        with self._lock:
+            self._cache.clear()
+            logger.info("[VectorStoreCache] Cache cleared")
+    
+    def stats(self) -> Dict[str, any]:
+        """返回缓存统计信息"""
+        with self._lock:
+            return {
+                "entries": len(self._cache),
+                "max_entries": self._max_entries,
+                "paths": list(self._cache.keys())
+            }
+
+
+# 全局缓存实例
+_vector_store_cache = VectorStoreCache()
 
 
 def _ensure_api_key() -> None:
@@ -106,9 +194,9 @@ def _format_conversation_history(history: List[Dict[str, str]]) -> str:
         role = msg.get("role", "user")
         content = msg.get("content", "")
         if role == "user":
-            formatted_parts.append(f"用户: {content}")
+            formatted_parts.append(f"User: {content}")
         elif role == "assistant":
-            formatted_parts.append(f"助手: {content}")
+            formatted_parts.append(f"Assistant: {content}")
     
     return "\n".join(formatted_parts)
 
@@ -119,12 +207,12 @@ def _resolve_vector_store_root(base_path: str) -> str:
     """
     if not base_path:
         raise ValueError(
-            "请通过环境变量 VECTOR_STORE_PATH 指定向量库根目录或具体目录。"
+            "Set VECTOR_STORE_PATH to the vector store root or a specific category directory."
         )
 
     candidate = os.path.abspath(base_path)
     if not os.path.exists(candidate):
-        raise FileNotFoundError(f"指定的向量库目录不存在：{candidate}")
+        raise FileNotFoundError(f"Vector store directory does not exist: {candidate}")
     return candidate
 
 
@@ -145,7 +233,7 @@ def _resolve_category_path(root_path: str, category: str) -> str:
         return root_path
 
     raise FileNotFoundError(
-        f"未找到 {category} 向量库。请确认目录 {root_path}/{category} 下已生成 index.faiss。"
+        f"No '{category}' vector store under {root_path}/{category} (missing index.faiss)."
     )
 
 
@@ -174,25 +262,68 @@ def _extract_store_documents(store: "FAISS") -> List[Document]:
 
 
 def _load_vector_stores(
-    root_path: str, categories: Iterable[str]
+    root_path: str, categories: Iterable[str], use_cache: bool = True
 ) -> Dict[str, CategoryRetrievalUnit]:
     """
     加载多个类别的向量库，包括密集向量存储和稀疏检索索引。
     为每个类别创建 CategoryRetrievalUnit，包含 FAISS 向量库和 BM25 索引。
     返回类别名称到检索单元的映射字典。
+    
+    性能优化：使用进程级缓存避免重复加载。
     """
+    # 尝试从缓存获取
+    if use_cache:
+        cached = _vector_store_cache.get(root_path)
+        if cached is not None:
+            logger.info(f"[RAG] Using cached vector stores for {root_path}")
+            return cached
+    
+    # 缓存未命中，执行加载
+    logger.info(f"[RAG] Loading vector stores from {root_path} (cache miss)")
+    load_start = time.time()
+    
     stores: Dict[str, CategoryRetrievalUnit] = {}
     for category in categories:
-        category_path = _resolve_category_path(root_path, category)
-        logger.info(f"Loading vector store for '{category}' from {category_path} ...")
-        dense_store = load_knowledge_base(category_path)
-        docs = _extract_store_documents(dense_store)
-        sparse_index = SparseBM25Index.build(docs) if docs else None
-        stores[category] = CategoryRetrievalUnit(
-            dense_store=dense_store,
-            sparse_index=sparse_index,
-        )
+        try:
+            category_path = _resolve_category_path(root_path, category)
+            logger.info(f"Loading vector store for '{category}' from {category_path} ...")
+            dense_store = load_knowledge_base(category_path)
+            docs = _extract_store_documents(dense_store)
+            sparse_index = SparseBM25Index.build(docs) if docs else None
+            stores[category] = CategoryRetrievalUnit(
+                dense_store=dense_store,
+                sparse_index=sparse_index,
+            )
+        except FileNotFoundError as e:
+            logger.warning(f"Category '{category}' not found: {e}")
+            continue
+    
+    load_elapsed = time.time() - load_start
+    logger.info(f"[RAG] Vector stores loaded in {load_elapsed:.2f}s, categories: {list(stores.keys())}")
+    
+    # 存入缓存
+    if use_cache and stores:
+        _vector_store_cache.put(root_path, stores)
+    
     return stores
+
+
+def invalidate_vector_store_cache(root_path: Optional[str] = None) -> None:
+    """
+    使向量库缓存失效。
+    
+    Args:
+        root_path: 指定要失效的路径，None 表示清空所有缓存
+    """
+    if root_path:
+        _vector_store_cache.invalidate(root_path)
+    else:
+        _vector_store_cache.clear()
+
+
+def get_vector_store_cache_stats() -> Dict[str, any]:
+    """获取向量库缓存统计信息"""
+    return _vector_store_cache.stats()
 
 
 def _format_documents(docs: List[Document]) -> str:
@@ -208,11 +339,11 @@ def _format_documents(docs: List[Document]) -> str:
     for idx, doc in enumerate(docs, start=1):
         source = doc.metadata.get("source") or doc.metadata.get("file_path") or ""
         category = doc.metadata.get("kb_category", "")
-        header_parts = [f"[片段 {idx}]"]
+        header_parts = [f"[chunk {idx}]"]
         if category:
-            header_parts.append(f"类型：{category}")
+            header_parts.append(f"type: {category}")
         if source:
-            header_parts.append(f"来源：{source}")
+            header_parts.append(f"source: {source}")
         header = " | ".join(header_parts)
         formatted_chunks.append(f"{header}\n{doc.page_content.strip()}")
     return "\n\n".join(formatted_chunks)
@@ -364,7 +495,7 @@ def answer_question(
         包含答案文本和参考来源的字典
     """
     if not question or not question.strip():
-        raise ValueError("问题不能为空。")
+        raise ValueError("Question must not be empty.")
 
     _ensure_api_key()
 
@@ -393,21 +524,21 @@ def interactive_chat(
     stores = _load_vector_stores(root_path, top_k_plan.keys())
 
     print(
-        "加载本地向量库成功，输入问题开始对话（输入 exit/quit 退出）。"
-        f" 当前检索计划：{', '.join(f'{cat}:{k}' for cat, k in top_k_plan.items())}"
+        "Vector store loaded. Type a question (exit/quit to stop). "
+        f"Retrieval plan: {', '.join(f'{cat}:{k}' for cat, k in top_k_plan.items())}"
     )
 
     while True:
         try:
-            question = input("问题> ").strip()
+            question = input("Q> ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\n中断，退出对话。")
+            print("\nInterrupted, exiting.")
             break
 
         if not question:
             continue
         if question.lower() in {"exit", "quit"}:
-            print("结束对话。")
+            print("Goodbye.")
             break
 
         try:
@@ -415,13 +546,13 @@ def interactive_chat(
                 stores, question, category_top_k=top_k_plan
             )
         except Exception as exc:
-            print(f"发生错误：{exc}")
+            print(f"Error: {exc}")
             continue
 
-        print("\nAI 回答：")
+        print("\nAnswer:")
         print(result["answer"])
         if result["sources"]:
-            print("\n参考来源：")
+            print("\nSources:")
             for src in result["sources"]:
                 print(f"- {src}")
         print("-" * 40)
@@ -488,18 +619,20 @@ def _answer_with_stores(
 
     logger.info("Calling AI model to generate answer...")
     
+    no_result_text = "No relevant results found."
+
     # 根据是否有对话历史选择不同的 prompt
     if conversation_history and len(conversation_history) > 0:
         history_text = _format_conversation_history(conversation_history)
         messages = RAG_CHAT_WITH_HISTORY_PROMPT.format_messages(
-            context=context or "无检索结果。", 
+            context=context or no_result_text, 
             conversation_history=history_text,
-            question=question
+            question=question,
         )
     else:
         messages = RAG_CHAT_PROMPT.format_messages(
-            context=context or "无检索结果。", 
-            question=question
+            context=context or no_result_text, 
+            question=question,
         )
     
     answer_text = llm.chat(messages, temperature=0.1)
@@ -522,6 +655,122 @@ def _answer_with_stores(
         "answer": answer_text.strip(),
         "sources": sources,
     }
+
+
+from typing import Generator, Tuple
+
+
+def answer_question_stream(
+    db_path: str,
+    question: str,
+    *,
+    category_top_k: Mapping[str, int] | None = None,
+    conversation_history: Optional[List[Dict[str, str]]] = None,
+    use_hyde: bool = True,
+) -> Generator[Tuple[str, Dict[str, any]], None, None]:
+    """
+    流式版本的 RAG 问答，逐步返回检索阶段和答案生成阶段的事件。
+    
+    事件类型：
+    - ("retrieval_start", {"query": str}) - 开始检索
+    - ("hyde_generated", {"hyde_doc": str}) - HyDE 文档已生成
+    - ("retrieval_done", {"sources": List[str], "doc_count": int}) - 检索完成
+    - ("answer_delta", {"delta": str}) - 答案增量
+    - ("answer_done", {"answer": str, "sources": List[str]}) - 答案完成
+    - ("error", {"error": str}) - 错误
+    
+    Yields:
+        Tuple[str, Dict]: (事件类型, 事件数据)
+    """
+    if not question or not question.strip():
+        yield ("error", {"error": "Question must not be empty."})
+        return
+    
+    try:
+        _ensure_api_key()
+        
+        yield ("retrieval_start", {"query": question[:100]})
+        
+        root_path = _resolve_vector_store_root(db_path)
+        top_k_plan = dict(category_top_k or CATEGORY_TOP_K)
+        stores = _load_vector_stores(root_path, top_k_plan.keys())
+        
+        # HyDE 生成
+        retrieval_query = question
+        if use_hyde and HYDE_ENABLED:
+            logger.info("[RAG Stream] 使用 HyDE 增强检索...")
+            hyde_doc = _generate_hyde_document(question)
+            retrieval_query = f"{question}\n\n{hyde_doc}"
+            yield ("hyde_generated", {"hyde_doc": hyde_doc[:200] + "..." if len(hyde_doc) > 200 else hyde_doc})
+        
+        # 检索
+        candidates = _gather_hybrid_candidates(
+            stores,
+            retrieval_query,
+            category_top_k=top_k_plan,
+        )
+        
+        if not candidates:
+            docs: List[Document] = []
+        else:
+            mmr_pick = mmr_select(
+                candidates,
+                question,
+                top_n=min(MMR_TARGET, len(candidates)),
+                lambda_mult=MMR_LAMBDA,
+            )
+            chosen = mmr_pick or candidates[:min(MMR_TARGET, len(candidates))]
+            docs = [cand.doc for cand in chosen]
+        
+        # 提取来源
+        sources: List[str] = []
+        seen_sources = set()
+        for doc in docs:
+            source = doc.metadata.get("source") or doc.metadata.get("file_path")
+            category = doc.metadata.get("kb_category")
+            source_key = f"{category}:{source}" if category and source else (source or category)
+            if source_key and source_key not in seen_sources:
+                seen_sources.add(source_key)
+                sources.append(source_key)
+        
+        yield ("retrieval_done", {"sources": sources[:5], "doc_count": len(docs)})
+        
+        # 准备 LLM 调用
+        context = _format_documents(docs)
+        provider, model = get_model_config(CONFIG, "rag_answer")
+        llm = get_ai_client(provider, model=model)
+
+        no_result_text = "No relevant results found."
+        
+        if conversation_history and len(conversation_history) > 0:
+            history_text = _format_conversation_history(conversation_history)
+            messages = RAG_CHAT_WITH_HISTORY_PROMPT.format_messages(
+                context=context or no_result_text,
+                conversation_history=history_text,
+                question=question,
+            )
+        else:
+            messages = RAG_CHAT_PROMPT.format_messages(
+                context=context or no_result_text,
+                question=question,
+            )
+        
+        # 流式生成答案
+        full_answer = ""
+        if llm.supports_streaming():
+            for delta in llm.stream_chat(messages, temperature=0.1):
+                full_answer += delta
+                yield ("answer_delta", {"delta": delta})
+        else:
+            # 回退到阻塞式
+            full_answer = llm.chat(messages, temperature=0.1)
+            yield ("answer_delta", {"delta": full_answer})
+        
+        yield ("answer_done", {"answer": full_answer.strip(), "sources": sources})
+        
+    except Exception as e:
+        logger.exception("[RAG Stream] 流式问答失败")
+        yield ("error", {"error": str(e)})
 
 
 def main() -> None:

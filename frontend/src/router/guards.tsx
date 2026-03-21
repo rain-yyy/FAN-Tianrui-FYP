@@ -50,7 +50,7 @@ export function RoutePermissionGuard({ requiredRole }: { requiredRole: 'user' | 
     return (
       <div className="h-full min-h-[40vh] flex items-center justify-center">
         <div className="rounded-xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-amber-100">
-          当前账号没有访问该路由的权限。
+          Your account does not have permission to access this route.
         </div>
       </div>
     );
@@ -70,7 +70,7 @@ export function ComponentDataGuard({
     return (
       <div className="h-full min-h-[40vh] flex items-center justify-center">
         <div className="rounded-xl border border-rose-300/30 bg-rose-500/10 px-4 py-3 text-rose-100">
-          路由参数存在，但当前任务尚未准备好 Wiki 内容。
+          The route is valid, but this task is not ready to show Wiki content yet.
         </div>
       </div>
     );

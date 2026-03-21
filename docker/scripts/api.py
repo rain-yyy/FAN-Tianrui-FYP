@@ -27,12 +27,12 @@ from src.clients.ai_client_factory import get_ai_client, get_model_config
 
 # 初始化日志
 from src.utils.logger import setup_logger
-from src.utils.repo_utils import get_repo_hash, get_repo_name
+from src.utils.repo_utils import get_repo_name
 logger = setup_logger("api")
 
 # 导入业务逻辑和管理模块
 from src.core.wiki_pipeline import execute_generation_task, VECTOR_STORE_ROOT, REPO_STORE_ROOT
-from src.core.chat import answer_question
+from src.core.chat import answer_question, answer_question_stream
 
 
 def _normalize_vector_store_path(raw_path: Optional[str], repo_url: str) -> str:
@@ -41,7 +41,7 @@ def _normalize_vector_store_path(raw_path: Optional[str], repo_url: str) -> str:
     兼容 Supabase 中可能存在的旧路径（如 /app/vector_stores/xxx）。
     """
     if not raw_path or not raw_path.strip():
-        raise ValueError("vector_store_path 为空")
+        raise ValueError("vector_store_path is empty")
     path_str = raw_path.strip()
     # 旧版本地 Docker 可能存储了 /app/vector_stores/xxx，映射到当前 VECTOR_STORE_ROOT
     if path_str.startswith("/app/vector_stores/"):
@@ -50,29 +50,6 @@ def _normalize_vector_store_path(raw_path: Optional[str], repo_url: str) -> str:
     elif path_str == "/app/vector_stores":
         path_str = str(VECTOR_STORE_ROOT / get_repo_name(repo_url))
     return path_str
-
-
-def _resolve_repo_roots(repo_info: Dict[str, Any], repo_url: str) -> List[Path]:
-    roots: List[Path] = []
-
-    repo_root = repo_info.get("repo_root")
-    if repo_root:
-        roots.append(Path(str(repo_root)).expanduser())
-
-    # 当前推荐路径：/data/repos/<repo_hash>
-    roots.append(REPO_STORE_ROOT / get_repo_hash(repo_url))
-    # 历史兼容：/data/repos/<repo_name>
-    roots.append(REPO_STORE_ROOT / get_repo_name(repo_url))
-
-    deduped: List[Path] = []
-    seen = set()
-    for root in roots:
-        key = str(root)
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(root)
-    return deduped
 
 
 def _resolve_path_under_root(root: Path, input_path: str) -> Optional[Path]:
@@ -92,7 +69,7 @@ def _resolve_path_under_root(root: Path, input_path: str) -> Optional[Path]:
 
 app = FastAPI(
     title="Project Wiki Generation API",
-    description="将项目仓库 URL 转换为 Wiki 结构和内容的 API（异步任务模式）"
+    description="Async API: turn a repository URL into wiki structure and generated content.",
 )
 
 # 配置 CORS，允许前端跨域请求
@@ -137,31 +114,73 @@ def _to_jsonable_builtin(value: Any) -> Any:
 
 # ============ API Endpoints ============
 
+# ============ Global State ============
+# 存储正在运行的异步任务，以便可以被强制终止
+running_tasks: Dict[str, asyncio.Task] = {}
 
-def _generate_chat_preview(question: str) -> str:
+
+def _generate_chat_preview_sync(question: str) -> str:
     """
-    Generate a short preview text (title) for the chat session using LLM.
+    Generate a short preview text (title) using simple truncation rules.
+    This is fast and non-blocking - no LLM call.
+    """
+    question = question.strip()
+    
+    # Remove common prefixes
+    prefixes_to_remove = [
+        "[Current page context:",
+        "User question:",
+        "Question:",
+    ]
+    for prefix in prefixes_to_remove:
+        if question.startswith(prefix):
+            question = question[len(prefix):].strip()
+    
+    # Extract first meaningful sentence or phrase
+    for delimiter in ["？", "?", "。", "\n", "，", ","]:
+        if delimiter in question:
+            question = question.split(delimiter)[0].strip()
+            break
+    
+    # Truncate to reasonable length
+    max_len = 40
+    if len(question) <= max_len:
+        return question if question else "New chat"
+    
+    # Try to cut at word boundary
+    truncated = question[:max_len]
+    last_space = truncated.rfind(" ")
+    if last_space > max_len // 2:
+        truncated = truncated[:last_space]
+    
+    return truncated.strip() + "..." if truncated else "New chat"
+
+
+async def _generate_chat_preview_async(question: str) -> str:
+    """
+    Async wrapper for generating chat preview using LLM.
+    Can be used for background title enhancement if needed.
     """
     try:
-        provider, model = get_model_config(CONFIG, "chat")
+        provider, model = get_model_config(CONFIG, "chat_title")
         client = get_ai_client(provider, model=model)
         
-        prompt = f"""
-Summarize the following user question into a very short phrase (3-5 words) to be used as a chat title.
-Do not include "User asks" or "Question about" or similar phrases. Just the topic.
-Do not use quotes.
+        prompt = f"""Summarize in 3-5 words as a chat title (no quotes):
+{question[:200]}
 
-Question: {question}
-
-Title:
-"""
+Title:"""
         messages = [{"role": "user", "content": prompt}]
-        response = client.chat(messages, temperature=0.3, max_tokens=20)
+        
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.chat(messages, temperature=0.3, max_tokens=20)
+        )
         title = response.strip().strip('"').strip("'")
-        return title
+        return title if title else _generate_chat_preview_sync(question)
     except Exception as e:
-        logger.warning(f"Failed to generate chat preview: {e}")
-        return f"Chat: {question[:20]}..."
+        logger.debug(f"LLM title generation failed, using fallback: {e}")
+        return _generate_chat_preview_sync(question)
 
 
 @app.post("/generate")
@@ -192,25 +211,29 @@ async def generate_wiki(request: Request):
         # 使用supabase 来控制任务记录
         success = supabase_client.create_task(user_id, task_id, url_link)
         if not success:
-            raise HTTPException(status_code=500, detail="创建任务记录失败")
+            raise HTTPException(status_code=500, detail="Failed to create task record")
 
         if cached_result:
-            supabase_client.update_task_progress(task_id, 100.0, "命中缓存，已直接加载")
+            supabase_client.update_task_progress(task_id, 100.0, "Cache hit — loaded existing docs")
             supabase_client.update_task_status(task_id, TaskStatus.CACHED.value, result=cached_result)
             logger.info(f"缓存命中，直接返回任务结果: {task_id}")
             return {
                 "task_id": task_id,
-                "message": "命中缓存，已直接加载已有文档。"
+                "message": "Cache hit — existing documentation loaded."
             }
 
         logger.info(f"创建任务成功: {task_id}")
 
         # 启动后台任务
-        asyncio.create_task(execute_generation_task(task_id, url_link))
+        task = asyncio.create_task(execute_generation_task(task_id, url_link))
+        running_tasks[task_id] = task
+        
+        # 任务完成后自动从字典中移除
+        task.add_done_callback(lambda t: running_tasks.pop(task_id, None))
 
         return {
             "task_id": task_id,
-            "message": "任务已创建，正在后台处理。请使用 /task/{task_id} 查询进度。"
+            "message": "Task created and processing in the background. Poll /task/{task_id} for progress."
         }
 
     except HTTPException:
@@ -232,7 +255,7 @@ async def get_task_information_api(task_id: str):
     # 去supabase中查找task_id对应的任务信息
     task_information = supabase_client.get_task(task_id)
     if not task_information:
-        raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
 
     return {"task": task_information}
 
@@ -253,6 +276,35 @@ async def list_tasks_api(request: Request):
     return {"tasks": all_tasks}
 
 
+@app.post("/task/{task_id}/cancel")
+async def cancel_task_api(task_id: str):
+    """
+    强制终止处于 processing 状态的任务
+    """
+    logger.info(f"请求强制终止任务: {task_id}")
+    supabase_client = SupabaseClient()
+    
+    if task_id in running_tasks:
+        task = running_tasks[task_id]
+        task.cancel()
+        running_tasks.pop(task_id, None)
+        
+        # 更新数据库状态
+        supabase_client.update_task_status(task_id, TaskStatus.FAILED.value, error="Cancelled by user")
+        logger.info(f"任务已强制终止: {task_id}")
+        return {"success": True, "message": "Task cancelled"}
+    else:
+        # 如果内存中找不到，但数据库中显示为 processing（可能是跨进程或者丢失追踪）
+        task_info = supabase_client.get_task(task_id)
+        if task_info and task_info.get("status") == TaskStatus.PROCESSING.value:
+            supabase_client.update_task_status(task_id, TaskStatus.FAILED.value, error="Cancelled by user")
+            logger.info(f"内存中未找到任务，但已在数据库中将其标记为终止: {task_id}")
+            return {"success": True, "message": "Task marked as cancelled"}
+            
+        logger.warning(f"无法终止任务（未运行或不存在）: {task_id}")
+        return {"success": False, "message": "No running task found or task is not processing"}
+
+
 @app.delete("/task/{task_id}")
 async def delete_task_api(task_id: str, user_id: str):
     """
@@ -266,10 +318,10 @@ async def delete_task_api(task_id: str, user_id: str):
     if not success:
         task = supabase_client.get_task(task_id)
         if not task:
-            raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
         if task.get("user_id") != user_id:
             raise HTTPException(status_code=404, detail="Task not found or unauthorized")
-        raise HTTPException(status_code=500, detail="删除任务失败")
+        raise HTTPException(status_code=500, detail="Failed to delete task")
 
     return {"success": True}
 
@@ -279,53 +331,75 @@ async def health_check():
     return {"status": "ok"}
 
 
+@app.get("/profile")
+async def get_profile_api(user_id: str):
+    """
+    Get user profile (theme preference).
+    """
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Missing user_id")
+    supabase_client = SupabaseClient()
+    profile = supabase_client.get_profile(user_id)
+    if not profile:
+        return {"profile": {"id": user_id, "theme": "dark"}}
+    return {"profile": profile}
+
+
+@app.patch("/profile")
+async def update_profile_api(request: Request):
+    """
+    Update user theme preference.
+    """
+    data = await request.json()
+    user_id = data.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Missing user_id")
+    theme = data.get("theme")
+    if theme is None:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    supabase_client = SupabaseClient()
+    ok = supabase_client.upsert_profile_preferences(user_id, theme=theme)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to update profile")
+    return {"success": True}
+
+
 @app.post("/file/content")
 async def get_file_content_api(request: Request):
     """
     读取指定仓库的文件内容
     """
-    try:
-        data = await request.json()
-        repo_url = data.get("repo_url")
-        file_path = data.get("file_path")
+    data = await request.json()
+    repo_url = data.get("repo_url")
+    file_path = data.get("file_path")
 
-        if not repo_url or not file_path:
-            raise HTTPException(status_code=400, detail="Missing repo_url or file_path")
+    if not repo_url or not file_path:
+        raise HTTPException(status_code=400, detail="Missing repo_url or file_path")
 
-        supabase_client = SupabaseClient()
-        repo_info = supabase_client.get_repo_information(repo_url) or {}
-        candidate_roots = _resolve_repo_roots(repo_info, repo_url)
+    supabase_client = SupabaseClient()
+    repo_info = supabase_client.get_repo_information(repo_url)
+    if not repo_info:
+        raise HTTPException(status_code=404, detail="Repository not found")
 
-        for root in candidate_roots:
-            if not root.exists() or not root.is_dir():
-                continue
-
-            target_path = _resolve_path_under_root(root, file_path)
-            if not target_path:
-                continue
-            if not target_path.exists() or not target_path.is_file():
-                continue
-
-            try:
-                content = target_path.read_text(encoding="utf-8", errors="replace")
-                return {"content": content}
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
-
+    folder_raw = repo_info.get("local_path")
+    if folder_raw is None or not str(folder_raw).strip():
         raise HTTPException(
-            status_code=404,
-            detail=(
-                "File not found under repository root. "
-                "Please ensure repo is generated and stored under REPO_STORE_PATH."
-            ),
+            status_code=400,
+            detail="Repository local_path is missing; expected folder name under REPO_STORE_PATH",
         )
+    folder = str(folder_raw).strip()
+    folder_path = Path(folder)
+    if folder_path.is_absolute() or len(folder_path.parts) != 1 or folder_path.name in (".", ".."):
+        raise HTTPException(status_code=400, detail="local_path must be a single directory name")
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("获取文件内容失败:")
-        raise HTTPException(status_code=500, detail=str(e))
+    repo_root = REPO_STORE_ROOT.expanduser() / folder_path.name
+    target_path = _resolve_path_under_root(repo_root, file_path)
+    if target_path is None or not target_path.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
 
+    content = target_path.read_text(encoding="utf-8", errors="replace")
+    return {"content": content}
+    
 
 @app.post("/chat")
 async def chat_with_repo_api(request: Request):
@@ -348,16 +422,12 @@ async def chat_with_repo_api(request: Request):
         
         # 1. 如果没有 chat_id，创建一个新的会话
         if not chat_id:
-            # Generate preview text
-            loop = asyncio.get_event_loop()
-            preview_text = await loop.run_in_executor(
-                None,
-                lambda: _generate_chat_preview(question)
-            )
+            # Use fast sync title generation (no LLM call)
+            preview_text = _generate_chat_preview_sync(question)
             
             chat_session = supabase_client.create_chat_history(user_id, repo_url, title=preview_text, preview_text=preview_text)
             if not chat_session:
-                raise HTTPException(status_code=500, detail="创建会话失败")
+                raise HTTPException(status_code=500, detail="Failed to create chat session")
             chat_id = chat_session["id"]
         
         # 2. 保存用户问题到数据库
@@ -368,26 +438,26 @@ async def chat_with_repo_api(request: Request):
         if not repo_info or not repo_info.get("vector_store_path"):
             raise HTTPException(
                 status_code=404,
-                detail="未找到该仓库的向量索引。请先通过 /generate 接口生成文档。"
+                detail="No vector index for this repository. Generate documentation via /generate first.",
             )
         
         vector_store_path = _normalize_vector_store_path(
             repo_info["vector_store_path"], repo_url
         )
 
-        # 4. 构建增强问题（包含上下文信息）
+        # 4. Build enhanced question (page context)
         enhanced_question = question
         if current_page_context:
-            enhanced_question = f"[当前页面上下文: {current_page_context}]\n\n用户问题: {question}"
+            enhanced_question = f"[Current page context: {current_page_context}]\n\nUser question: {question}"
         
-        # 5. 执行 RAG 问答
+        # 5. Run RAG Q&A (answers are always in English)
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
             lambda: answer_question(
                 db_path=vector_store_path,
                 question=enhanced_question,
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
             )
         )
         
@@ -413,7 +483,125 @@ async def chat_with_repo_api(request: Request):
         raise
     except Exception as e:
         logger.exception("RAG 问答过程中发生异常:")
-        raise HTTPException(status_code=500, detail=f"RAG 问答失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"RAG chat failed: {str(e)}")
+
+
+@app.post("/chat/stream")
+async def chat_stream_api(request: Request):
+    """
+    RAG 流式问答接口 (Server-Sent Events)
+    
+    实时返回检索阶段和答案生成过程。
+    
+    Request Body:
+        question: 用户问题
+        repo_url: 仓库 URL
+        user_id: 用户 ID
+        chat_id: 会话 ID（可选）
+        conversation_history: 对话历史（可选）
+        current_page_context: 当前页面上下文（可选）
+        
+    Response (SSE):
+        event: retrieval_start | hyde_generated | retrieval_done | answer_delta | answer_done | error
+        data: JSON 格式的事件数据
+    """
+    try:
+        data = await request.json()
+        question = data.get("question")
+        repo_url = data.get("repo_url")
+        user_id = data.get("user_id")
+        chat_id = data.get("chat_id")
+        conversation_history = data.get("conversation_history")
+        current_page_context = data.get("current_page_context")
+
+        if not question or not repo_url or not user_id:
+            raise HTTPException(status_code=400, detail="Missing question, repo_url or user_id")
+
+        supabase_client = SupabaseClient()
+        
+        # 创建会话
+        if not chat_id:
+            preview_text = _generate_chat_preview_sync(question)
+            chat_session = supabase_client.create_chat_history(user_id, repo_url, title=preview_text, preview_text=preview_text)
+            if not chat_session:
+                raise HTTPException(status_code=500, detail="Failed to create chat session")
+            chat_id = chat_session["id"]
+        
+        supabase_client.add_chat_message(chat_id, "user", question)
+
+        repo_info = supabase_client.get_repo_information(repo_url)
+        if not repo_info or not repo_info.get("vector_store_path"):
+            raise HTTPException(
+                status_code=404,
+                detail="No vector index for this repository. Generate documentation via /generate first.",
+            )
+        
+        vector_store_path = _normalize_vector_store_path(
+            repo_info["vector_store_path"], repo_url
+        )
+        
+        enhanced_question = question
+        if current_page_context:
+            enhanced_question = f"[Current page context: {current_page_context}]\n\nUser question: {question}"
+
+        async def event_generator():
+            loop = asyncio.get_event_loop()
+            full_answer = ""
+            sources = []
+            
+            # 在线程池中执行流式生成器
+            def run_stream():
+                return list(answer_question_stream(
+                    db_path=vector_store_path,
+                    question=enhanced_question,
+                    conversation_history=conversation_history,
+                    use_hyde=True,
+                ))
+            
+            events = await loop.run_in_executor(None, run_stream)
+            
+            for event_type, event_data in events:
+                if event_type == "answer_delta":
+                    full_answer += event_data.get("delta", "")
+                elif event_type == "answer_done":
+                    sources = event_data.get("sources", [])
+                
+                payload = _to_jsonable_builtin(event_data)
+                yield f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            
+            # 保存消息
+            if full_answer:
+                supabase_client.add_chat_message(
+                    chat_id, 
+                    "assistant", 
+                    full_answer.strip(), 
+                    {"sources": sources}
+                )
+            
+            # 发送完成事件
+            complete_payload = {
+                "chat_id": chat_id,
+                "repo_url": repo_url,
+                "answer": full_answer.strip(),
+                "sources": sources,
+            }
+            yield f"event: complete\ndata: {json.dumps(complete_payload, ensure_ascii=False)}\n\n"
+        
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("RAG 流式问答过程中发生异常:")
+        raise HTTPException(status_code=500, detail=f"RAG streaming chat failed: {str(e)}")
 
 
 @app.get("/chat/repos")
@@ -519,16 +707,12 @@ async def agent_chat_api(request: Request):
         supabase_client = SupabaseClient()
         
         if not chat_id:
-            # Generate preview text
-            loop = asyncio.get_event_loop()
-            preview_text = await loop.run_in_executor(
-                None,
-                lambda: _generate_chat_preview(question)
-            )
+            # Use fast sync title generation (no LLM call)
+            preview_text = _generate_chat_preview_sync(question)
 
             chat_session = supabase_client.create_chat_history(user_id, repo_url, title=preview_text, preview_text=preview_text)
             if not chat_session:
-                raise HTTPException(status_code=500, detail="创建会话失败")
+                raise HTTPException(status_code=500, detail="Failed to create chat session")
             chat_id = chat_session["id"]
         
         supabase_client.add_chat_message(chat_id, "user", question)
@@ -537,7 +721,7 @@ async def agent_chat_api(request: Request):
         if not repo_info or not repo_info.get("vector_store_path"):
             raise HTTPException(
                 status_code=404,
-                detail="未找到该仓库的向量索引。请先通过 /generate 接口生成文档。"
+                detail="No vector index for this repository. Generate documentation via /generate first.",
             )
         
         vector_store_path = _normalize_vector_store_path(
@@ -548,7 +732,7 @@ async def agent_chat_api(request: Request):
         
         enhanced_question = question
         if current_page_context:
-            enhanced_question = f"[当前页面上下文: {current_page_context}]\n\n用户问题: {question}"
+            enhanced_question = f"[Current page context: {current_page_context}]\n\nUser question: {question}"
         
         logger.info(f"Agent 模式问答开始: question={question[:50]}... repo_url={repo_url}")
         
@@ -562,7 +746,7 @@ async def agent_chat_api(request: Request):
                 graph_path=graph_path,
                 repo_root=repo_root,
                 conversation_history=conversation_history,
-                max_iterations=5
+                max_iterations=5,
             )
         )
         
@@ -606,7 +790,7 @@ async def agent_chat_api(request: Request):
         raise
     except Exception as e:
         logger.exception("Agent 问答过程中发生异常:")
-        raise HTTPException(status_code=500, detail=f"Agent 问答失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Agent chat failed: {str(e)}")
 
 
 @app.post("/agent/chat/stream")
@@ -638,16 +822,12 @@ async def agent_chat_stream_api(request: Request):
         supabase_client = SupabaseClient()
 
         if not chat_id:
-            # Generate preview text
-            loop = asyncio.get_event_loop()
-            preview_text = await loop.run_in_executor(
-                None,
-                lambda: _generate_chat_preview(question)
-            )
+            # Use fast sync title generation (no LLM call)
+            preview_text = _generate_chat_preview_sync(question)
 
             chat_session = supabase_client.create_chat_history(user_id, repo_url, title=preview_text, preview_text=preview_text)
             if not chat_session:
-                raise HTTPException(status_code=500, detail="创建会话失败")
+                raise HTTPException(status_code=500, detail="Failed to create chat session")
             chat_id = chat_session["id"]
 
         supabase_client.add_chat_message(chat_id, "user", question)
@@ -656,7 +836,7 @@ async def agent_chat_stream_api(request: Request):
         if not repo_info or not repo_info.get("vector_store_path"):
             raise HTTPException(
                 status_code=404,
-                detail="未找到该仓库的向量索引。请先通过 /generate 接口生成文档。"
+                detail="No vector index for this repository. Generate documentation via /generate first.",
             )
         
         vector_store_path = _normalize_vector_store_path(
@@ -667,14 +847,14 @@ async def agent_chat_stream_api(request: Request):
         
         enhanced_question = question
         if current_page_context:
-            enhanced_question = f"[当前页面上下文: {current_page_context}]\n\n用户问题: {question}"
+            enhanced_question = f"[Current page context: {current_page_context}]\n\nUser question: {question}"
 
         async def event_generator():
             runner = AgentRunner(
                 vector_store_path=vector_store_path,
                 graph_path=graph_path,
                 repo_root=repo_root,
-                max_iterations=5
+                max_iterations=5,
             )
 
             async for event in runner.run_streaming(
@@ -721,7 +901,7 @@ async def agent_chat_stream_api(request: Request):
         raise
     except Exception as e:
         logger.exception("Agent 流式问答过程中发生异常:")
-        raise HTTPException(status_code=500, detail=f"Agent 流式问答失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Agent streaming chat failed: {str(e)}")
 
 
 if __name__ == "__main__":

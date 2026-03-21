@@ -24,36 +24,91 @@ class ToolType(str, Enum):
     CODE_GRAPH = "code_graph"
     FILE_READ = "file_read"
     REPO_MAP = "repo_map"
+    GREP_SEARCH = "grep_search"
 
 
 class QueryIntent(str, Enum):
     """
-    查询意图分类（扩展版）
+    查询意图分类（扩展版 — 面向仓库理解 Agent）
     
-    对齐 agentplan.md 的问题分类：
+    代码类意图：
     - location: 定位型（"X在哪里？"）
     - mechanism: 机制型（"X如何工作？"）
     - call_chain: 调用链/数据流（"请求如何流转？"）
     - impact_analysis: 影响分析（"修改X会影响什么？"）
     - debugging: 调试型（"为什么X出错？"）
-    - architecture: 架构型（"项目架构是什么？"）
     - change_guidance: 修改指导（"如何修改X？"）
+    
+    仓库/文档类意图：
+    - architecture: 架构型（"项目架构是什么？"）
     - concept: 概念理解（"什么是X？"）
     - usage: 使用指南（"如何使用X？"）
+    - topic_coverage: 主题覆盖（"哪些部分讨论了X？"）
+    - relationship: 关系理解（"X和Y之间有什么关系？"）
+    - evidence: 证据追溯（"什么支持结论X？"）
+    - section_locator: 章节定位（"哪个文档/章节描述了X？"）
+    - repo_overview: 仓库概览（"这个项目做什么？技术栈？"）
+    - followup_clarification: 跟进追问（"你刚才说的X是什么意思？"）
     - general: 通用问答（不需要代码检索即可回答）
     """
+    # 代码类意图
     LOCATION = "location"
     MECHANISM = "mechanism"
     CALL_CHAIN = "call_chain"
     IMPACT_ANALYSIS = "impact_analysis"
     DEBUGGING = "debugging"
-    ARCHITECTURE = "architecture"
     CHANGE_GUIDANCE = "change_guidance"
+    # 仓库/文档类意图
+    ARCHITECTURE = "architecture"
     CONCEPT = "concept"
     USAGE = "usage"
+    TOPIC_COVERAGE = "topic_coverage"
+    RELATIONSHIP = "relationship"
+    EVIDENCE = "evidence"
+    SECTION_LOCATOR = "section_locator"
+    REPO_OVERVIEW = "repo_overview"
+    FOLLOWUP_CLARIFICATION = "followup_clarification"
     GENERAL = "general"
     # 兼容旧版本
     IMPLEMENTATION = "implementation"
+
+
+# ---- 意图分类辅助集合 ----
+
+# 代码结构强依赖的意图（需要 code_graph / definition anchor）
+CODE_CENTRIC_INTENTS = {
+    QueryIntent.LOCATION, QueryIntent.MECHANISM, QueryIntent.CALL_CHAIN,
+    QueryIntent.IMPACT_ANALYSIS, QueryIntent.DEBUGGING, QueryIntent.CHANGE_GUIDANCE,
+    QueryIntent.IMPLEMENTATION,
+}
+
+# 文档/仓库级意图（语义/文档证据即可满足）
+DOC_CENTRIC_INTENTS = {
+    QueryIntent.TOPIC_COVERAGE, QueryIntent.RELATIONSHIP, QueryIntent.EVIDENCE,
+    QueryIntent.SECTION_LOCATOR, QueryIntent.REPO_OVERVIEW,
+    QueryIntent.FOLLOWUP_CLARIFICATION,
+}
+
+# 不强制要求 definition anchor 即可给出高置信度答案的意图
+SOFT_ANCHOR_INTENTS = {
+    QueryIntent.CONCEPT, QueryIntent.ARCHITECTURE, QueryIntent.USAGE,
+    QueryIntent.TOPIC_COVERAGE, QueryIntent.RELATIONSHIP, QueryIntent.EVIDENCE,
+    QueryIntent.SECTION_LOCATOR, QueryIntent.REPO_OVERVIEW,
+    QueryIntent.FOLLOWUP_CLARIFICATION, QueryIntent.GENERAL,
+}
+
+# 轻量检索即可回答的意图（只需 1 轮 RAG / repo_map）
+LIGHT_RETRIEVAL_INTENTS = {
+    QueryIntent.CONCEPT, QueryIntent.USAGE, QueryIntent.TOPIC_COVERAGE,
+    QueryIntent.SECTION_LOCATOR, QueryIntent.REPO_OVERVIEW,
+    QueryIntent.FOLLOWUP_CLARIFICATION,
+}
+
+# 需要深度多轮迭代的意图
+DEEP_EXPLORATION_INTENTS = {
+    QueryIntent.MECHANISM, QueryIntent.CALL_CHAIN, QueryIntent.IMPACT_ANALYSIS,
+    QueryIntent.DEBUGGING, QueryIntent.CHANGE_GUIDANCE,
+}
 
 
 class AnchorType(str, Enum):
@@ -83,6 +138,7 @@ class EvidenceType(str, Enum):
     ROUTE_CONFIG = "route_config"       # 路由/框架配置
     TEST_ASSERTION = "test_assertion"   # 测试断言
     DOCUMENTATION = "documentation"     # 文档/注释
+    LEXICAL_MATCH = "lexical_match"     # 词法/精确匹配（grep、字面量）
     SEMANTIC_MATCH = "semantic_match"   # 语义匹配（最低）
 
 
@@ -191,7 +247,7 @@ class ContextPiece:
     ) -> EvidenceCard:
         """转换为证据卡片"""
         return EvidenceCard(
-            file_path=self.file_path or "unknown",
+            file_path=self.file_path or "",
             symbol=symbol or self.metadata.get("symbol"),
             span=self.line_range or (None, None),
             evidence_type=evidence_type,
@@ -214,9 +270,12 @@ class ToolCall:
     success: bool = True
     error: Optional[str] = None
     timestamp: Optional[str] = None
+    duration_ms: Optional[int] = None
+    metrics: Optional[Dict[str, Any]] = None
+    used_fallback: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "tool": self.tool.value,
             "arguments": self.arguments,
             "result": self.result[:500] if self.result and len(self.result) > 500 else self.result,
@@ -224,6 +283,13 @@ class ToolCall:
             "error": self.error,
             "timestamp": self.timestamp,
         }
+        if self.duration_ms is not None:
+            out["duration_ms"] = self.duration_ms
+        if self.metrics:
+            out["metrics"] = self.metrics
+        if self.used_fallback:
+            out["used_fallback"] = True
+        return out
 
 
 @dataclass
@@ -360,6 +426,7 @@ class AgentState:
     # ========== 锚点与证据 ==========
     anchors: List[Anchor] = field(default_factory=list)
     evidence_cards: List[EvidenceCard] = field(default_factory=list)
+    _evidence_dedup_keys: set = field(default_factory=set, repr=False)
     
     # ========== 上下文收集（原始） ==========
     context_scratchpad: List[ContextPiece] = field(default_factory=list)
@@ -393,9 +460,19 @@ class AgentState:
     # ========== 错误处理 ==========
     error: Optional[str] = None
 
-    def add_context(self, piece: ContextPiece) -> None:
-        """添加上下文片段"""
+    def add_context(self, piece: ContextPiece, convert_to_evidence: bool = True) -> None:
+        """
+        添加上下文片段
+        
+        Args:
+            piece: 上下文片段
+            convert_to_evidence: 是否立即转换为证据卡片（用于评估阶段）
+        """
         self.context_scratchpad.append(piece)
+        
+        # 增量转换：高相关性的上下文立即变成证据卡片
+        if convert_to_evidence and piece.relevance_score > 0.3:
+            self._convert_piece_to_evidence(piece)
     
     def add_anchor(self, anchor: Anchor) -> None:
         """添加锚点"""
@@ -437,9 +514,55 @@ class AgentState:
         self.missing_pieces = result.missing_pieces
         self.reflection_notes.extend(result.reflection_notes)
     
+    def _convert_piece_to_evidence(self, piece: ContextPiece) -> None:
+        """
+        将单个上下文片段转换为证据卡片（内部方法）
+
+        增量转换 + 内容去重（相同 source+file_path+content 截断 hash 去重）。
+        """
+        # 去重检查
+        dedup_key = f"{piece.source}|{piece.file_path or ''}|{piece.content[:200]}"
+        if dedup_key in self._evidence_dedup_keys:
+            return
+        self._evidence_dedup_keys.add(dedup_key)
+
+        evidence_type = self._infer_evidence_type(piece)
+        confidence = self._infer_confidence(piece)
+        
+        # 从元数据或内容中提取符号名
+        symbol = piece.metadata.get("symbol")
+        if not symbol and piece.file_path:
+            # 尝试从文件路径推断
+            import os
+            symbol = os.path.basename(piece.file_path).split(".")[0]
+        
+        evidence = piece.to_evidence_card(
+            evidence_type=evidence_type,
+            confidence=confidence,
+            why_it_matters=f"Retrieved via {piece.source} with relevance {piece.relevance_score:.2f}",
+            symbol=symbol,
+        )
+        self.evidence_cards.append(evidence)
+        
+        # 更新停止条件相关状态
+        if evidence_type == EvidenceType.DEFINITION:
+            self.has_primary_anchor = True
+
     def convert_context_to_evidence(self) -> None:
-        """将所有上下文片段转换为证据卡片"""
+        """
+        将所有上下文片段转换为证据卡片（仅用于最终阶段或手动触发）
+        
+        注意：现在 add_context 会自动增量转换，此方法主要用于：
+        1. 兼容旧代码
+        2. 处理之前未转换的低分上下文（在需要时降低阈值）
+        """
+        existing_contents = {e.content for e in self.evidence_cards}
+        
         for piece in self.context_scratchpad:
+            # 跳过已转换的
+            if piece.content in existing_contents:
+                continue
+            
             if piece.relevance_score > 0.3:
                 evidence_type = self._infer_evidence_type(piece)
                 confidence = self._infer_confidence(piece)
@@ -459,6 +582,8 @@ class AgentState:
             return EvidenceType.DIRECT_CALL
         elif "file_read" in source:
             return EvidenceType.DEFINITION
+        elif "grep" in source:
+            return EvidenceType.LEXICAL_MATCH
         elif "rag" in source:
             return EvidenceType.SEMANTIC_MATCH
         elif "graph" in source:
@@ -478,7 +603,7 @@ class AgentState:
         获取当前收集的上下文摘要，用于传递给 LLM。
         """
         if not self.context_scratchpad:
-            return "尚未收集到任何上下文信息。"
+            return "No context has been collected yet."
         
         summaries = []
         total_length = 0
@@ -486,11 +611,11 @@ class AgentState:
         for piece in sorted(self.context_scratchpad, 
                            key=lambda x: x.relevance_score, 
                            reverse=True):
-            entry = f"[来源: {piece.source}]"
+            entry = f"[source: {piece.source}]"
             if piece.file_path:
-                entry += f" [文件: {piece.file_path}]"
+                entry += f" [file: {piece.file_path}]"
             if piece.line_range:
-                entry += f" [行 {piece.line_range[0]}-{piece.line_range[1]}]"
+                entry += f" [lines {piece.line_range[0]}-{piece.line_range[1]}]"
             entry += f"\n{piece.content}"
             
             if total_length + len(entry) > max_length:
@@ -506,7 +631,7 @@ class AgentState:
         获取证据卡片摘要，用于答案合成。
         """
         if not self.evidence_cards:
-            return "尚未收集到任何证据。"
+            return "No evidence has been collected yet."
         
         summaries = []
         total_length = 0
@@ -518,6 +643,7 @@ class AgentState:
             EvidenceType.ROUTE_CONFIG: 3,
             EvidenceType.TEST_ASSERTION: 2,
             EvidenceType.DOCUMENTATION: 1,
+            EvidenceType.LEXICAL_MATCH: 1,
             EvidenceType.SEMANTIC_MATCH: 0,
         }
         
@@ -529,11 +655,11 @@ class AgentState:
         
         for evidence in sorted_evidence:
             entry = f"[{evidence.evidence_type.value}] [{evidence.confidence.value}]\n"
-            entry += f"文件: {evidence.get_citation()}\n"
+            entry += f"file: {evidence.get_citation()}\n"
             if evidence.symbol:
-                entry += f"符号: {evidence.symbol}\n"
-            entry += f"说明: {evidence.why_it_matters}\n"
-            entry += f"内容:\n{evidence.content}"
+                entry += f"symbol: {evidence.symbol}\n"
+            entry += f"note: {evidence.why_it_matters}\n"
+            entry += f"content:\n{evidence.content}"
             
             if total_length + len(entry) > max_length:
                 break
@@ -546,9 +672,9 @@ class AgentState:
     def get_anchors_summary(self) -> str:
         """获取锚点摘要"""
         if not self.anchors:
-            return "尚未发现锚点。"
+            return "No anchors discovered yet."
         
-        lines = [f"已发现 {len(self.anchors)} 个锚点:"]
+        lines = [f"Discovered {len(self.anchors)} anchor(s):"]
         for anchor in self.anchors:
             loc = f"{anchor.file_path}"
             if anchor.line_number:
@@ -570,18 +696,18 @@ class AgentState:
         获取压缩后的对话历史
         """
         if self.session_memory.session_summary:
-            summary = f"[会话摘要] {self.session_memory.session_summary}\n\n"
+            summary = f"[session summary] {self.session_memory.session_summary}\n\n"
         else:
             summary = ""
         
         recent = self.session_memory.recent_turns[-max_turns:] if self.session_memory.recent_turns else self.conversation_history[-max_turns:]
         
         if not recent:
-            return summary + "无对话历史"
+            return summary + "No conversation history."
         
         parts = []
         for msg in recent:
-            role = "用户" if msg.get("role") == "user" else "助手"
+            role = "User" if msg.get("role") == "user" else "Assistant"
             content = msg.get("content", "")
             if len(content) > 300:
                 content = content[:300] + "..."
@@ -593,30 +719,99 @@ class AgentState:
         """
         检查是否满足停止条件
         
-        基于硬门控的非 LLM 判断。
+        基于硬门控的非 LLM 判断。使用多层门控逻辑。
+        区分代码类意图与文档/仓库类意图，适用不同的停止策略。
         """
-        # 至少有一个主锚点
-        if not self.has_primary_anchor and self.iteration_count < 2:
-            return False
-        
-        # 对于调用链/架构问题，需要闭合路径
+        is_doc_intent = self.query_intent in DOC_CENTRIC_INTENTS
+        is_soft = self.query_intent in SOFT_ANCHOR_INTENTS
+        is_light = self.query_intent in LIGHT_RETRIEVAL_INTENTS
+
+        # ========== 快速路径检查 ==========
+
+        # 如果已经达到最大迭代次数的一半且有足够证据，可以停止
+        if self.iteration_count >= self.max_iterations // 2:
+            if len(self.evidence_cards) >= 3 and (self.has_primary_anchor or is_soft):
+                return True
+
+        # ========== 轻量检索意图：1 轮即够 ==========
+
+        if is_light and self.iteration_count >= 1 and len(self.evidence_cards) >= 1:
+            return True
+
+        # ========== 文档/仓库类意图门控 ==========
+
+        if is_doc_intent:
+            # 有 2 条语义/文档证据即可停止
+            doc_or_semantic = sum(
+                1 for e in self.evidence_cards
+                if e.evidence_type in [EvidenceType.SEMANTIC_MATCH, EvidenceType.DOCUMENTATION]
+            )
+            if doc_or_semantic >= 2:
+                return True
+            # 1 轮后有任何上下文也可停止
+            if self.iteration_count >= 1 and len(self.context_scratchpad) >= 2:
+                return True
+
+        # ========== 代码类意图门控 ==========
+
+        # 简单定位型问题：找到定义锚点即可停止
+        if self.query_intent == QueryIntent.LOCATION:
+            definition_anchors = [a for a in self.anchors if a.anchor_type == AnchorType.DEFINITION]
+            if definition_anchors and len(self.evidence_cards) >= 1:
+                return True
+
+        # 概念型问题：有语义匹配证据即可
+        if self.query_intent in [QueryIntent.CONCEPT, QueryIntent.USAGE]:
+            if len(self.evidence_cards) >= 2:
+                return True
+
+        # 调用链/架构问题：需要更多证据
         if self.query_intent in [QueryIntent.CALL_CHAIN, QueryIntent.ARCHITECTURE]:
             if not self.has_closed_path and self.iteration_count < 3:
                 return False
-        
-        # 如果有冲突证据，需要继续收集
+            if len(self.anchors) < 2 and self.iteration_count < 2:
+                return False
+
+        # ========== 证据充分性门控 ==========
+
+        # 至少有一个主锚点或足够的上下文
+        if not self.has_primary_anchor and not is_soft:
+            if len(self.context_scratchpad) < 3 and self.iteration_count < 2:
+                return False
+
+        # 如果有冲突证据，需要继续收集（但不超过3轮）
         if self.has_conflicts and self.iteration_count < 3:
             return False
-        
+
         # 证据卡片数量门控
         definition_count = sum(1 for e in self.evidence_cards if e.evidence_type == EvidenceType.DEFINITION)
-        if definition_count == 0 and self.iteration_count < 2:
+        total_structural = sum(1 for e in self.evidence_cards if e.evidence_type in [EvidenceType.DEFINITION, EvidenceType.DIRECT_CALL])
+
+        # 代码类意图：至少需要一些结构化证据，或者已经足够迭代
+        if not is_soft and total_structural == 0 and definition_count == 0:
+            if self.iteration_count < 2:
+                return False
+
+        # ========== 置信度门控 ==========
+
+        # 文档类意图阈值更低
+        if is_doc_intent or is_soft:
+            min_confidence = 0.4 if self.iteration_count >= 1 else 0.5
+        else:
+            min_confidence = 0.5 if self.iteration_count >= 2 else 0.6
+        if self.confidence_score < min_confidence and self.iteration_count < 3:
             return False
-        
-        # 置信度门控
-        if self.confidence_score < 0.6 and self.iteration_count < 3:
-            return False
-        
+
+        # ========== 最终检查 ==========
+
+        # 如果迭代次数足够且有一些证据，可以停止
+        if self.iteration_count >= 2 and len(self.evidence_cards) >= 2:
+            return True
+
+        # 轻量意图 1 轮就够
+        if is_light and self.iteration_count >= 1:
+            return True
+
         return True
 
     def to_dict(self) -> Dict[str, Any]:

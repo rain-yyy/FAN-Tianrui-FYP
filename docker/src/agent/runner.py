@@ -23,8 +23,20 @@ logger = logging.getLogger("app.agent.runner")
 
 @dataclass
 class AgentEvent:
-    """Agent 执行过程中的事件"""
-    event_type: str   # 'planning', 'tool_call', 'evaluation', 'synthesis', 'complete', 'error'
+    """
+    Agent 执行过程中的事件
+    
+    事件类型：
+    - 'planning': 规划阶段 {status, question, intent, entities, plan_steps}
+    - 'tool_call': 工具调用 {status, iteration, tool, operation, query, file_path, symbol_name, tools, elapsed_ms, results}
+    - 'evaluation': 评估阶段 {status, iteration, is_sufficient, confidence, confidence_level, missing}
+    - 'synthesis': 合成阶段 {status, answer_length, sources_count}
+    - 'answer_delta': 答案增量 {delta}
+    - 'complete': 完成 {answer_length, iterations, sources_count}
+    - 'final_result': 最终结果 {answer, sources, trajectory, ...}
+    - 'error': 错误 {error}
+    """
+    event_type: str
     data: Dict[str, Any]
     timestamp: str
     
@@ -34,6 +46,64 @@ class AgentEvent:
             "data": self.data,
             "timestamp": self.timestamp,
         }
+    
+    @staticmethod
+    def create_tool_call_event(
+        status: str,
+        iteration: int,
+        tools: List[Dict[str, Any]] = None,
+        elapsed_ms: int = None,
+        results: List[Dict[str, Any]] = None
+    ) -> "AgentEvent":
+        """创建工具调用事件"""
+        data = {
+            "status": status,
+            "iteration": iteration,
+        }
+        
+        if tools:
+            # 格式化工具信息为更详细的描述
+            formatted_tools = []
+            for tool in tools:
+                tool_name = tool.get("tool", "unknown")
+                args = tool.get("arguments", {})
+                
+                formatted = {
+                    "tool": tool_name,
+                    "description": _get_tool_description(tool_name, args),
+                }
+                
+                # 添加关键参数用于前端展示
+                if tool_name == "rag_search":
+                    formatted["query"] = args.get("query", "")[:100]
+                elif tool_name == "code_graph":
+                    formatted["operation"] = args.get("operation", "")
+                    formatted["symbol_name"] = args.get("symbol_name", "")
+                elif tool_name == "file_read":
+                    formatted["file_path"] = args.get("file_path", "")
+                elif tool_name == "repo_map":
+                    formatted["include_signatures"] = args.get("include_signatures", True)
+                elif tool_name == "grep_search":
+                    formatted["pattern"] = args.get("pattern", "")[:100]
+                    formatted["is_regex"] = args.get("is_regex", False)
+                    formatted["case_sensitive"] = args.get("case_sensitive", False)
+                
+                formatted_tools.append(formatted)
+            
+            data["tools"] = formatted_tools
+            data["parallel"] = len(tools) > 1
+        
+        if elapsed_ms is not None:
+            data["elapsed_ms"] = elapsed_ms
+        
+        if results:
+            data["results"] = results
+        
+        return AgentEvent(
+            event_type="tool_call",
+            data=data,
+            timestamp=datetime.now().isoformat()
+        )
 
 
 class AgentRunner:
@@ -52,7 +122,7 @@ class AgentRunner:
         graph_path: Optional[str] = None,
         repo_root: Optional[str] = None,
         max_iterations: int = 5,
-        on_event: Optional[Callable[[AgentEvent], None]] = None
+        on_event: Optional[Callable[[AgentEvent], None]] = None,
     ):
         """
         初始化 Agent Runner
@@ -124,7 +194,7 @@ class AgentRunner:
         
         self._emit_event("planning", {
             "question": question,
-            "status": "开始分析问题意图..."
+            "status": "Analyzing question intent...",
         })
         
         result = runner.run(
@@ -255,36 +325,88 @@ class AgentRunner:
                 "code_graph": "🕸️",
                 "file_read": "📄",
                 "repo_map": "🗺️",
+                "grep_search": "⚡",
             }
             
-            formatted.append({
+            entry: Dict[str, Any] = {
                 "step": i + 1,
                 "icon": tool_icons.get(tool, "🔧"),
                 "tool": tool,
                 "description": _get_tool_description(tool, args),
                 "success": success,
                 "preview": result[:200] + "..." if len(result) > 200 else result,
-            })
+            }
+            if step.get("duration_ms") is not None:
+                entry["duration_ms"] = step["duration_ms"]
+            if step.get("metrics"):
+                entry["metrics"] = step["metrics"]
+            if step.get("used_fallback"):
+                entry["used_fallback"] = True
+            formatted.append(entry)
         
         return formatted
 
 
 def _get_tool_description(tool: str, args: Dict[str, Any]) -> str:
-    """生成工具调用的人类可读描述"""
+    """
+    生成工具调用的人类可读描述
+    
+    用于前端展示具体的工具调用步骤，类似 DeepWiki 风格。
+    """
     if tool == "rag_search":
         query = args.get("query", "")
-        return f"搜索知识库：{query[:50]}..."
+        if len(query) > 60:
+            query = query[:60] + "..."
+        return f"Search knowledge base: \"{query}\""
+    
     elif tool == "code_graph":
         op = args.get("operation", "")
         symbol = args.get("symbol_name", "")
-        return f"查询代码图谱：{op}({symbol})"
+        file_path = args.get("file_path", "")
+        
+        op_descriptions = {
+            "find_definition": f"Find definition of `{symbol}`",
+            "find_callers": f"Find callers of `{symbol}`",
+            "find_callees": f"Find callees of `{symbol}`",
+            "get_all_symbols": "List all symbols",
+            "get_file_symbols": f"List symbols in `{file_path}`",
+        }
+        return op_descriptions.get(op, f"Code graph: {op}({symbol})")
+    
     elif tool == "file_read":
         path = args.get("file_path", "")
-        return f"读取文件：{path}"
+        start_line = args.get("start_line")
+        end_line = args.get("end_line")
+        
+        if path:
+            parts = path.split("/")
+            short_path = "/".join(parts[-2:]) if len(parts) > 2 else path
+            
+            if start_line and end_line:
+                return f"Read `{short_path}` lines {start_line}-{end_line}"
+            elif start_line:
+                return f"Read `{short_path}` from line {start_line}"
+            else:
+                return f"Read file `{short_path}`"
+        return "Read file"
+    
     elif tool == "repo_map":
-        return "获取仓库结构概览"
+        include_signatures = args.get("include_signatures", True)
+        max_depth = args.get("max_depth", 3)
+        if include_signatures:
+            return f"Repository map (signatures, depth {max_depth})"
+        return f"Repository tree (depth {max_depth})"
+    
+    elif tool == "grep_search":
+        pattern = args.get("pattern", "")
+        if len(pattern) > 60:
+            pattern = pattern[:60] + "..."
+        is_regex = args.get("is_regex", False)
+        mode = "regex" if is_regex else "text"
+        return f"Grep search ({mode}): \"{pattern}\""
+    
     else:
-        return f"执行 {tool}"
+        return f"Run tool {tool}"
 
 
 class AgentSession:

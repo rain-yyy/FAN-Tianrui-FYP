@@ -18,6 +18,8 @@ wiki_section_json/
 wiki_structure_raw/
 wiki_structure.json
 
+docker/data/
+
 
 
 frontend/node_modules/

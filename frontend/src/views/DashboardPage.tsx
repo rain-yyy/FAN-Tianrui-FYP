@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/providers/AuthProvider';
 import { prefetchRouteModule } from '@/router/prefetch';
 import RepoGrid from '@/components/RepoGrid';
+import { t } from '@/lib/i18n';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -26,10 +27,10 @@ export default function DashboardPage() {
   const maxRetries = 5;
 
   const getPollDelayMs = useCallback((attempt: number) => {
-    if (typeof document !== 'undefined' && document.hidden) return 10000;
-    if (attempt <= 1) return 2500;
-    if (attempt <= 3) return 4000;
-    return 6000;
+    if (typeof document !== 'undefined' && document.hidden) return 20000;
+    if (attempt <= 1) return 5000;
+    if (attempt <= 3) return 10000;
+    return 20000;
   }, []);
 
   const clearTask = useCallback(() => {
@@ -196,7 +197,7 @@ export default function DashboardPage() {
           API SYSTEM: {health ? 'ONLINE' : 'OFFLINE'}
         </div>
         <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-white">
-          Which repo would you like to understand?
+          {t('dashboardTitle')}
         </h1>
       </div>
 
@@ -288,7 +289,7 @@ export default function DashboardPage() {
             </div>
             <div className="text-xs text-zinc-400 inline-flex items-center gap-1">
               <ShieldCheck className="w-3 h-3" />
-              任务完成后将自动导航到 `/app/wiki/:taskId`
+              When the task completes you will be redirected to `/app/wiki/:taskId`
             </div>
           </div>
           {status.status === 'failed' && (

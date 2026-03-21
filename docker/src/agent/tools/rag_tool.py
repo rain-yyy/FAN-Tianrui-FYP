@@ -5,12 +5,14 @@ RAG 语义检索工具
 - 支持混合检索（密集 + 稀疏）
 - 支持 HyDE 增强
 - 返回结构化的上下文片段
+- 使用全局缓存避免重复加载
 """
 
 from __future__ import annotations
 
 import os
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Mapping
 
@@ -24,6 +26,7 @@ from src.core.retrieval import (
     mmr_select,
     normalize_scores,
 )
+from src.core.chat import _vector_store_cache, CategoryRetrievalUnit as ChatCategoryRetrievalUnit
 from src.ingestion.kb_loader import load_knowledge_base
 from src.clients.ai_client_factory import get_ai_client, get_model_config
 from src.config import CONFIG
@@ -79,12 +82,27 @@ class RAGSearchTool:
         self._hyde_cache: Dict[str, str] = {}
     
     def _ensure_loaded(self) -> None:
-        """确保向量库已加载"""
+        """确保向量库已加载，优先使用全局缓存"""
         if self._loaded:
             return
         
         root_path = self._resolve_vector_store_root(self.vector_store_path)
         
+        # 尝试从全局缓存获取
+        cached_stores = _vector_store_cache.get(root_path)
+        if cached_stores is not None:
+            # 转换缓存格式（ChatCategoryRetrievalUnit -> CategoryRetrievalUnit）
+            for category, chat_unit in cached_stores.items():
+                self.stores[category] = CategoryRetrievalUnit(
+                    dense_store=chat_unit.dense_store,
+                    sparse_index=chat_unit.sparse_index,
+                )
+            logger.info(f"[RAGTool] Using cached vector stores for {root_path}")
+            self._loaded = True
+            return
+        
+        # 缓存未命中，执行加载
+        logger.info(f"[RAGTool] Loading vector stores from {root_path} (cache miss)")
         for category in CATEGORY_TOP_K.keys():
             category_path = self._resolve_category_path(root_path, category)
             if category_path:
@@ -99,6 +117,17 @@ class RAGSearchTool:
                     logger.info(f"Loaded vector store for category '{category}'")
                 except Exception as e:
                     logger.warning(f"Failed to load category '{category}': {e}")
+        
+        # 存入全局缓存
+        if self.stores:
+            chat_stores = {
+                cat: ChatCategoryRetrievalUnit(
+                    dense_store=unit.dense_store,
+                    sparse_index=unit.sparse_index,
+                )
+                for cat, unit in self.stores.items()
+            }
+            _vector_store_cache.put(root_path, chat_stores)
         
         self._loaded = True
     
@@ -249,9 +278,12 @@ class RAGSearchTool:
             
             for idx, cand in enumerate(chosen, 1):
                 doc = cand.doc
-                source = doc.metadata.get("source") or doc.metadata.get("file_path") or "unknown"
+                source = doc.metadata.get("source") or doc.metadata.get("file_path") or ""
                 category = doc.metadata.get("kb_category", "")
                 
+                if not source:
+                    source = doc.metadata.get("id") or f"doc_{idx}"
+
                 result_lines.append(f"[{idx}] Source: {source} | Type: {category}")
                 result_lines.append("-" * 40)
                 
@@ -289,18 +321,28 @@ class RAGSearchTool:
         question: str,
         category_top_k: Mapping[str, int],
     ) -> List[RankedCandidate]:
-        """收集混合检索候选"""
+        """收集混合检索候选（跨类别并行）"""
         final_candidates: List[RankedCandidate] = []
-        
-        for category, unit in self.stores.items():
+
+        def _fetch_category(category, unit):
             base_k = max(int(category_top_k.get(category, 3)), 1)
             dense_k = min(base_k * 4, 20)
             sparse_k = min(base_k * 3, 15)
-            
-            candidates = self._collect_candidates_for_category(
+            return self._collect_candidates_for_category(
                 category, unit, question, dense_k, sparse_k
             )
-            final_candidates.extend(candidates)
+
+        if len(self.stores) <= 1:
+            for category, unit in self.stores.items():
+                final_candidates.extend(_fetch_category(category, unit))
+        else:
+            with ThreadPoolExecutor(max_workers=len(self.stores)) as pool:
+                futures = {
+                    pool.submit(_fetch_category, cat, unit): cat
+                    for cat, unit in self.stores.items()
+                }
+                for future in as_completed(futures):
+                    final_candidates.extend(future.result())
         
         if not final_candidates:
             return []
@@ -320,49 +362,55 @@ class RAGSearchTool:
         dense_k: int,
         sparse_k: int,
     ) -> List[RankedCandidate]:
-        """为指定类别收集候选"""
+        """为指定类别收集候选（dense + sparse 并行）"""
         candidates: Dict[str, RankedCandidate] = {}
-        
-        try:
-            dense_hits = unit.dense_store.similarity_search_with_relevance_scores(
-                question, k=dense_k
-            )
+
+        def _dense_search():
+            try:
+                return unit.dense_store.similarity_search_with_relevance_scores(
+                    question, k=dense_k
+                )
+            except Exception as e:
+                logger.warning(f"Dense search failed for {category}: {e}")
+                return []
+
+        def _sparse_search():
+            if unit.sparse_index is None or sparse_k <= 0:
+                return []
+            try:
+                return unit.sparse_index.search(question, top_k=sparse_k)
+            except Exception as e:
+                logger.warning(f"Sparse search failed for {category}: {e}")
+                return []
+
+        # 并行执行 dense 和 sparse
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            dense_future = pool.submit(_dense_search)
+            sparse_future = pool.submit(_sparse_search)
+            dense_hits = dense_future.result()
+            sparse_hits = sparse_future.result()
+
+        # 处理 dense 结果
+        if dense_hits:
             dense_scores = normalize_scores([score for _, score in dense_hits])
-            
             for idx, (doc, _) in enumerate(dense_hits):
                 norm_score = dense_scores[idx] if idx < len(dense_scores) else 0.0
                 enriched_doc = self._attach_category(doc, category)
                 key = f"{category}|{compute_doc_key(enriched_doc)}"
-                
                 if key not in candidates:
-                    candidates[key] = RankedCandidate(
-                        key=key,
-                        category=category,
-                        doc=enriched_doc,
-                    )
+                    candidates[key] = RankedCandidate(key=key, category=category, doc=enriched_doc)
                 candidates[key].dense_score = max(candidates[key].dense_score, norm_score)
-        except Exception as e:
-            logger.warning(f"Dense search failed for {category}: {e}")
-        
-        if unit.sparse_index is not None and sparse_k > 0:
-            try:
-                sparse_hits = unit.sparse_index.search(question, top_k=sparse_k)
-                sparse_scores = normalize_scores([score for _, score in sparse_hits])
-                
-                for idx, (doc, _) in enumerate(sparse_hits):
-                    norm_score = sparse_scores[idx] if idx < len(sparse_scores) else 0.0
-                    enriched_doc = self._attach_category(doc, category)
-                    key = f"{category}|{compute_doc_key(enriched_doc)}"
-                    
-                    if key not in candidates:
-                        candidates[key] = RankedCandidate(
-                            key=key,
-                            category=category,
-                            doc=enriched_doc,
-                        )
-                    candidates[key].sparse_score = max(candidates[key].sparse_score, norm_score)
-            except Exception as e:
-                logger.warning(f"Sparse search failed for {category}: {e}")
+
+        # 处理 sparse 结果
+        if sparse_hits:
+            sparse_scores = normalize_scores([score for _, score in sparse_hits])
+            for idx, (doc, _) in enumerate(sparse_hits):
+                norm_score = sparse_scores[idx] if idx < len(sparse_scores) else 0.0
+                enriched_doc = self._attach_category(doc, category)
+                key = f"{category}|{compute_doc_key(enriched_doc)}"
+                if key not in candidates:
+                    candidates[key] = RankedCandidate(key=key, category=category, doc=enriched_doc)
+                candidates[key].sparse_score = max(candidates[key].sparse_score, norm_score)
         
         for candidate in candidates.values():
             candidate.final_score = (

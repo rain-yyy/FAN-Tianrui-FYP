@@ -32,9 +32,19 @@ logger = logging.getLogger("api")
 # 项目根目录获取
 PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
 
-# 默认路径配置
+# 默认路径配置（保留为单任务回退，实际并发场景应使用 _task_output_dir 生成的任务级路径）
 DEFAULT_OUTPUT_PATH: Path = PROJECT_ROOT / "wiki_structure.json"
 DEFAULT_WIKI_SECTION_JSON_OUTPUT: Path = PROJECT_ROOT / "wiki_section_json"
+
+# 任务级工作目录根路径
+TASK_WORK_ROOT: Path = Path(os.getenv("TASK_WORK_PATH", str(PROJECT_ROOT / "task_workdirs")))
+
+
+def _task_output_dir(task_id: str) -> Path:
+    """返回 task_id 专属的工作目录，确保不同任务的输出互不干扰"""
+    d = TASK_WORK_ROOT / task_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 # Vector store 根目录 (Fly.io 持久化卷挂载点或本地开发目录)
 VECTOR_STORE_ROOT: Path = Path(os.getenv("VECTOR_STORE_PATH", str(PROJECT_ROOT / "vector_stores")))
@@ -66,7 +76,7 @@ def run_structure_generation(
     _update_progress(task_id, 5, "正在克隆/读取仓库...")
 
     if repo_url_or_path.startswith(("http://", "https://", "git@")):
-        repo_path = setup_repository(repo_url_or_path)
+        repo_path = setup_repository(repo_url_or_path, task_id=task_id)
     else:
         repo_path = repo_url_or_path
 
@@ -102,19 +112,27 @@ def run_wiki_content_generation(
     task_id: Optional[str] = None
 ) -> List[Path]:
     """
-    调用 AI 客户端，根据 wiki 目录逐条生成内容与 Mermaid 图，并写入 JSON。
+    调用 AI 客户端，根据 wiki 目录并发生成内容与 Mermaid 图，并写入 JSON。
     """
     _update_progress(task_id, 45, "正在初始化 AI 客户端...")
 
     provider, model = get_model_config(CONFIG, "wiki_content")
-    client = get_ai_client(provider, model=model)
+    # 构建客户端工厂，让每个并发 worker 独立获取实例
+    client_factory = lambda: get_ai_client(provider, model=model)
+
+    # 进度回调：将章节级进度同步到 Supabase
+    def _progress_cb(progress: float, step: str):
+        _update_progress(task_id, progress, step)
+
     generator = WikiContentGenerator(
         repo_root=repo_path,
         json_output_dir=json_output_dir,
-        client=client,
+        client_factory=client_factory,
+        progress_callback=_progress_cb if task_id else None,
+        task_id=task_id,
     )
 
-    _update_progress(task_id, 50, "正在生成 Wiki 内容（此步骤可能耗时较长）...")
+    _update_progress(task_id, 50, "正在并发生成 Wiki 内容...")
 
     result = generator.generate(wiki_structure)
 
@@ -188,7 +206,8 @@ def run_rag_indexing(
 
 def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output_dir: Path):
     """
-    清理本地生成的临时文件，释放存储空间
+    清理本地生成的临时文件，释放存储空间。
+    如果 output_path 和 json_output_dir 位于同一个 task 工作目录，则直接清理整个工作目录。
     """
     if repo_path and Path(repo_path).exists():
         try:
@@ -209,6 +228,20 @@ def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output
         except Exception as e:
             logger.warning(f"[清理警告] 删除仓库目录失败: {repo_path}, 错误: {e}")
 
+    # 尝试整体清理 task 工作目录（如果两者同属一个 task_dir）
+    task_work_root = TASK_WORK_ROOT.resolve()
+    try:
+        task_dir = output_path.resolve().parent
+        task_dir.relative_to(task_work_root)
+        # output_path 位于 task 工作目录内，直接清理整个目录
+        if task_dir.exists():
+            shutil.rmtree(task_dir)
+            logger.info(f"[清理] 已删除任务工作目录: {task_dir}")
+        return
+    except ValueError:
+        pass
+
+    # 回退：分别清理单个文件和目录
     if output_path.exists():
         try:
             output_path.unlink()
@@ -278,10 +311,11 @@ async def execute_generation_task(task_id: str, url_link: str):
             logger.info(f"Task {task_id} not found (deleted) at start, aborting.")
             return
 
-        # 获取默认路径
+        # 构建任务级隔离路径
         config_path = CONFIG_PATH.expanduser().resolve()
-        output_path = DEFAULT_OUTPUT_PATH.expanduser().resolve()
-        json_output_dir = DEFAULT_WIKI_SECTION_JSON_OUTPUT.expanduser().resolve()
+        task_dir = _task_output_dir(task_id)
+        output_path = (task_dir / "wiki_structure.json").resolve()
+        json_output_dir = (task_dir / "wiki_section_json").resolve()
 
         # 1. 生成项目结构 (wiki_structure.json)
         loop = asyncio.get_event_loop()
@@ -327,6 +361,7 @@ async def execute_generation_task(task_id: str, url_link: str):
                 wiki_structure=wiki_structure,
                 structure_local_path=output_path,
                 content_dir=json_output_dir,
+                task_id=task_id,
             )
         )
 
