@@ -6,6 +6,11 @@ import dotenv
 
 dotenv.load_dotenv()
 
+
+class SupabaseStorageError(Exception):
+    """Supabase 网络/查询失败，与「无记录」区分（无记录时 get_task 返回 None）。"""
+
+
 class SupabaseClient:
     def __init__(
         self,
@@ -201,10 +206,10 @@ class SupabaseClient:
     def get_task(self, task_id: str):
         """
         Get a task from Supabase.
+        成功且无行时返回 None；客户端未配置或查询异常时抛出 SupabaseStorageError。
         """
         if not self.client:
-            print("[Supabase] Client not initialized. Skipping get task.")
-            return None
+            raise SupabaseStorageError("Supabase client is not configured")
 
         try:
             response = self.client.table("tasks").select("*").eq("task_id", task_id).execute()
@@ -212,8 +217,7 @@ class SupabaseClient:
                 return response.data[0]
             return None
         except Exception as e:
-            print(f"[Supabase] Error getting task: {e}")
-            return None
+            raise SupabaseStorageError(f"Failed to fetch task: {e}") from e
 
     def get_all_tasks(self, user_id: str):
         """
@@ -230,20 +234,19 @@ class SupabaseClient:
             print(f"[Supabase] Error getting all tasks: {e}")
             return None
 
-    def get_all_available_repos(self):
+    def get_all_available_repos(self) -> List[dict]:
         """
         Get all available repos from Supabase.
+        成功时始终返回 list（可为空）；未配置或查询失败时抛出 SupabaseStorageError。
         """
         if not self.client:
-            print("[Supabase] Client not initialized. Skipping get all available repos.")
-            return None
+            raise SupabaseStorageError("Supabase client is not configured")
 
         try:
             response = self.client.table("repositories").select("*").execute()
-            return response.data
+            return list(response.data or [])
         except Exception as e:
-            print(f"[Supabase] Error getting all available repos: {e}")
-            return None
+            raise SupabaseStorageError(f"Failed to fetch repositories: {e}") from e
 
     def get_repo_information(self, repo_url: str):
         """

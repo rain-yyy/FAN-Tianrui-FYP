@@ -4,7 +4,7 @@ import asyncio
 import shutil
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 
 # 导入必要的模块
@@ -17,7 +17,7 @@ from src.wiki.struct_gen import generate_wiki_structure
 from src.wiki.content_gen import WikiContentGenerator
 from src.clients.ai_client_factory import get_ai_client, get_model_config
 from src.storage.r2_client import upload_wiki_to_r2
-from src.storage.supabase_client import update_repo_vector_path, SupabaseClient
+from src.storage.supabase_client import update_repo_vector_path, SupabaseClient, SupabaseStorageError
 from src.utils.repo_utils import get_repo_name, get_repo_hash
 
 # 任务状态定义 (保持与 api.py 一致)
@@ -46,10 +46,31 @@ def _task_output_dir(task_id: str) -> Path:
     d.mkdir(parents=True, exist_ok=True)
     return d
 
-# Vector store 根目录 (Fly.io 持久化卷挂载点或本地开发目录)
-VECTOR_STORE_ROOT: Path = Path(os.getenv("VECTOR_STORE_PATH", str(PROJECT_ROOT / "vector_stores")))
-# 默认使用项目内 data/repos，本地开发可写；Docker 通过 REPO_STORE_PATH=/data/repos 覆盖
-REPO_STORE_ROOT: Path = Path(os.getenv("REPO_STORE_PATH", str(PROJECT_ROOT / "data" / "repos"))).expanduser()
+# 持久化数据默认在仓库根下 data/（与 docker/ 同级）；Fly/Compose 挂载 /data 时由环境变量覆盖
+_DATA_ROOT_DEFAULT = PROJECT_ROOT.parent / "data"
+VECTOR_STORE_ROOT: Path = Path(
+    os.getenv("VECTOR_STORE_PATH", str(_DATA_ROOT_DEFAULT / "vector_stores"))
+)
+REPO_STORE_ROOT: Path = Path(
+    os.getenv("REPO_STORE_PATH", str(_DATA_ROOT_DEFAULT / "repos"))
+).expanduser()
+
+
+def _task_marked_cancelled_by_user(supabase_client: SupabaseClient, task_id: str) -> bool:
+    """
+    用户已通过 /cancel 将任务标为 failed（含 Cancelled）时返回 True，
+    避免后台在长时间 run_in_executor 结束后把状态写回 completed 覆盖取消结果。
+    """
+    try:
+        row = supabase_client.get_task(task_id)
+    except SupabaseStorageError:
+        return False
+    if not row:
+        return False
+    if row.get("status") != TaskStatus.FAILED:
+        return False
+    err = (row.get("error") or "").lower()
+    return "cancel" in err
 
 
 def _update_progress(task_id: Optional[str], progress: float, step: str):
@@ -150,7 +171,7 @@ def run_rag_indexing(
     """
     为仓库创建 RAG 向量索引（代码和文本分类）
     """
-    _update_progress(task_id, 86, "正在构建 RAG 向量索引...")
+    _update_progress(task_id, 88, "正在构建 RAG 向量索引...")
     
     # 获取仓库名称作为目录名
     repo_name = get_repo_name(repo_url)
@@ -174,7 +195,7 @@ def run_rag_indexing(
     
     # 处理代码文件
     if code_files:
-        _update_progress(task_id, 87, f"正在索引 {len(code_files)} 个代码文件...")
+        _update_progress(task_id, 89, f"正在索引 {len(code_files)} 个代码文件...")
         
         code_docs = load_and_split_docs(code_files)
         if code_docs:
@@ -184,7 +205,7 @@ def run_rag_indexing(
     
     # 处理文本文件
     if text_files:
-        _update_progress(task_id, 88, f"正在索引 {len(text_files)} 个文本文件...")
+        _update_progress(task_id, 90, f"正在索引 {len(text_files)} 个文本文件...")
         
         text_docs = load_and_split_docs(text_files)
         if text_docs:
@@ -198,7 +219,7 @@ def run_rag_indexing(
     except Exception as e:
         logger.error(f"[Supabase] 同步向量路径失败: {e}")
     
-    _update_progress(task_id, 89, "RAG 向量索引构建完成")
+    _update_progress(task_id, 91, "RAG 向量索引构建完成")
     
     logger.info(f"[RAG] 向量库构建完成: {vector_store_path}")
     return str(vector_store_path)
@@ -257,6 +278,111 @@ def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output
             logger.warning(f"[清理警告] 删除 wiki_section_json 目录失败: {json_output_dir}, 错误: {e}")
 
 
+def _parse_task_result_blob(raw: Any) -> Dict[str, Any]:
+    """将 Supabase tasks.result（dict 或 JSON 字符串）规范为 dict。"""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+async def _background_retry_rag_indexing(task_id: str, url_link: str, config_path: Path) -> None:
+    """
+    Wiki 已成功上传后，若 RAG 失败则在后台多次重试索引；成功后合并写回 tasks.result 与 repositories。
+    每次重试单独克隆到持久目录，不依赖已清理的任务临时目录。
+    """
+    supabase_client = SupabaseClient()
+    retry_tag = f"{task_id}_embed_retry"
+    delays_before_attempt_sec = [30, 120, 300]
+    loop = asyncio.get_event_loop()
+    last_error: Optional[str] = None
+
+    for attempt in range(1, len(delays_before_attempt_sec) + 1):
+        if attempt > 1:
+            await asyncio.sleep(delays_before_attempt_sec[attempt - 1])
+        else:
+            await asyncio.sleep(delays_before_attempt_sec[0])
+
+        try:
+            task_row = supabase_client.get_task(task_id)
+        except SupabaseStorageError as e:
+            logger.warning(f"[RAG 重试] Supabase 查询失败，终止后台重试: {e}")
+            return
+        if not task_row:
+            logger.info(f"[RAG 重试] 任务 {task_id} 已不存在，终止后台重试")
+            return
+
+        try:
+
+            def _clone_and_index() -> str:
+                rp = setup_repository(url_link, task_id=retry_tag)
+                return run_rag_indexing(rp, url_link, config_path, task_id=None)
+
+            vector_store_path = await loop.run_in_executor(None, _clone_and_index)
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"[RAG 重试] task={task_id} 第 {attempt} 次失败: {e}")
+            continue
+
+        try:
+            task_row = supabase_client.get_task(task_id)
+        except SupabaseStorageError as e:
+            logger.warning(f"[RAG 重试] 写回前 Supabase 查询失败，跳过: {e}")
+            return
+        if not task_row:
+            logger.info(f"[RAG 重试] 任务 {task_id} 在索引成功后已被删除，跳过写回")
+            return
+
+        prev = _parse_task_result_blob(task_row.get("result"))
+        prev["vector_store_path"] = vector_store_path
+        emb = prev.get("embedding") if isinstance(prev.get("embedding"), dict) else {}
+        emb = dict(emb)
+        emb["status"] = "ready"
+        emb["last_error"] = None
+        emb["retry_attempts"] = attempt
+        emb["ready_at"] = datetime.now(timezone.utc).isoformat()
+        prev["embedding"] = emb
+
+        supabase_client.update_task_status(task_id, TaskStatus.COMPLETED, result=prev)
+
+        repo_row = supabase_client.get_repo_information(url_link)
+        desc = (repo_row or {}).get("description")
+        supabase_client.update_repository_information(
+            url_link,
+            None,
+            None,
+            vector_store_path,
+            desc,
+        )
+        logger.info(f"[RAG 重试] 成功 task={task_id} vector_store_path={vector_store_path}")
+        return
+
+    try:
+        task_row = supabase_client.get_task(task_id)
+    except SupabaseStorageError as e:
+        logger.warning(f"[RAG 重试] 最终状态写回前 Supabase 失败: {e}")
+        return
+    if not task_row:
+        return
+    prev = _parse_task_result_blob(task_row.get("result"))
+    emb = prev.get("embedding") if isinstance(prev.get("embedding"), dict) else {}
+    emb = dict(emb)
+    emb["status"] = "failed"
+    emb["last_error"] = last_error
+    emb["retry_attempts"] = len(delays_before_attempt_sec)
+    emb["failed_at"] = datetime.now(timezone.utc).isoformat()
+    prev["embedding"] = emb
+    supabase_client.update_task_status(task_id, TaskStatus.COMPLETED, result=prev)
+    logger.error(f"[RAG 重试] task={task_id} 已达最大重试次数，embedding 仍为失败")
+
+
 def _generate_repo_description(repo_path: str, repo_url: str) -> str:
     """
     Generate a short description for the repository using LLM.
@@ -313,7 +439,7 @@ async def execute_generation_task(task_id: str, url_link: str):
 
         # 构建任务级隔离路径
         config_path = CONFIG_PATH.expanduser().resolve()
-        task_dir = _task_output_dir(task_id)
+        task_dir = _task_output_dir(task_id) #临时工作目录
         output_path = (task_dir / "wiki_structure.json").resolve()
         json_output_dir = (task_dir / "wiki_section_json").resolve()
 
@@ -328,6 +454,7 @@ async def execute_generation_task(task_id: str, url_link: str):
                 task_id=task_id
             )
         )
+        await asyncio.sleep(0)
 
         # 2. 生成 Wiki 内容和对应的 JSON 详情
         await loop.run_in_executor(
@@ -339,21 +466,10 @@ async def execute_generation_task(task_id: str, url_link: str):
                 task_id=task_id
             )
         )
+        await asyncio.sleep(0)
 
-        # 3. 构建 RAG 向量索引（用于聊天问答）
-        vector_store_path = await loop.run_in_executor(
-            None,
-            lambda: run_rag_indexing(
-                repo_path=repo_path,
-                repo_url=url_link,
-                config_path=config_path,
-                task_id=task_id
-            )
-        )
-
-        _update_progress(task_id, 90, "正在上传到 R2 存储...")
-
-        # 4. 上传到 R2 存储
+        # 3. 先上传 R2，避免仅因 RAG/embedding 失败导致 Wiki 成果未持久化
+        _update_progress(task_id, 86, "正在上传到 R2 存储...")
         r2_structure_url, r2_content_urls = await loop.run_in_executor(
             None,
             lambda: upload_wiki_to_r2(
@@ -364,31 +480,81 @@ async def execute_generation_task(task_id: str, url_link: str):
                 task_id=task_id,
             )
         )
+        await asyncio.sleep(0)
 
-        # 更新任务为完成状态
-        result = {
+        # 4. 构建 RAG 向量索引（失败不推翻已完成的上传与任务）
+        vector_store_path: Optional[str] = None
+        embedding_error: Optional[str] = None
+        try:
+            vector_store_path = await loop.run_in_executor(
+                None,
+                lambda: run_rag_indexing(
+                    repo_path=repo_path,
+                    repo_url=url_link,
+                    config_path=config_path,
+                    task_id=task_id
+                )
+            )
+        except Exception as rag_exc:
+            embedding_error = str(rag_exc)
+            logger.exception(
+                "任务 %s Wiki 已上传至 R2，但 RAG 向量索引失败，将标记为已完成并调度后台重试: %s",
+                task_id,
+                rag_exc,
+            )
+
+        await asyncio.sleep(0)
+
+        result: Dict[str, Any] = {
             "r2_structure_url": r2_structure_url,
             "r2_content_urls": r2_content_urls,
             "json_wiki": str(output_path) if not r2_structure_url else None,
             "json_content": str(json_output_dir) if not r2_content_urls else None,
-            "vector_store_path": vector_store_path,  # RAG 向量库路径
-            "repo_url": url_link,  # 仓库 URL（用于聊天接口）
+            "vector_store_path": vector_store_path,
+            "repo_url": url_link,
+            "embedding": {
+                "status": "ready" if embedding_error is None else "retry_scheduled",
+                "last_error": None if embedding_error is None else embedding_error,
+            },
         }
+        if embedding_error is not None:
+            result["embedding"]["message"] = (
+                "Wiki 已生成并上传；向量索引失败，系统将在后台自动重试。"
+            )
+
+        if _task_marked_cancelled_by_user(supabase_client, task_id):
+            logger.info(f"任务 {task_id} 已被用户取消，跳过写入完成状态")
+            return
+
         supabase_client.update_task_status(task_id, TaskStatus.COMPLETED, result=result)
 
-        logger.info(f"任务 {task_id} 执行完成")
-        
-        # 5. 生成仓库简短描述
+        logger.info(
+            "任务 %s Wiki 流程结束（embedding 成功=%s）",
+            task_id,
+            embedding_error is None,
+        )
+
         description = await loop.run_in_executor(
             None,
             lambda: _generate_repo_description(repo_path, url_link)
         )
+        await asyncio.sleep(0)
         logger.info(f"生成仓库描述: {description}")
 
-        # 同步supabase repository表
-        success = supabase_client.update_repository_information(url_link, r2_structure_url, r2_content_urls, vector_store_path, description)
+        success = supabase_client.update_repository_information(
+            url_link,
+            r2_structure_url,
+            r2_content_urls,
+            vector_store_path if embedding_error is None else None,
+            description,
+        )
         if not success:
             logger.error(f"同步supabase repository表失败: {url_link}")
+
+        if embedding_error is not None:
+            asyncio.create_task(
+                _background_retry_rag_indexing(task_id, url_link, config_path)
+            )
 
     except InterruptedError:
         logger.info(f"任务 {task_id} 被用户中断（删除），停止后台处理")
@@ -396,8 +562,8 @@ async def execute_generation_task(task_id: str, url_link: str):
 
     except Exception as e:
         logger.exception(f"任务 {task_id} 执行过程中发生异常:")
-        # 更新任务为失败状态
-        supabase_client.update_task_status(task_id, TaskStatus.FAILED, error=str(e))
+        if not _task_marked_cancelled_by_user(supabase_client, task_id):
+            supabase_client.update_task_status(task_id, TaskStatus.FAILED, error=str(e))
 
     finally:
         # 无论成功还是失败，都清理本地文件以释放存储空间

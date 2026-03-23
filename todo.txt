@@ -9,9 +9,10 @@ agent回复中的图表可以放大（当然在wiki中的也是）
 9. license 不处理
 整理vercel和fly的部署参数
 
-对于小的项目，就不要embedding了，大的才embedding
-使用合适的rank和embedding模型
 调整rag变为agentic rag，配合证据卡片
-路径那些东西，还是有点没搞懂
+验证fly和vercel中的路径
+在取消任务的时候，也删除文件，并更新supabase数据库中的状态
+tree_sitter_language_pack拉取有时候存在问题
+构建社区的那一步太慢了，中间起码打印多一点日志出来
 
 怎么选rank逻辑和embedding模型，优化一下使用的模型（可以用贵的）

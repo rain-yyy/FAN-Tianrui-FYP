@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
 
-from src.storage.supabase_client import SupabaseClient
+from src.storage.supabase_client import SupabaseClient, SupabaseStorageError
 from src.agent import run_agent, AgentRunner
 from src.config import CONFIG
 from src.clients.ai_client_factory import get_ai_client, get_model_config
@@ -252,8 +252,12 @@ async def get_task_information_api(task_id: str):
 
     supabase_client = SupabaseClient()
 
-    # 去supabase中查找task_id对应的任务信息
-    task_information = supabase_client.get_task(task_id)
+    try:
+        task_information = supabase_client.get_task(task_id)
+    except SupabaseStorageError as e:
+        logger.error("查询任务时 Supabase 不可用: %s", e)
+        raise HTTPException(status_code=503, detail=f"Database temporarily unavailable: {e}")
+
     if not task_information:
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
 
@@ -283,26 +287,48 @@ async def cancel_task_api(task_id: str):
     """
     logger.info(f"请求强制终止任务: {task_id}")
     supabase_client = SupabaseClient()
-    
+
+    def _persist_cancelled_status() -> bool:
+        return supabase_client.update_task_status(
+            task_id, TaskStatus.FAILED.value, error="Cancelled by user"
+        )
+
     if task_id in running_tasks:
         task = running_tasks[task_id]
         task.cancel()
         running_tasks.pop(task_id, None)
-        
-        # 更新数据库状态
-        supabase_client.update_task_status(task_id, TaskStatus.FAILED.value, error="Cancelled by user")
+
+        if not _persist_cancelled_status():
+            logger.error(f"取消任务后写入 Supabase 失败: {task_id}")
+            raise HTTPException(
+                status_code=503,
+                detail="Task stopped locally but failed to persist cancelled status; try again.",
+            )
         logger.info(f"任务已强制终止: {task_id}")
         return {"success": True, "message": "Task cancelled"}
-    else:
-        # 如果内存中找不到，但数据库中显示为 processing（可能是跨进程或者丢失追踪）
+
+    try:
         task_info = supabase_client.get_task(task_id)
-        if task_info and task_info.get("status") == TaskStatus.PROCESSING.value:
-            supabase_client.update_task_status(task_id, TaskStatus.FAILED.value, error="Cancelled by user")
-            logger.info(f"内存中未找到任务，但已在数据库中将其标记为终止: {task_id}")
-            return {"success": True, "message": "Task marked as cancelled"}
-            
-        logger.warning(f"无法终止任务（未运行或不存在）: {task_id}")
-        return {"success": False, "message": "No running task found or task is not processing"}
+    except SupabaseStorageError as e:
+        logger.error("取消任务时无法查询 Supabase: %s", e)
+        raise HTTPException(status_code=503, detail=f"Could not verify task status: {e}")
+
+    if task_info and task_info.get("status") == TaskStatus.PROCESSING.value:
+        if not _persist_cancelled_status():
+            logger.error(f"仅 DB 标记取消时写入失败: {task_id}")
+            raise HTTPException(status_code=503, detail="Failed to update task status in database")
+        logger.info(f"内存中未找到任务，但已在数据库中将其标记为终止: {task_id}")
+        return {"success": True, "message": "Task marked as cancelled"}
+
+    if task_info and task_info.get("status") == TaskStatus.PENDING.value:
+        # 尚未进入 execute_generation_task 的 processing，无内存任务可杀；删除流程可继续
+        return {"success": True, "message": "Task not yet running; nothing to cancel"}
+
+    logger.warning(f"无法终止任务（未运行或不存在）: {task_id}")
+    raise HTTPException(
+        status_code=404,
+        detail="No running task found or task is not processing",
+    )
 
 
 @app.delete("/task/{task_id}")
@@ -316,7 +342,10 @@ async def delete_task_api(task_id: str, user_id: str):
     supabase_client = SupabaseClient()
     success = supabase_client.delete_task(task_id, user_id)
     if not success:
-        task = supabase_client.get_task(task_id)
+        try:
+            task = supabase_client.get_task(task_id)
+        except SupabaseStorageError as e:
+            raise HTTPException(status_code=503, detail=f"Database error while verifying task: {e}")
         if not task:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
         if task.get("user_id") != user_id:
@@ -431,7 +460,8 @@ async def chat_with_repo_api(request: Request):
             chat_id = chat_session["id"]
         
         # 2. 保存用户问题到数据库
-        supabase_client.add_chat_message(chat_id, "user", question)
+        if supabase_client.add_chat_message(chat_id, "user", question) is None:
+            raise HTTPException(status_code=500, detail="Failed to save user message")
 
         # 3. 从 Supabase 获取向量库路径
         repo_info = supabase_client.get_repo_information(repo_url)
@@ -465,13 +495,17 @@ async def chat_with_repo_api(request: Request):
         sources = list(result.get("sources", []))
 
         # 6. 保存助手回答到数据库
-        supabase_client.add_chat_message(
-            chat_id, 
-            "assistant", 
-            answer, 
-            {"sources": sources}
-        )
-        
+        if (
+            supabase_client.add_chat_message(
+                chat_id,
+                "assistant",
+                answer,
+                {"sources": sources},
+            )
+            is None
+        ):
+            raise HTTPException(status_code=500, detail="Failed to save assistant message")
+
         return {
             "answer": answer,
             "sources": sources,
@@ -527,7 +561,8 @@ async def chat_stream_api(request: Request):
                 raise HTTPException(status_code=500, detail="Failed to create chat session")
             chat_id = chat_session["id"]
         
-        supabase_client.add_chat_message(chat_id, "user", question)
+        if supabase_client.add_chat_message(chat_id, "user", question) is None:
+            raise HTTPException(status_code=500, detail="Failed to save user message")
 
         repo_info = supabase_client.get_repo_information(repo_url)
         if not repo_info or not repo_info.get("vector_store_path"):
@@ -571,13 +606,17 @@ async def chat_stream_api(request: Request):
             
             # 保存消息
             if full_answer:
-                supabase_client.add_chat_message(
-                    chat_id, 
-                    "assistant", 
-                    full_answer.strip(), 
-                    {"sources": sources}
+                saved = supabase_client.add_chat_message(
+                    chat_id,
+                    "assistant",
+                    full_answer.strip(),
+                    {"sources": sources},
                 )
-            
+                if saved is None:
+                    err_payload = {"detail": "Failed to save assistant message"}
+                    yield f"event: error\ndata: {json.dumps(err_payload, ensure_ascii=False)}\n\n"
+                    return
+
             # 发送完成事件
             complete_payload = {
                 "chat_id": chat_id,
@@ -611,10 +650,12 @@ async def list_available_repos_api():
     """
     logger.info("列出所有可用于聊天的仓库")
     supabase_client = SupabaseClient()
-    available_repos = supabase_client.get_all_available_repos()
-    if not available_repos:
-        return {"repos": []}
-    
+    try:
+        available_repos = supabase_client.get_all_available_repos()
+    except SupabaseStorageError as e:
+        logger.error("列出可用仓库时 Supabase 失败: %s", e)
+        raise HTTPException(status_code=503, detail=f"Failed to list repositories: {e}")
+
     return {"repos": available_repos}
 
 
@@ -715,7 +756,8 @@ async def agent_chat_api(request: Request):
                 raise HTTPException(status_code=500, detail="Failed to create chat session")
             chat_id = chat_session["id"]
         
-        supabase_client.add_chat_message(chat_id, "user", question)
+        if supabase_client.add_chat_message(chat_id, "user", question) is None:
+            raise HTTPException(status_code=500, detail="Failed to save user message")
 
         repo_info = supabase_client.get_repo_information(repo_url)
         if not repo_info or not repo_info.get("vector_store_path"):
@@ -766,13 +808,9 @@ async def agent_chat_api(request: Request):
             "mode": "agent"
         }
         metadata = _to_jsonable_builtin(metadata)
-        supabase_client.add_chat_message(
-            chat_id, 
-            "assistant", 
-            answer, 
-            metadata
-        )
-        
+        if supabase_client.add_chat_message(chat_id, "assistant", answer, metadata) is None:
+            raise HTTPException(status_code=500, detail="Failed to save assistant message")
+
         logger.info(f"Agent 模式问答完成: iterations={iterations}, confidence={confidence:.2f}")
         
         return _to_jsonable_builtin({
@@ -830,7 +868,8 @@ async def agent_chat_stream_api(request: Request):
                 raise HTTPException(status_code=500, detail="Failed to create chat session")
             chat_id = chat_session["id"]
 
-        supabase_client.add_chat_message(chat_id, "user", question)
+        if supabase_client.add_chat_message(chat_id, "user", question) is None:
+            raise HTTPException(status_code=500, detail="Failed to save user message")
         
         repo_info = supabase_client.get_repo_information(repo_url)
         if not repo_info or not repo_info.get("vector_store_path"):
@@ -877,7 +916,10 @@ async def agent_chat_stream_api(request: Request):
                         "iterations": int(payload.get("iterations", 0)),
                         "mode": "agent",
                     })
-                    supabase_client.add_chat_message(chat_id, "assistant", answer, metadata)
+                    if supabase_client.add_chat_message(chat_id, "assistant", answer, metadata) is None:
+                        err_pl = {"detail": "Failed to save assistant message"}
+                        yield f"event: error\ndata: {json.dumps(err_pl, ensure_ascii=False)}\n\n"
+                        return
 
                     yield f"event: complete\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
                 elif event.event_type == "error":

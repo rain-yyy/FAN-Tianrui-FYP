@@ -238,15 +238,24 @@ export const api = {
   cancelTask: async (taskId: string): Promise<boolean> => {
     const url = `/task/${encodeURIComponent(taskId)}/cancel`;
     const res = await fetch(`${API_BASE_URL}${url}`, { method: 'POST' });
+    let body: { success?: boolean; message?: string; detail?: string | unknown[] } = {};
+    try {
+      body = (await res.json()) as typeof body;
+    } catch {
+      // ignore invalid JSON
+    }
     if (!res.ok) {
-      let detail = res.statusText;
-      try {
-        const errorData = await res.json() as { detail?: string };
-        detail = errorData.detail || detail;
-      } catch {
-        // ignore
-      }
+      const d = body.detail;
+      const detail =
+        typeof d === 'string' ? d : Array.isArray(d) ? JSON.stringify(d) : res.statusText;
       throw new Error(detail || 'Failed to cancel task');
+    }
+    if (body.success === false) {
+      throw new Error(
+        (typeof body.message === 'string' && body.message) ||
+          (typeof body.detail === 'string' ? body.detail : '') ||
+          'Failed to cancel task',
+      );
     }
     return true;
   },
@@ -301,12 +310,9 @@ export const api = {
   },
 
   getAvailableRepos: async (): Promise<AvailableReposResponse> => {
-    try {
-      const data = await requestJson<{ repos: AvailableRepo[] }>('/chat/repos', { method: 'GET' });
-      return { repos: data.repos, count: data.repos.length };
-    } catch {
-      return { repos: [], count: 0 };
-    }
+    const data = await requestJson<{ repos?: AvailableRepo[] }>('/chat/repos', { method: 'GET' });
+    const repos = data.repos ?? [];
+    return { repos, count: repos.length };
   },
 
   getChatHistory: async (userId: string): Promise<ChatHistoryItem[]> => {

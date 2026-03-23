@@ -18,7 +18,8 @@ wiki_section_json/
 wiki_structure_raw/
 wiki_structure.json
 
-docker/data/
+# 仓库根持久化目录（vector_stores、repos 等）
+/data/
 
 
 

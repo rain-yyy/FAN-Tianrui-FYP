@@ -101,7 +101,7 @@ Wiki 生成由 `docker/src/core/wiki_pipeline.py` 中的 `execute_generation_tas
   - `VECTOR_STORE_PATH`、`REPO_STORE_PATH`  
   - Supabase URL / Service Key（`SupabaseClient`）
 
-本地 Docker 常挂载 `./data:/data`，需存在 `data/vector_stores`、`data/repos`（详见 `API_DOCUMENTATION` 历史说明或 compose 注释）。
+本地 Docker Compose 将仓库根目录的 `data/` 挂载到容器 `/data`（`../data:/data`），需存在 `data/vector_stores`、`data/repos`（详见 `API_DOCUMENTATION` 历史说明或 compose 注释）。
 
 ---
 

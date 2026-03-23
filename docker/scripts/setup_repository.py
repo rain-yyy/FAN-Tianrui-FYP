@@ -4,9 +4,10 @@ import hashlib
 from pathlib import Path
 from git import Repo, GitCommandError
 
-# 默认使用项目内 data/repos，本地开发可写；Docker 通过 REPO_STORE_PATH=/data/repos 覆盖
+# 默认：<仓库根>/data/repos（data 与 docker/ 同级）；容器/Fly 通过 REPO_STORE_PATH=/data/repos 覆盖
 _SCRIPT_DIR = Path(__file__).resolve().parent
-_DEFAULT_REPO_STORE = _SCRIPT_DIR.parent / "data" / "repos"
+_REPO_ROOT = _SCRIPT_DIR.parent.parent  # scripts -> docker -> 仓库根
+_DEFAULT_REPO_STORE = _REPO_ROOT / "data" / "repos"
 REPO_STORE_ROOT = Path(os.getenv("REPO_STORE_PATH", str(_DEFAULT_REPO_STORE))).expanduser()
 
 
