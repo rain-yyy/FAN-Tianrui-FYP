@@ -85,7 +85,8 @@ def _build_repo_map_context(repo_path: str, target_subdir: str = "src") -> str:
 
 def generate_wiki_structure(
     repo_path: str, file_tree: str, repo_map: Optional[str] = None, communities_info: Optional[str] = None,
-    valid_file_list: Optional[str] = None
+    valid_file_list: Optional[str] = None,
+    communities_persist_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     调用 gpt 4o mini 生成分层 Wiki 目录并解析 JSON 响应。
@@ -157,6 +158,12 @@ def generate_wiki_structure(
             
             communities_info = "\n\n".join(comm_list)
             logger.info(f"Community info built: {len(communities_info)} chars")
+            if communities_persist_path:
+                try:
+                    engine.save_results(communities_persist_path)
+                    logger.info("GraphRAG communities saved to %s", communities_persist_path)
+                except OSError as persist_exc:
+                    logger.warning("Failed to persist GraphRAG communities: %s", persist_exc)
         except Exception as e:
             logger.error(f"Failed to build communities: {e}")
             communities_info = "No community information available."

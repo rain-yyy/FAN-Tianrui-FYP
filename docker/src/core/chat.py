@@ -1,9 +1,10 @@
+import json
 import os
 import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Mapping, Optional, TYPE_CHECKING
+from typing import Dict, Generator, Iterable, List, Mapping, Optional, Tuple
 
 from langchain_core.documents import Document
 from src.clients.ai_client_factory import get_ai_client, get_model_config
@@ -14,6 +15,7 @@ from src.core.retrieval import (
     RankedCandidate,
     SparseBM25Index,
     compute_doc_key,
+    create_community_retriever,
     mmr_select,
     normalize_scores,
 )
@@ -37,6 +39,7 @@ MAX_METHOD_K = 30
 DENSE_K_MULTIPLIER = 6  # code 指令通常需要更大的候选池
 SPARSE_K_MULTIPLIER = 4
 MAX_TOTAL_CANDIDATES = 60
+GRAPHRAG_COMMUNITIES_FILENAME = "graphrag_communities.json"
 RAG_PROMPT = get_rag_chat_prompt()
 
 # HyDE 配置
@@ -349,6 +352,119 @@ def _format_documents(docs: List[Document]) -> str:
     return "\n\n".join(formatted_chunks)
 
 
+def _load_graphrag_communities(
+    root_path: str,
+) -> Optional[Tuple[Dict[int, List[str]], Dict[int, str]]]:
+    """
+    读取与向量库同目录下的 GraphRAG 社区划分与摘要（wiki 流程中由 struct_gen 生成并写入）。
+    """
+    path = os.path.join(root_path, GRAPHRAG_COMMUNITIES_FILENAME)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        comm_raw = data.get("communities") or {}
+        summ_raw = data.get("summaries") or {}
+        communities: Dict[int, List[str]] = {}
+        for k, v in comm_raw.items():
+            try:
+                cid = int(k)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(v, list):
+                communities[cid] = [str(x) for x in v]
+        summaries: Dict[int, str] = {}
+        for k, v in summ_raw.items():
+            try:
+                cid = int(k)
+            except (TypeError, ValueError):
+                continue
+            summaries[cid] = str(v) if v is not None else ""
+        if not communities or not summaries:
+            return None
+        return communities, summaries
+    except (OSError, json.JSONDecodeError, TypeError) as e:
+        logger.warning("[RAG] 无法加载 GraphRAG 元数据 %s: %s", path, e)
+        return None
+
+
+def _collect_all_store_documents(
+    stores: Mapping[str, CategoryRetrievalUnit],
+) -> List[Document]:
+    combined: List[Document] = []
+    for category, unit in stores.items():
+        for doc in _extract_store_documents(unit.dense_store):
+            combined.append(_attach_category(doc, category))
+    return combined
+
+
+def _gather_dense_faiss_hits(
+    stores: Mapping[str, CategoryRetrievalUnit],
+    question: str,
+    *,
+    category_top_k: Mapping[str, int],
+) -> List[Tuple[Document, float]]:
+    """
+    仅稠密向量检索命中（跨类别合并），供 CommunityFirstRetriever.hybrid_retrieve 与社区稀疏分融合。
+    """
+    best_by_key: Dict[str, Tuple[Document, float]] = {}
+    for category, unit in stores.items():
+        planned_base = max(int(category_top_k.get(category, 0)), 1)
+        dense_k = _plan_method_k(planned_base, DENSE_K_MULTIPLIER)
+        dense_hits = unit.dense_store.similarity_search_with_relevance_scores(
+            question, k=dense_k
+        )
+        for doc, score in dense_hits:
+            enriched = _attach_category(doc, category)
+            key = f"{category}|{compute_doc_key(enriched)}"
+            prev = best_by_key.get(key)
+            if prev is None or float(score) > prev[1]:
+                best_by_key[key] = (enriched, float(score))
+    if not best_by_key:
+        return []
+    return sorted(best_by_key.values(), key=lambda x: x[1], reverse=True)
+
+
+def _gather_retrieval_candidates(
+    stores: Mapping[str, CategoryRetrievalUnit],
+    question: str,
+    *,
+    category_top_k: Mapping[str, int],
+    graphrag: Optional[Tuple[Dict[int, List[str]], Dict[int, str]]] = None,
+) -> List[RankedCandidate]:
+    """
+    若存在 GraphRAG 元数据，则用 CommunityFirstRetriever 做社区优先两阶段稀疏检索，
+    并与全库稠密向量分按 HYBRID_DENSE_WEIGHT 融合；否则保持原按类 BM25+稠密混合。
+    """
+    if graphrag:
+        communities, summaries = graphrag
+        all_docs = _collect_all_store_documents(stores)
+        if all_docs:
+            try:
+                retriever = create_community_retriever(communities, summaries, all_docs)
+                dense_hits = _gather_dense_faiss_hits(
+                    stores, question, category_top_k=category_top_k
+                )
+                merged = retriever.hybrid_retrieve(
+                    question,
+                    dense_hits,
+                    top_k_communities=3,
+                    top_k_docs_per_community=5,
+                    alpha=HYBRID_DENSE_WEIGHT,
+                    top_k=MAX_TOTAL_CANDIDATES,
+                )
+                if merged:
+                    logger.info("[RAG] 已启用 CommunityFirstRetriever 主路径（GraphRAG + 稠密）")
+                    return merged
+            except Exception as exc:
+                logger.warning("[RAG] CommunityFirstRetriever 不可用，回退混合检索: %s", exc)
+
+    return _gather_hybrid_candidates(
+        stores, question, category_top_k=category_top_k
+    )
+
+
 def _attach_category(doc: Document, category: str) -> Document:
     """
     为文档对象附加类别信息到元数据中。
@@ -502,13 +618,15 @@ def answer_question(
     root_path = _resolve_vector_store_root(db_path)
     top_k_plan = dict(category_top_k or CATEGORY_TOP_K)
     stores = _load_vector_stores(root_path, top_k_plan.keys())
+    graphrag = _load_graphrag_communities(root_path)
 
     return _answer_with_stores(
-        stores, 
-        question, 
+        stores,
+        question,
         category_top_k=top_k_plan,
         conversation_history=conversation_history,
         use_hyde=use_hyde and HYDE_ENABLED,
+        graphrag=graphrag,
     )
 
 
@@ -522,6 +640,7 @@ def interactive_chat(
     root_path = _resolve_vector_store_root(db_path)
     top_k_plan = dict(category_top_k or CATEGORY_TOP_K)
     stores = _load_vector_stores(root_path, top_k_plan.keys())
+    graphrag = _load_graphrag_communities(root_path)
 
     print(
         "Vector store loaded. Type a question (exit/quit to stop). "
@@ -543,7 +662,10 @@ def interactive_chat(
 
         try:
             result = _answer_with_stores(
-                stores, question, category_top_k=top_k_plan
+                stores,
+                question,
+                category_top_k=top_k_plan,
+                graphrag=graphrag,
             )
         except Exception as exc:
             print(f"Error: {exc}")
@@ -565,6 +687,7 @@ def _answer_with_stores(
     category_top_k: Mapping[str, int],
     conversation_history: Optional[List[Dict[str, str]]] = None,
     use_hyde: bool = True,
+    graphrag: Optional[Tuple[Dict[int, List[str]], Dict[int, str]]] = None,
 ) -> Dict[str, object]:
     """
     使用已加载的向量库回答问题。
@@ -593,13 +716,14 @@ def _answer_with_stores(
         # 结合原始问题和假设文档进行检索
         retrieval_query = f"{question}\n\n{hyde_doc}"
 
-    candidates = _gather_hybrid_candidates(
+    candidates = _gather_retrieval_candidates(
         stores,
         retrieval_query,
         category_top_k=category_top_k,
+        graphrag=graphrag,
     )
     if not candidates:
-        docs: List[Document] = []
+        docs = []
     else:
         mmr_pick = mmr_select(
             candidates,
@@ -613,7 +737,7 @@ def _answer_with_stores(
     context = _format_documents(docs)
     if not context:
         logger.warning("No relevant context retrieved. The answer may be limited.")
-    
+
     provider, model = get_model_config(CONFIG, "rag_answer")
     llm = get_ai_client(provider, model=model)
 
@@ -657,9 +781,6 @@ def _answer_with_stores(
     }
 
 
-from typing import Generator, Tuple
-
-
 def answer_question_stream(
     db_path: str,
     question: str,
@@ -694,7 +815,8 @@ def answer_question_stream(
         root_path = _resolve_vector_store_root(db_path)
         top_k_plan = dict(category_top_k or CATEGORY_TOP_K)
         stores = _load_vector_stores(root_path, top_k_plan.keys())
-        
+        graphrag = _load_graphrag_communities(root_path)
+
         # HyDE 生成
         retrieval_query = question
         if use_hyde and HYDE_ENABLED:
@@ -702,12 +824,13 @@ def answer_question_stream(
             hyde_doc = _generate_hyde_document(question)
             retrieval_query = f"{question}\n\n{hyde_doc}"
             yield ("hyde_generated", {"hyde_doc": hyde_doc[:200] + "..." if len(hyde_doc) > 200 else hyde_doc})
-        
+
         # 检索
-        candidates = _gather_hybrid_candidates(
+        candidates = _gather_retrieval_candidates(
             stores,
             retrieval_query,
             category_top_k=top_k_plan,
+            graphrag=graphrag,
         )
         
         if not candidates:

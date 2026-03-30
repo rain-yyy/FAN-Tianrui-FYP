@@ -71,20 +71,20 @@ export default function HistoryPage() {
   const getStatusClass = (status: string) => {
     switch (status) {
       case 'completed':
-        return 'text-emerald-300';
+        return 'text-emerald-700';
       case 'cached':
-        return 'text-cyan-300';
+        return 'text-sky-700';
       case 'failed':
-        return 'text-rose-300';
+        return 'text-rose-700';
       default:
-        return 'text-zinc-400';
+        return 'text-stone-500';
     }
   };
 
   if (isLoading) {
     return (
       <div className="min-h-[50vh] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-fuchsia-300" />
+        <Loader2 className="w-8 h-8 animate-spin text-sky-600" />
       </div>
     );
   }
@@ -92,9 +92,9 @@ export default function HistoryPage() {
   if (sortedTasks.length === 0) {
     return (
       <div className="min-h-[50vh] flex items-center justify-center">
-        <div className="text-center py-12 bg-white/[0.03] rounded-2xl border border-dashed border-white/15 px-12">
-          <Clock className="w-12 h-12 text-zinc-500 mx-auto mb-4 opacity-40" />
-          <p className="text-zinc-400">{t('noHistory')}</p>
+        <div className="text-center py-12 bg-stone-50 rounded-2xl border border-dashed border-stone-200 px-12">
+          <Clock className="w-12 h-12 text-stone-400 mx-auto mb-4" />
+          <p className="text-stone-600">{t('noHistory')}</p>
         </div>
       </div>
     );
@@ -102,9 +102,9 @@ export default function HistoryPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
-      <h1 className="text-2xl font-semibold text-white">{t('historyTitle')}</h1>
+      <h1 className="text-2xl font-semibold text-stone-900">{t('historyTitle')}</h1>
       <div className="space-y-3 min-w-0">
-        <h2 className="text-lg font-medium text-zinc-200">{t('tasks')}</h2>
+        <h2 className="text-lg font-medium text-stone-800">{t('tasks')}</h2>
         <div className="space-y-3">
           {sortedTasks.map((item) => {
             const clickable = item.status === 'completed' || item.status === 'cached';
@@ -122,21 +122,21 @@ export default function HistoryPage() {
                   }
                 }}
                 className={cn(
-                  'w-full text-left p-4 bg-white/[0.03] border border-white/15 rounded-xl transition-all',
+                  'w-full text-left p-4 bg-white border border-stone-200 rounded-xl transition-all shadow-sm',
                   deleting
                     ? 'opacity-60'
                     : clickable
-                      ? 'hover:bg-white/[0.08] hover:border-fuchsia-400/40 cursor-pointer'
+                      ? 'hover:bg-stone-50 hover:border-sky-300 cursor-pointer'
                       : 'opacity-75 cursor-not-allowed'
                 )}
               >
                 <div className="flex items-start justify-between">
                   <div className="space-y-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <Github className="w-4 h-4 text-zinc-400 shrink-0" />
-                      <span className="font-mono text-sm text-white/90 break-all">{item.repo_url}</span>
+                      <Github className="w-4 h-4 text-stone-500 shrink-0" />
+                      <span className="font-mono text-sm text-stone-900 break-all">{item.repo_url}</span>
                     </div>
-                    <div className="text-xs text-zinc-400 inline-flex items-center gap-2">
+                    <div className="text-xs text-stone-500 inline-flex items-center gap-2">
                       <span>{new Date(item.created_at).toLocaleDateString('en-US')}</span>
                       <span>•</span>
                       <span className={getStatusClass(item.status)}>{item.status}</span>
@@ -148,11 +148,11 @@ export default function HistoryPage() {
                       onClick={(event) => void handleDeleteTask(item, event)}
                       disabled={deleting}
                       aria-label="Delete task"
-                      className="p-1.5 rounded-md text-zinc-400 hover:text-rose-300 hover:bg-rose-500/10"
+                      className="p-1.5 rounded-md text-stone-500 hover:text-rose-700 hover:bg-rose-50"
                     >
                       {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                     </button>
-                    <ChevronRight className="w-5 h-5 text-zinc-400 shrink-0" />
+                    <ChevronRight className="w-5 h-5 text-stone-400 shrink-0" />
                   </div>
                 </div>
               </div>

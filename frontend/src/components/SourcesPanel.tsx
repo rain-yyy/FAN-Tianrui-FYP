@@ -111,17 +111,17 @@ const getFileIcon = (extension: string) => {
 
 const getExtensionColor = (extension: string) => {
   const colors: Record<string, string> = {
-    'py': 'text-yellow-400',
-    'ts': 'text-blue-400',
-    'tsx': 'text-blue-400',
-    'js': 'text-yellow-300',
-    'jsx': 'text-yellow-300',
-    'md': 'text-cyan-400',
-    'json': 'text-green-400',
-    'yaml': 'text-pink-400',
-    'yml': 'text-pink-400',
+    'py': 'text-amber-700',
+    'ts': 'text-sky-700',
+    'tsx': 'text-sky-700',
+    'js': 'text-amber-700',
+    'jsx': 'text-amber-700',
+    'md': 'text-teal-700',
+    'json': 'text-emerald-700',
+    'yaml': 'text-rose-700',
+    'yml': 'text-rose-700',
   };
-  return colors[extension.toLowerCase()] || 'text-zinc-400';
+  return colors[extension.toLowerCase()] || 'text-stone-600';
 };
 
 const SourceChip = ({ 
@@ -138,8 +138,8 @@ const SourceChip = ({
       onClick={onClick}
       className={cn(
         "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs transition-all",
-        "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20",
-        "text-zinc-300 hover:text-white"
+        "bg-white border-stone-200 hover:bg-stone-50 hover:border-stone-300 shadow-sm",
+        "text-stone-800 hover:text-stone-900"
       )}
     >
       <div className={getExtensionColor(source.extension)}>
@@ -147,7 +147,7 @@ const SourceChip = ({
       </div>
       <span className="font-mono truncate max-w-[150px]">{source.fileName}</span>
       {source.lineRange && (
-        <span className="text-zinc-500 font-mono text-[10px]">
+        <span className="text-stone-500 font-mono text-[10px]">
           :{source.lineRange.start}
         </span>
       )}
@@ -167,7 +167,7 @@ export const SourcesPanel = ({ sources, onSourceClick, compact = true }: Sources
     if (compact) return null;
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
-        <p className="text-sm text-zinc-500">No sources</p>
+        <p className="text-sm text-stone-600">No sources</p>
       </div>
     );
   }

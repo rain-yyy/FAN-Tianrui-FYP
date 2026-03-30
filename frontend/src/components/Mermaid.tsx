@@ -281,9 +281,9 @@ export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
   // Streaming state - show placeholder
   if (isStreaming && !isValid) {
     return (
-      <div className="mermaid-container flex justify-center items-center p-6 bg-secondary/30 rounded-xl border border-white/5 min-h-[150px]">
-        <div className="text-muted-foreground text-sm flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+      <div className="mermaid-container flex justify-center items-center p-6 bg-stone-50 rounded-xl border border-stone-200 min-h-[150px]">
+        <div className="text-stone-600 text-sm flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-sky-500 animate-pulse" />
           Generating diagram...
         </div>
       </div>
@@ -292,8 +292,8 @@ export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
 
   if (isLoading) {
     return (
-      <div className="mermaid-container flex justify-center items-center p-6 bg-secondary/30 rounded-xl border border-white/5 min-h-[200px]">
-        <div className="text-muted-foreground text-sm">Rendering diagram...</div>
+      <div className="mermaid-container flex justify-center items-center p-6 bg-stone-50 rounded-xl border border-stone-200 min-h-[200px]">
+        <div className="text-stone-600 text-sm">Rendering diagram...</div>
       </div>
     );
   }
@@ -301,16 +301,16 @@ export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
   if (isError) {
     // Show degraded view with source code and retry option
     return (
-      <div className="mermaid-container p-4 bg-secondary/30 rounded-xl border border-amber-500/20">
+      <div className="mermaid-container p-4 bg-amber-50 rounded-xl border border-amber-200">
         <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2 text-amber-400 text-sm">
+          <div className="flex items-center gap-2 text-amber-800 text-sm">
             <AlertTriangle className="w-4 h-4" />
             <span>Diagram render failed</span>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowSource(!showSource)}
-              className="flex items-center gap-1.5 px-2 py-1 text-xs text-zinc-400 hover:text-white bg-white/5 rounded-md transition-colors"
+              className="flex items-center gap-1.5 px-2 py-1 text-xs text-stone-600 hover:text-stone-900 bg-white border border-stone-200 rounded-md transition-colors"
               aria-label="Toggle source code"
             >
               <Code2 className="w-3.5 h-3.5" />
@@ -318,7 +318,7 @@ export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
             </button>
             <button
               onClick={handleRetry}
-              className="flex items-center gap-1.5 px-2 py-1 text-xs text-blue-400 hover:text-blue-300 bg-blue-500/10 rounded-md transition-colors"
+              className="flex items-center gap-1.5 px-2 py-1 text-xs text-sky-800 hover:text-sky-900 bg-sky-100 rounded-md transition-colors border border-sky-200"
               aria-label="Retry rendering"
             >
               <RefreshCw className="w-3.5 h-3.5" />
@@ -329,11 +329,11 @@ export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
         
         {showSource && (
           <div className="mt-2">
-            <pre className="p-3 bg-black/30 rounded-lg text-xs text-zinc-400 overflow-x-auto max-h-[200px] overflow-y-auto">
+            <pre className="p-3 bg-white rounded-lg text-xs text-stone-700 border border-stone-200 overflow-x-auto max-h-[200px] overflow-y-auto">
               <code>{cleanedChart}</code>
             </pre>
             {errorMessage && (
-              <p className="mt-2 text-xs text-amber-400/70">
+              <p className="mt-2 text-xs text-amber-800">
                 Error: {errorMessage}
               </p>
             )}
@@ -350,7 +350,7 @@ export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
   return (
     <div 
       ref={ref}
-      className="mermaid-container flex justify-center p-6 bg-secondary/30 rounded-xl overflow-x-auto border border-white/5"
+      className="mermaid-container flex justify-center p-6 bg-stone-50 rounded-xl overflow-x-auto border border-stone-200"
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );

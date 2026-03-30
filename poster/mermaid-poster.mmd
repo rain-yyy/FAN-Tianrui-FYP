@@ -1,0 +1,62 @@
+---
+config:
+  theme: default
+  look: handDrawn
+  layout: dagre
+---
+flowchart TB
+ subgraph ING["① Offline Ingestion"]
+    direction LR
+    REPO(["GitHub Repo"])
+
+    REPO --> SPLIT["AST-Aware Chunking\n+ Text Splitting"]
+    SPLIT --> EMB["BGE-M3 Embedding"]
+    EMB --> VIDX[("FAISS + BM25\nHybrid Index")]
+
+    REPO --> CGB["CodeGraph Builder\nTree-sitter DiGraph"]
+    CGB --> LEID["Leiden Community\n+ LLM Summary"]
+    LEID --> GIDX[("Community\nSummaries")]
+
+    REPO --> RMAP["RepoMap\nCode Skeleton"]
+    RMAP --> WIKI[("Wiki\nGeneration")]
+ end
+
+ subgraph AGT["② Online Agent Pipeline"]
+    direction TB
+    Q(["User Query + History"])
+
+    Q --> PREP["Session Compression\n+ Lexical Intent"]
+    PREP --> RT{"Route"}
+
+    RT -- DIRECT --> DLLM["Direct LLM"]
+    RT -- LIGHT / DEEP --> TR["Tool Router"]
+
+    subgraph PAR["Parallel Tool Execution"]
+       direction LR
+       T1["HyDE · Hybrid RAG\nFAISS+BM25 → MMR"]
+       T2["Code Graph Query\nCommunity Lookup"]
+       T3["RepoMap · Grep\nFile Reader"]
+    end
+
+    TR --> PAR
+    PAR --> EV["Evidence Evaluator\nGap Detection · max 5 iter"]
+    EV -- gap --> TR
+    EV -- sufficient --> EC["Evidence Cards\nMD5 Dedup · Rerank"]
+    EC --> SYN["Synthesizer\n+ Memory Writeback"]
+    SYN --> ANS(["Answer"])
+    DLLM --> ANS
+ end
+
+ VIDX -.-> T1
+ GIDX -.-> T2
+ WIKI & RMAP -.-> T3
+
+ classDef store stroke-width:1.5px,stroke:#FF5978,fill:#FFDFE5,color:#8E2236
+ classDef proc  stroke-width:1.5px,stroke:#374D7C,fill:#E2EBFF,color:#374D7C
+ classDef io    stroke-width:1.5px,stroke:#46EDC8,fill:#DEFFF8,color:#378E7A
+ classDef route stroke-width:1.5px,stroke:#FBB35A,fill:#FFEFDB,color:#8F632D
+
+ class VIDX,GIDX,WIKI store
+ class SPLIT,EMB,CGB,LEID,RMAP,PREP,TR,T1,T2,T3,EV,EC,SYN,DLLM proc
+ class REPO,Q,ANS io
+ class RT route

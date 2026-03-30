@@ -1,6 +1,6 @@
 
 
-出一份完整的文档
+
 agent回复中的图表可以放大（当然在wiki中的也是）
 直接去掉rag，只保留agent模式，也删除agent有关的选择或者提示
  有空再继续优化wiki structure的生成
@@ -9,10 +9,15 @@ agent回复中的图表可以放大（当然在wiki中的也是）
 9. license 不处理
 整理vercel和fly的部署参数
 
-调整rag变为agentic rag，配合证据卡片
 验证fly和vercel中的路径
-在取消任务的时候，也删除文件，并更新supabase数据库中的状态
+在取消任务的时候，更新supabase数据库中的状态
 tree_sitter_language_pack拉取有时候存在问题
 构建社区的那一步太慢了，中间起码打印多一点日志出来
 
-怎么选rank逻辑和embedding模型，优化一下使用的模型（可以用贵的）
+1. 换点模型
+2. sparse检索中的自定义中英文分词器看一下
+3. 去顶一下graphraggcommunitites json文件被正确存下来了
+4. leiden 算法使用ModularityVertexPartition来评估社区生成的质量
+5. 准备repomapper的骨架结构图
+6. 我的sessionmemory， repofactmemory 在什么地方
+7. 证据卡片到底展示在什么地方

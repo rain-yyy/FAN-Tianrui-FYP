@@ -55,31 +55,31 @@ const RepoCard = ({ repo }: { repo: RepoData }) => {
   return (
     <div 
       onClick={handleCardClick}
-      className="group relative flex flex-col justify-between rounded-xl bg-white/5 border border-white/10 p-4 hover:bg-white/10 transition-all cursor-pointer h-[160px]"
+      className="group relative flex flex-col justify-between rounded-xl bg-white border border-stone-200 p-4 hover:bg-stone-50 hover:border-stone-300 transition-all cursor-pointer h-[160px] shadow-sm"
     >
       <div>
         <div className="flex items-start justify-between gap-2">
-          <div className="font-medium text-zinc-100 truncate w-full pr-8">
+          <div className="font-medium text-stone-900 truncate w-full pr-8">
             {repo.owner} / {repo.name}
           </div>
-          <div className="absolute right-4 top-4 shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-white/5 text-zinc-400 group-hover:bg-white/20 group-hover:text-white transition-colors">
+          <div className="absolute right-4 top-4 shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-stone-100 text-stone-500 group-hover:bg-sky-100 group-hover:text-sky-800 transition-colors">
             <ArrowRight className="w-4 h-4" />
           </div>
         </div>
         
-        <div className="mt-2 text-sm text-zinc-400 line-clamp-3 h-[60px]">
-          {description || (loadingMetadata ? <div className="animate-pulse h-4 bg-white/5 rounded w-3/4" /> : 'No description available')}
+        <div className="mt-2 text-sm text-stone-600 line-clamp-3 h-[60px]">
+          {description || (loadingMetadata ? <div className="animate-pulse h-4 bg-stone-100 rounded w-3/4" /> : 'No description available')}
         </div>
       </div>
 
-      <div className="mt-auto flex items-center gap-4 text-xs text-zinc-500">
+      <div className="mt-auto flex items-center gap-4 text-xs text-stone-500">
         {stars !== null ? (
           <div className="flex items-center gap-1">
-            <Star className="w-3 h-3 text-zinc-500" />
+            <Star className="w-3 h-3 text-stone-500" />
             <span>{stars >= 1000 ? `${(stars / 1000).toFixed(1)}k` : stars}</span>
           </div>
         ) : loadingMetadata ? (
-             <div className="animate-pulse h-3 bg-white/5 rounded w-12" />
+             <div className="animate-pulse h-3 bg-stone-100 rounded w-12" />
         ) : null}
       </div>
     </div>
@@ -148,7 +148,7 @@ export default function RepoGrid({ userId, onAddRepo }: { userId: string; onAddR
   if (loading) {
     return (
       <div className="flex justify-center py-10">
-        <Loader2 className="w-8 h-8 text-zinc-500 animate-spin" />
+        <Loader2 className="w-8 h-8 text-sky-600 animate-spin" />
       </div>
     );
   }
@@ -158,15 +158,15 @@ export default function RepoGrid({ userId, onAddRepo }: { userId: string; onAddR
       {/* Add Repo Card */}
       <div 
         onClick={onAddRepo}
-        className="group flex flex-col justify-between rounded-xl bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/20 p-4 hover:border-indigo-500/40 hover:from-indigo-500/20 hover:to-purple-500/20 transition-all cursor-pointer h-[160px]"
+        className="group flex flex-col justify-between rounded-xl bg-sky-50 border border-sky-200/80 p-4 hover:bg-sky-100/80 hover:border-sky-300 transition-all cursor-pointer h-[160px] shadow-sm"
       >
         <div>
-          <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-300 mb-3 group-hover:scale-110 transition-transform">
+          <div className="w-8 h-8 rounded-full bg-white border border-sky-200 flex items-center justify-center text-sky-700 mb-3 group-hover:scale-110 transition-transform shadow-sm">
             <Plus className="w-5 h-5" />
           </div>
-          <div className="font-medium text-indigo-100">Add repo</div>
+          <div className="font-medium text-sky-950">Add repo</div>
         </div>
-        <div className="self-end text-indigo-400 group-hover:translate-x-1 transition-transform">
+        <div className="self-end text-sky-700 group-hover:translate-x-1 transition-transform">
           <ArrowRight className="w-5 h-5" />
         </div>
       </div>

@@ -38,9 +38,9 @@ export default function Auth() {
   };
 
   return (
-    <div className="w-full max-w-md mx-auto p-6 space-y-8 bg-secondary/30 backdrop-blur-xl border border-white/10 rounded-2xl">
+    <div className="w-full max-w-md mx-auto p-6 space-y-8 bg-white border border-stone-200 rounded-2xl shadow-sm shadow-stone-900/5">
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-white">Welcome Back</h2>
+        <h2 className="text-2xl font-bold text-stone-900">Welcome Back</h2>
         <p className="text-muted-foreground text-sm">
           Sign in with Google to generate and view wikis
         </p>
@@ -50,10 +50,10 @@ export default function Auth() {
         onClick={handleGoogleLogin}
         disabled={googleLoading}
         aria-label="Continue with Google"
-        className="w-full bg-white/5 hover:bg-white/10 text-white font-medium py-3 rounded-xl transition-all border border-white/10 flex items-center justify-center gap-2"
+        className="w-full bg-white hover:bg-stone-50 text-stone-800 font-medium py-3 rounded-xl transition-all border border-stone-200 shadow-sm flex items-center justify-center gap-2"
       >
         {googleLoading ? (
-          <Loader2 className="w-5 h-5 animate-spin" />
+          <Loader2 className="w-5 h-5 animate-spin text-sky-600" />
         ) : (
           <>
             <svg className="w-5 h-5" viewBox="0 0 24 24">

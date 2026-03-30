@@ -115,7 +115,12 @@ def run_structure_generation(
 
     _update_progress(task_id, 30, "正在生成 Wiki 目录结构（包含 GraphRAG 社区分析）...")
 
-    wiki_structure = generate_wiki_structure(repo_path, file_tree)
+    communities_path = str((output_path.parent / "graphrag_communities.json").resolve())
+    wiki_structure = generate_wiki_structure(
+        repo_path,
+        file_tree,
+        communities_persist_path=communities_path,
+    )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as f:
@@ -166,7 +171,8 @@ def run_rag_indexing(
     repo_path: str,
     repo_url: str,
     config_path: Path,
-    task_id: Optional[str] = None
+    task_id: Optional[str] = None,
+    communities_json_path: Optional[str] = None,
 ) -> str:
     """
     为仓库创建 RAG 向量索引（代码和文本分类）
@@ -213,6 +219,16 @@ def run_rag_indexing(
             create_and_save_vector_store(text_docs, text_store_path)
             logger.info(f"[RAG] 文本向量库已保存: {text_store_path}")
     
+    if communities_json_path:
+        src = Path(communities_json_path).expanduser().resolve()
+        if src.is_file():
+            dest = vector_store_path / "graphrag_communities.json"
+            try:
+                shutil.copy2(src, dest)
+                logger.info("[RAG] GraphRAG 元数据已复制到 %s", dest)
+            except OSError as copy_exc:
+                logger.warning("[RAG] 复制 GraphRAG 元数据失败: %s", copy_exc)
+
     # 同步到 Supabase
     try:
         update_repo_vector_path(repo_url, str(vector_store_path))
@@ -492,7 +508,10 @@ async def execute_generation_task(task_id: str, url_link: str):
                     repo_path=repo_path,
                     repo_url=url_link,
                     config_path=config_path,
-                    task_id=task_id
+                    task_id=task_id,
+                    communities_json_path=str(
+                        (output_path.parent / "graphrag_communities.json").resolve()
+                    ),
                 )
             )
         except Exception as rag_exc:

@@ -57,10 +57,10 @@ const StepItem = ({ step, isLast }: { step: LiveStep; isLast: boolean }) => {
     : stepIcons[step.type] || <Sparkles className="w-4 h-4" />;
 
   const statusColors = {
-    pending: 'text-zinc-500 bg-zinc-500/10',
-    running: 'text-blue-400 bg-blue-500/20 animate-pulse',
-    done: 'text-green-400 bg-green-500/20',
-    error: 'text-red-400 bg-red-500/20',
+    pending: 'text-stone-500 bg-stone-100',
+    running: 'text-sky-800 bg-sky-100 animate-pulse',
+    done: 'text-emerald-800 bg-emerald-50',
+    error: 'text-rose-800 bg-rose-50',
   };
 
   return (
@@ -91,22 +91,22 @@ const StepItem = ({ step, isLast }: { step: LiveStep; isLast: boolean }) => {
           <div className="flex items-center gap-2">
             <span className={cn(
               "text-sm font-medium",
-              step.status === 'running' ? "text-blue-300" :
-              step.status === 'done' ? "text-green-300" :
-              step.status === 'error' ? "text-red-300" :
-              "text-zinc-400"
+              step.status === 'running' ? "text-sky-900" :
+              step.status === 'done' ? "text-emerald-900" :
+              step.status === 'error' ? "text-rose-900" :
+              "text-stone-600"
             )}>
               {step.title}
             </span>
             {step.elapsed_ms && step.status === 'done' && (
-              <span className="text-[10px] text-zinc-500 font-mono">
+              <span className="text-[10px] text-stone-500 font-mono">
                 {step.elapsed_ms}ms
               </span>
             )}
           </div>
           
           {step.description && (
-            <p className="text-xs text-zinc-500 mt-0.5 truncate">
+            <p className="text-xs text-stone-600 mt-0.5 truncate">
               {step.description}
             </p>
           )}
@@ -115,7 +115,7 @@ const StepItem = ({ step, isLast }: { step: LiveStep; isLast: boolean }) => {
             <motion.p 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="text-[11px] text-zinc-600 mt-1 font-mono"
+              className="text-[11px] text-stone-500 mt-1 font-mono"
             >
               {step.details}
             </motion.p>
@@ -125,7 +125,7 @@ const StepItem = ({ step, isLast }: { step: LiveStep; isLast: boolean }) => {
 
       {/* Connector line */}
       {!isLast && (
-        <div className="absolute left-4 top-8 bottom-0 w-px bg-gradient-to-b from-zinc-700 to-transparent" />
+        <div className="absolute left-4 top-8 bottom-0 w-px bg-gradient-to-b from-stone-300 to-transparent" />
       )}
     </motion.div>
   );
@@ -142,11 +142,11 @@ export const LiveStepFlow = ({ steps, isAgent, currentPhase, streamingAnswer }: 
       <div className="flex items-center gap-2 mb-3">
         <div className={cn(
           "w-2 h-2 rounded-full animate-pulse",
-          isAgent ? "bg-purple-400" : "bg-blue-400"
+          isAgent ? "bg-teal-600" : "bg-sky-600"
         )} />
         <span className={cn(
           "text-xs font-medium uppercase tracking-wider",
-          isAgent ? "text-purple-400" : "text-blue-400"
+          isAgent ? "text-teal-800" : "text-sky-800"
         )}>
           {isAgent ? t('agentWorking') : t('processing')}
         </span>
@@ -170,13 +170,13 @@ export const LiveStepFlow = ({ steps, isAgent, currentPhase, streamingAnswer }: 
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mt-4 p-3 rounded-lg bg-white/[0.02] border border-white/5"
+          className="mt-4 p-3 rounded-lg bg-white border border-stone-200"
         >
           <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-            <span className="text-xs text-zinc-400">{t('generatingPreview')}</span>
+            <Sparkles className="w-3.5 h-3.5 text-sky-600" />
+            <span className="text-xs text-stone-600">{t('generatingPreview')}</span>
           </div>
-          <p className="text-sm text-zinc-300 line-clamp-3">
+          <p className="text-sm text-stone-800 line-clamp-3">
             {streamingAnswer.slice(0, 200)}
             {streamingAnswer.length > 200 && '...'}
           </p>

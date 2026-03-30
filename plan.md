@@ -1,50 +1,80 @@
-## Plan: Wiki 正文并发生成
+---
+name: Ch5-6 报告与测试
+overview: 在仓库根目录新增 `test/`（benchmark/检查表/README），在 `docker/tests/` 补充针对 `ts_parser.py` 与流水线闭环的 PyTest；另新建一份完整第五～六章报告稿 Markdown，在大纲基础上结合代码与可查文献补全 5.1、5.5 与第六章全文，并允许调整与原大纲不一致处。
+todos:
+  - id: add-test-folder
+    content: 创建 test/ 目录：README、5.2 对照说明、5.3 计时脚本与表格模板、5.4 定性 rubric
+    status: pending
+  - id: pytest-ts-parser
+    content: 新增 docker/tests/test_ts_parser.py（解析断言 + 可选 skip）
+    status: pending
+  - id: pytest-pipeline-mock
+    content: 新增 docker/tests/test_wiki_pipeline_integration.py（mock 闭环）
+    status: pending
+  - id: dev-deps-doc
+    content: 补充 pytest 安装说明（requirements-dev 或 test/README）
+    status: pending
+  - id: report-md-full
+    content: 新建完整第五～六章 report Markdown（5.1、5.5、第6章 + 修订 5.2–5.4 与实现对应）
+    status: pending
+isProject: false
+---
 
-目标是把当前串行的 Wiki 正文生成改为受控并发执行，并让日志能够清楚反映任务级与章节级进度，同时消除并发场景下本地输出目录、R2 路径和章节 JSON 文件名的覆盖风险。推荐方案是保守固定并发 2-3，采用线程池执行章节生成，文件名尽量保持现有可读性，只在规范化后发生冲突时追加稳定后缀，并把所有本地与远端输出都切到 task_id 级隔离路径。
+# 第五章测试脚本与报告补全计划
 
-**Steps**
-1. Phase 1 - 现状收口与配置入口
-   在 docker/src/core/wiki_pipeline.py 中梳理共享输出路径，把当前全局共享的 wiki_structure.json 与 wiki_section_json 改为任务级输出目录设计，避免不同任务同时运行时互相覆盖。同步确定并发配置入口，优先放入 docker/config/repo_config.json 的新字段中，并由 docker/src/config.py 现有配置加载链路读取，默认值设为 2 或 3。
-2. Phase 2 - 任务级输出隔离，先于并发改造
-   调整 docker/src/core/wiki_pipeline.py 中 execute_generation_task、run_structure_generation、run_wiki_content_generation 的参数与路径构造方式，使每次任务生成独立的结构文件与章节目录，例如按 task_id 建立专属工作目录。该步骤依赖 Step 1，并阻塞后续所有并发改造，因为不先隔离路径就无法安全并发。
-3. Phase 3 - 正文生成器并发化
-   在 docker/src/wiki/content_gen.py 中将 WikiContentGenerator.generate 从串行 for 循环改为受控线程池执行，最大并发取 min(配置值, 章节数)。执行模型调用时不要直接复用一个共享客户端实例，应改为每个工作线程独立获取客户端，或在生成器中引入 client_factory 延迟创建，降低 OpenAI/OpenRouter SDK 在多线程复用下的未知风险。该步骤依赖 Step 2。
-4. Phase 4 - 章节级日志与进度聚合
-   在 docker/src/wiki/content_gen.py 与 docker/src/core/wiki_pipeline.py 中增加并发可观测性：任务开始时打印总章节数与并发上限；每个章节开始时打印 task_id、section_id、标题和当前 active/completed/total；章节结束时打印耗时、结果文件名、累计完成数；章节失败时打印异常与累计失败数。与此同时，把当前固定从 50 直接跳到 85 的正文阶段进度，改为按章节完成比例线性推进到目标区间，保证前端与任务表能反映真实进度。该步骤依赖 Step 3。
-5. Phase 5 - 文件名规范化与冲突去重
-   在 docker/src/wiki/content_gen.py 中把章节文件名处理改成两段式：先保留现有 safe filename 规则生成基础名，再在单线程预处理中建立规范化名称映射，对重复名称追加稳定后缀，例如 -2、-3。这样既保持现有可读性，也避免 API/AI 产生相近 section_id 时在并发写盘时互相覆盖。需要同时覆盖空字符串、全非法字符、大小写折叠和特殊符号折叠后的碰撞情形。该步骤可与 Step 4 并行设计，但落地时建议在 Step 3 后一起实现。
-6. Phase 6 - 远端路径与仓库路径并发安全
-   更新 docker/src/storage/r2_client.py 与 docker/scripts/setup_repository.py、docker/src/utils/repo_utils.py 中的命名规则，避免并发任务落到同一天同仓库同前缀路径下。推荐把 R2 base path 从 repo_name/date 升级为 repo_hash/task_id 或 repo_hash/timestamp_taskid；本地克隆目录继续使用仓库标识，但要避免不同任务针对同一仓库并发时直接删掉彼此目录，必要时改为 task_id 级 clone 目录或先明确同仓库串行化策略。该步骤与 Step 3、Step 5 有耦合，建议在正文并发化之后立即完成。
-7. Phase 7 - 回归与补充测试
-   为 docker/src/wiki/content_gen.py 增加针对文件名规范化和重复去重的单元测试；为正文生成流程补一个使用 mock client 的并发生成测试，验证输出文件数、输出文件名唯一性、失败章节不影响其他章节、进度日志与结果收集行为。最后验证 cleanup_local_files 只清理本任务目录，不误删其他任务产物。该步骤依赖前面所有改造完成。
+## 背景对齐
 
-**Relevant files**
-- /Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/src/core/wiki_pipeline.py — 核心任务编排入口，当前共享 DEFAULT_OUTPUT_PATH 与 DEFAULT_WIKI_SECTION_JSON_OUTPUT，需改为 task_id 级工作目录，并在正文生成阶段接入细粒度进度更新。
-- /Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/src/wiki/content_gen.py — 正文生成核心，当前 generate 串行调用 _generate_section，且 _write_section_json 只按 safe filename 落盘，是并发、日志和文件名去重的主修改点。
-- /Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/src/clients/ai_client_factory.py — 并发下客户端创建策略建议统一从这里收口，避免线程间直接复用同一 client 实例。
-- /Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/src/clients/openrouter_client.py — 需要确认多线程使用时的实例边界，并按计划改成每 worker 独立实例的安全模式。
-- /Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/src/storage/r2_client.py — 当前 base path 为 repo_name/date，存在同日并发覆盖风险，需要引入 repo_hash 与 task_id 或更细时间戳。
-- /Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/scripts/setup_repository.py — 当前本地仓库目录名为 repo_name + 8 位 hash，且同名目录存在时会直接删除，需评估并发同仓任务的目录冲突。
-- /Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/src/utils/repo_utils.py — 若统一使用 repo_hash 作为远端命名空间，应与 setup_repository 的哈希策略保持一致。
-- /Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/config/repo_config.json — 推荐新增正文生成并发配置项和必要的输出命名策略开关。
-- /Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/src/wiki/struct_gen.py — 当前只对 toc 节点做 strip，不保证 section_id 在规范化后唯一；需要作为文件名冲突来源参考。
+- 大纲来源：[report.md](report.md)（5.1–5.5、6.1–6.4）。
+- **5.2 单元测试**：大纲中的 `content_gen.py` 文件名冲突与并发已由 [docker/tests/test_content_gen.py](docker/tests/test_content_gen.py) 覆盖（`_safe_filename`、`_build_filename_map`、`generate` 并发等）；需在报告中明确引用现有用例，并**新增** `ts_parser.py` 的解析准确性测试。
+- **5.2 集成测试**：完整流水线在 [docker/src/core/wiki_pipeline.py](docker/src/core/wiki_pipeline.py)（克隆→结构→内容→向量索引等）。真实跑通依赖 Git/LLM/Supabase/R2，适合用 **fixture 临时目录 + 大面积 mock**（`unittest.mock.patch` 掉 `setup_repository`、`WikiContentGenerator.generate`、`create_and_save_vector_store`、`upload_wiki_to_r2` 等）验证**调用顺序与产物路径**，而非在 CI 中默认联网。
+- **5.3 量化**：代码侧可编写**可重复测量脚本**（检索耗时、整轮 chat 耗时）；论文表格中的「14–25 分钟、30–50 页、~20s」保留为**实验记录/IR II 数据**，与脚本输出对照写入报告。
+- **5.4 定性**：以**结构化检查表 + 可选自动化辅助**（从 Wiki JSON 抽取 `mermaid` 代码块、括号/关键字粗检）为主；Leiden 模块划分、图表是否与代码一致需**人工对照**，脚本只辅助不替代判断。
+- **依赖**：`pytest` 已在测试文件中使用但未出现在 [docker/requirements.txt](docker/requirements.txt)；实施时在 `docker/requirements-dev.txt` 或文档中注明 `pip install pytest`（优先最小改动）。
 
-**Verification**
-1. 使用 mock AI client 运行正文生成流程，验证 10 个章节在并发 2-3 下全部产出且文件名唯一，没有覆盖丢失。
-2. 人工构造 section_id 冲突样例，例如 API Reference、api-reference、API_reference，验证最终文件名保持可读且稳定去重。
-3. 人工并发启动两个生成任务，验证本地输出目录、R2 key、cleanup 行为互不干扰。
-4. 检查任务日志，确认能看到正文阶段总章节数、并发上限、章节开始、章节结束、累计完成数和失败信息。
-5. 检查 Supabase 任务进度，确认正文阶段从 50 到 85 会随着章节完成持续推进，而不是一次性跳变。
-6. 如果可运行集成流程，使用真实仓库执行一次端到端生成，确认 R2 上传后的 content_urls 数量与本地产出一致。
+## 1. 仓库根目录 `test/` 结构（你已选择根目录方案）
 
-**Decisions**
-- 并发策略采用保守固定并发 2-3，不做激进吞吐优化。
-- 文件名优先保持现有 section_id 的可读语义，只在规范化后冲突时追加稳定后缀。
-- 日志粒度采用任务级汇总加章节开始/结束，不默认引入重试级别日志。
-- 本次范围包含正文生成并发、日志可观测性、文件名与路径并发安全。
-- 本次范围暂不包含 RAG 索引并发优化、前端展示改造、任务重试机制重构。
+建议布局：
 
-**Further Considerations**
-1. 如果后续发现 OpenRouter SDK 单实例在多线程下不稳定，应直接切换为 worker 内创建 client，而不是为共享 client 加锁，因为加锁会抵消正文并发收益。
-2. 如果同一仓库 URL 可能被高频重复触发，建议把本地克隆目录也切到 task_id 级，避免 setup_repository 先删目录再 clone 的行为影响正在运行的旧任务。
-3. 如果需要后续观察正文瓶颈，可以在章节结束日志中附加上下文长度与 LLM 耗时，但这一项可以作为第二阶段优化，不必阻塞首版并发落地。
+```text
+test/
+  README.md                      # 如何运行：cd docker && PYTHONPATH=. pytest …；如何运行 benchmark
+  chapter5/
+    02_functional_testing.md     # 5.2：用例编号 ↔ pytest 类/函数对应表（中文）
+    03_benchmark_rag_latency.py  # 5.3：RAG 阶段计时（需本地向量库/API key 时在说明中标注）
+    03_wiki_pipeline_timings.md  # 5.3：手工/脚本记录 wiki 各阶段耗时的表格模板与填写说明
+    04_qualitative_rubric.md     # 5.4：模块划分、Mermaid 准确性、失败样例记录表
+```
+
+- `03_benchmark_rag_latency.py`：从 `docker` 包导入 [docker/src/core/chat.py](docker/src/core/chat.py) / [docker/src/core/retrieval.py](docker/src/core/retrieval.py)，对固定 `question` + 已有 `vector_store` 路径（通过参数传入）循环测量：可选 HyDE 开关、`_gather_hybrid_candidates` 或公开封装函数耗时 vs 完整 `chat` 路径；输出 CSV 或控制台表格供报告 5.3 粘贴。
+- 若缺少现成向量库，脚本应 **graceful exit** 并提示「仅在有索引目录时运行」，避免误报失败。
+
+## 2. `docker/tests/` 新增/调整（5.2 自动化）
+
+| 文件 | 内容要点 |
+|------|----------|
+| `test_ts_parser.py` | 使用 `TreeSitterParser` 对**内嵌 TS/TSX/Python 片段**断言：`parse_code` 返回非空 `CodeChunk`；对已知函数/类名检查 `name` 与 `node_type`；空扩展名返回 `[]`；极简文件走 `file` 整块回退逻辑（见 [docker/src/ingestion/ts_parser.py](docker/src/ingestion/ts_parser.py) 第 98–105 行）。**用 `pytest.importorskip` 或 try/except** 处理未安装 tree-sitter 语言包时的 skip，避免裸机无依赖即红。 |
+| `test_wiki_pipeline_integration.py` | `patch` `setup_repository` 返回 `tmp_path` 下假仓库；`patch` 结构生成/内容生成/RAG/上传为轻量返回值；调用 `wiki_pipeline` 中exported 的高层函数（如 `execute_generation_task` 或其子步骤，以只读代码后选**最少公共入口**为准），断言进度回调或关键文件是否写入。 |
+
+集成测试范围以**证明闭环路径被串联**为目标，不重复测试 LLM 质量。
+
+## 3. 新报告 Markdown 文件（补全大纲其余部分）
+
+- **新文件**（名称建议：`docs/report_chapter5_6_full.md` 或你指定的根路径文件名）：写入完整可读稿，替换/调整 [report.md](report.md) 中不合适表述。
+- **5.1 Testing Environment and Dataset**：结合 [explain.md](explain.md) 与部署常识撰写——Fly.io 机器规格写「以实际 `fly.toml`/仪表盘为准并列表」；Vercel 写前端构建与边缘无关 RAG；测试仓库 **jsoncrack / react-resume / openclaw** 与 [docker/config/repo_config.json](docker/config/repo_config.json) 若存在则交叉引用。官方文档链接（Fly、Vercel）在实施阶段用网络检索补全 URL。
+- **5.5 Comparison of Retrieval Strategies**：依据 [docker/src/core/retrieval.py](docker/src/core/retrieval.py) 中 `hybrid_retrieve`、BM25、`CommunityFirstRetriever`（与主路径接入情况对照 [docker/src/core/chat.py](docker/src/core/chat.py)）撰写；说明「混合检索利于符号/配置项」的机制（稀疏项匹配）；诚实写 **CommunityFirst** 若未接入主 RAG 路径则与大纲 [17][18] 一致标为技术债。
+- **第六章**：6.1 对照项目 Objectives（需回读开题/第一章若仓库内有）；6.2 写入 `valid_file_list`（[docker/src/wiki/struct_gen.py](docker/src/wiki/struct_gen.py)、[docker/src/prompts.py](docker/src/prompts.py)）、AST/内存、`ThreadPoolExecutor`（[docker/src/wiki/content_gen.py](docker/src/wiki/content_gen.py)）、任务目录隔离（`wiki_pipeline` 中 `_task_output_dir`）；6.3 OpenRouter 多模型；6.4 增量更新与 Mermaid 校验自动化——用语客观、可答辩。
+- **文献 [1]–[20]**：在大纲中多为占位；成稿中用「待你最终核对」或与你 IR II PDF 一致的简短引用格式列出，避免捏造篇名。
+
+## 4. 实施顺序建议
+
+1. 新增 `test/` 下 README + chapter5 文档与 benchmark 脚本骨架。  
+2. 新增 `docker/tests/test_ts_parser.py` 与集成测试用例。  
+3. 验证：`cd docker && PYTHONPATH=. pytest tests/ -q`（处理 skip）。  
+4. 撰写 `report_chapter5_6_full.md`，把 5.2–5.4 与 `test/`、`docker/tests/` 的对应关系写进正文。  
+
+## 5. 风险与边界
+
+- Tree-sitter 语言包在 CI/本地不一致 → 测试以 **skip + 文档说明** 为主。  
+- 全链路集成无 mock 时过长且不稳定 → **禁止**将重流水线作为默认 CI 必跑，除非后续加 `pytest -m "integration"` 与可选网络。  
+- 5.3 数字强依赖你 IR II 实测；脚本提供**方法**，表格数值以你实验为准。
+**

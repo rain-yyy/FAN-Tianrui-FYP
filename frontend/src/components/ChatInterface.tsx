@@ -679,7 +679,7 @@ export default function ChatInterface({
           >
             <button
               onClick={() => setMode('open')}
-              className="inline-flex items-center gap-2.5 rounded-full border border-fuchsia-300/40 bg-black/80 px-5 py-3.5 text-base font-medium text-fuchsia-100 shadow-xl shadow-fuchsia-500/20 backdrop-blur-xl hover:bg-black hover:scale-105 hover:shadow-fuchsia-500/40 transition-all duration-300"
+              className="inline-flex items-center gap-2.5 rounded-full border border-sky-200 bg-white px-5 py-3.5 text-base font-medium text-sky-900 shadow-lg shadow-stone-900/10 hover:bg-sky-50 hover:scale-105 hover:border-sky-300 transition-all duration-300"
               aria-label="Open chat sidebar"
             >
               <MessageSquare className="w-5 h-5" />
@@ -696,20 +696,20 @@ export default function ChatInterface({
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ duration: 0.2 }}
-            className="fixed top-0 right-0 bottom-0 z-50 bg-[#0A0A0A] border-l border-white/10 flex flex-col shadow-[-20px_0_60px_rgba(0,0,0,0.45)]"
+            className="fixed top-0 right-0 bottom-0 z-50 bg-white border-l border-stone-200 flex flex-col shadow-[-12px_0_40px_rgba(0,0,0,0.08)]"
             style={{ width: sidebarWidth }}
           >
             {/* Drag Handle */}
             <div
-              className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-blue-500/50 z-[60] transition-colors"
+              className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-sky-300 z-[60] transition-colors"
               onMouseDown={startResizing}
             />
 
-            <header className="h-14 border-b border-white/10 flex items-center justify-between px-4 bg-white/[0.02]">
+            <header className="h-14 border-b border-stone-200 flex items-center justify-between px-4 bg-stone-50/90">
               <div className="flex items-center gap-4">
                 <button
                   onClick={() => setShowHistorySidebar((prev) => !prev)}
-                  className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-white transition-colors"
+                  className="inline-flex items-center gap-2 text-sm text-stone-600 hover:text-stone-900 transition-colors"
                   aria-label="Toggle history sidebar"
                 >
                   <History className="w-4 h-4" />
@@ -717,15 +717,15 @@ export default function ChatInterface({
                 </button>
                 {currentPageTitle && (
                   <>
-                    <span className="text-white/20">/</span>
-                    <span className="text-sm text-white/80 truncate max-w-[200px]">{currentPageTitle}</span>
+                    <span className="text-stone-300">/</span>
+                    <span className="text-sm text-stone-800 truncate max-w-[200px]">{currentPageTitle}</span>
                   </>
                 )}
               </div>
               <div className="flex items-center gap-3">
                 <button 
                   onClick={() => setMode('closed')}
-                  className="p-2 text-muted-foreground hover:text-white transition-colors"
+                  className="p-2 text-stone-500 hover:text-stone-900 transition-colors"
                   aria-label="Close chat"
                 >
                   <X className="w-5 h-5" />
@@ -736,17 +736,17 @@ export default function ChatInterface({
             <div className="flex-1 flex overflow-hidden">
               {/* Chat history sidebar */}
               <aside className={cn(
-                "w-64 border-r border-white/10 bg-[#0A0A0A] flex-col transition-all duration-300",
+                "w-64 border-r border-stone-200 bg-stone-50 flex-col transition-all duration-300",
                 showHistorySidebar ? "hidden sm:flex" : "hidden"
               )}>
-                <div className="p-3 border-b border-white/5 flex items-center justify-between">
-                  <h3 className="text-sm font-medium text-white/80 flex items-center gap-2">
-                    <History className="w-4 h-4 text-purple-400" />
+                <div className="p-3 border-b border-stone-200 flex items-center justify-between">
+                  <h3 className="text-sm font-medium text-stone-800 flex items-center gap-2">
+                    <History className="w-4 h-4 text-sky-600" />
                     {t('chatHistory')}
                   </h3>
                   <button
                     onClick={handleNewChat}
-                    className="p-1.5 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 active:scale-95 transition-all"
+                    className="p-1.5 rounded-lg bg-sky-100 text-sky-800 hover:bg-sky-200 active:scale-95 transition-all border border-sky-200/80"
                     aria-label="New chat"
                   >
                     <Plus className="w-4 h-4" />
@@ -755,13 +755,13 @@ export default function ChatInterface({
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
                   {isLoadingHistory ? (
                     <div className="flex items-center justify-center py-8">
-                      <Loader2 className="w-5 h-5 text-zinc-500 animate-spin" />
+                      <Loader2 className="w-5 h-5 text-stone-400 animate-spin" />
                     </div>
                   ) : chatHistory.length === 0 ? (
                     <div className="text-center py-8">
-                      <MessageSquare className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-                      <p className="text-xs text-zinc-500">{t('noChatHistory')}</p>
-                      <p className="text-xs text-zinc-600 mt-1">{t('startChatHint')}</p>
+                      <MessageSquare className="w-8 h-8 text-stone-400 mx-auto mb-2" />
+                      <p className="text-xs text-stone-600">{t('noChatHistory')}</p>
+                      <p className="text-xs text-stone-500 mt-1">{t('startChatHint')}</p>
                     </div>
                   ) : (
                     chatHistory.map((item) => {
@@ -773,19 +773,19 @@ export default function ChatInterface({
                         className={cn(
                           "w-full text-left p-2.5 rounded-lg transition-all group",
                           chatId === effectiveChatId
-                            ? "bg-purple-500/20 border border-purple-500/30"
-                            : "hover:bg-white/5 border border-transparent"
+                            ? "bg-sky-100 border border-sky-200"
+                            : "hover:bg-stone-100 border border-transparent"
                         )}
                         aria-label={`Load chat ${item.title || effectiveChatId.slice(0, 8)}`}
                       >
                         <div className="flex items-center gap-2">
                           <MessageSquare className={cn(
                             "w-4 h-4 shrink-0",
-                            chatId === effectiveChatId ? "text-purple-400" : "text-zinc-500 group-hover:text-zinc-400"
+                            chatId === effectiveChatId ? "text-sky-700" : "text-stone-500 group-hover:text-stone-600"
                           )} />
                           <span className={cn(
                             "text-sm truncate flex-1",
-                            chatId === effectiveChatId ? "text-purple-200" : "text-zinc-400 group-hover:text-zinc-300"
+                            chatId === effectiveChatId ? "text-stone-900" : "text-stone-600 group-hover:text-stone-800"
                           )}>
                             {item.title || `${t('chatDefault')} ${effectiveChatId.slice(0, 8)}`}
                           </span>
@@ -793,7 +793,7 @@ export default function ChatInterface({
                           {/* Delete Button */}
                           <button
                             onClick={(e) => handleDeleteChat(item, e)}
-                            className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all"
+                            className="p-1 rounded text-stone-500 hover:text-rose-700 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
                             disabled={deletingChatId === effectiveChatId}
                           >
                             {deletingChatId === effectiveChatId ? (
@@ -803,7 +803,7 @@ export default function ChatInterface({
                             )}
                           </button>
                         </div>
-                        <div className="mt-1 text-[10px] text-zinc-600 ml-6">
+                        <div className="mt-1 text-[10px] text-stone-500 ml-6">
                           {new Date(item.created_at).toLocaleDateString('en-US', { 
                             month: 'short', 
                             day: 'numeric',
@@ -819,27 +819,27 @@ export default function ChatInterface({
               </aside>
 
               {/* Main chat area */}
-              <div className="flex-1 flex flex-col min-w-0 relative bg-[#050505]">
+              <div className="flex-1 flex flex-col min-w-0 relative bg-white">
                 <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 custom-scrollbar scroll-smooth">
                   {isChatLoading && (
                     <div className="flex flex-col items-center justify-center h-full text-center">
-                      <Loader2 className="w-8 h-8 text-purple-400 animate-spin mb-4" />
-                      <p className="text-sm text-zinc-500">{t('loadingChat')}</p>
+                      <Loader2 className="w-8 h-8 text-sky-600 animate-spin mb-4" />
+                      <p className="text-sm text-stone-600">{t('loadingChat')}</p>
                     </div>
                   )}
                   {messages.length === 0 && !isLoading && !isChatLoading && (
                     <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                      <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-purple-500/10 to-blue-500/10 border border-white/5 flex items-center justify-center mb-6 shadow-xl">
+                      <div className="w-16 h-16 rounded-3xl bg-sky-50 border border-sky-100 flex items-center justify-center mb-6 shadow-sm">
                         {chatMode === 'agent' ? (
-                          <Bot className="w-8 h-8 text-purple-400" />
+                          <Bot className="w-8 h-8 text-teal-700" />
                         ) : (
-                          <Sparkles className="w-8 h-8 text-blue-400" />
+                          <Sparkles className="w-8 h-8 text-sky-600" />
                         )}
                       </div>
-                      <h2 className="text-2xl font-semibold text-white/90 mb-3">
+                      <h2 className="text-2xl font-semibold text-stone-900 mb-3">
                         {chatMode === 'agent' ? t('agentDeepAnalysis') : t('quickQA')}
                       </h2>
-                      <p className="text-[15px] text-zinc-400 max-w-md leading-relaxed">
+                      <p className="text-[15px] text-stone-600 max-w-md leading-relaxed">
                         {chatMode === 'agent' 
                           ? t('agentDesc')
                           : t('ragDesc')}
@@ -856,7 +856,7 @@ export default function ChatInterface({
                   
                   {isLoading && (
                     <div className="max-w-3xl mx-auto px-2 md:px-0 mt-4">
-                      <div className="ml-2 md:ml-12 p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                      <div className="ml-2 md:ml-12 p-4 rounded-xl bg-stone-50 border border-stone-200">
                         <LiveStepFlow 
                           steps={liveSteps}
                           isAgent={chatMode === 'agent'}
@@ -866,7 +866,7 @@ export default function ChatInterface({
                         {liveSteps.length === 0 && (
                           <div className={cn(
                             "flex items-center gap-3 text-sm",
-                            chatMode === 'agent' ? "text-purple-400" : "text-blue-400"
+                            chatMode === 'agent' ? "text-teal-700" : "text-sky-700"
                           )}>
                             {chatMode === 'agent' ? (
                               <Bot className="w-4 h-4 animate-pulse" />
@@ -882,16 +882,16 @@ export default function ChatInterface({
                   <div ref={messagesEndRef} className="h-4" />
                 </div>
 
-                <div className="p-4 md:p-6 bg-gradient-to-t from-[#0A0A0A] via-[#0A0A0A] to-transparent shrink-0">
+                <div className="p-4 md:p-6 bg-gradient-to-t from-stone-50 via-white to-transparent shrink-0 border-t border-stone-100">
                   <div className="max-w-3xl mx-auto relative space-y-3">
-                    <div className="relative bg-[#1A1A1A] border border-white/10 rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-purple-500/30 focus-within:border-purple-500/50 transition-all shadow-lg">
+                    <div className="relative bg-white border border-stone-200 rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-sky-200 focus-within:border-sky-300 transition-all shadow-sm">
                       <textarea
                         ref={fullViewInputRef}
                         value={inputValue}
                         onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
                         placeholder={chatMode === 'agent' ? "Ask Agent to analyze code..." : "Ask a question..."}
-                        className="w-full bg-transparent border-none outline-none text-[15px] text-white placeholder:text-zinc-500 resize-none px-4 py-3.5 max-h-[200px] leading-relaxed"
+                        className="w-full bg-transparent border-none outline-none text-[15px] text-stone-900 placeholder:text-stone-400 resize-none px-4 py-3.5 max-h-[200px] leading-relaxed"
                         rows={1}
                         disabled={isLoading}
                         aria-label="Follow-up question"
@@ -904,8 +904,8 @@ export default function ChatInterface({
                             className={cn(
                               "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all border",
                               chatMode === 'rag'
-                                ? "bg-blue-500/20 text-blue-300 border-blue-500/30"
-                                : "text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-white/5"
+                                ? "bg-sky-100 text-sky-900 border-sky-200"
+                                : "text-stone-500 border-transparent hover:text-stone-800 hover:bg-stone-100"
                             )}
                             title="Quick answer mode"
                           >
@@ -917,8 +917,8 @@ export default function ChatInterface({
                             className={cn(
                               "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all border",
                               chatMode === 'agent'
-                                ? "bg-purple-500/20 text-purple-300 border-purple-500/30"
-                                : "text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-white/5"
+                                ? "bg-teal-100 text-teal-900 border-teal-200"
+                                : "text-stone-500 border-transparent hover:text-stone-800 hover:bg-stone-100"
                             )}
                             title="Agent deep analysis mode"
                           >
@@ -935,9 +935,9 @@ export default function ChatInterface({
                               "p-2 rounded-xl transition-all shadow-sm",
                               inputValue.trim() && !isLoading
                                 ? chatMode === 'agent'
-                                  ? "bg-purple-600 text-white hover:bg-purple-500 hover:shadow-purple-500/25"
-                                  : "bg-blue-600 text-white hover:bg-blue-500 hover:shadow-blue-500/25"
-                                : "bg-white/5 text-zinc-600 cursor-not-allowed"
+                                  ? "bg-teal-600 text-white hover:bg-teal-500"
+                                  : "bg-sky-600 text-white hover:bg-sky-500"
+                                : "bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200"
                             )}
                             aria-label="Send follow-up"
                           >

@@ -26,26 +26,26 @@ export default function AppLayout() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#050505]">
-      <header className="h-16 border-b border-white/10 bg-black/40 backdrop-blur-xl px-4 md:px-8 flex items-center justify-between sticky top-0 z-40">
+    <div className="min-h-screen flex flex-col bg-[var(--background)]">
+      <header className="h-16 border-b border-stone-200 bg-white/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between sticky top-0 z-40 shadow-sm shadow-stone-900/5">
         <div className="flex items-center gap-6">
-          <button 
+          <button
             onClick={() => navigate('/app/dashboard')}
-            className="flex items-center gap-3 hover:opacity-80 transition-opacity group"
+            className="flex items-center gap-3 hover:opacity-90 transition-opacity group"
             aria-label="Go to Dashboard"
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-fuchsia-500/20 to-cyan-500/20 border border-fuchsia-300/30 flex items-center justify-center group-hover:scale-105 transition-transform">
-              <FileCode2 className="w-5 h-5 text-fuchsia-300" />
+            <div className="w-9 h-9 rounded-xl bg-sky-50 border border-sky-200/80 flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm">
+              <FileCode2 className="w-5 h-5 text-sky-700" />
             </div>
             <div>
-              <p className="text-base font-semibold bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
+              <p className="text-base font-semibold text-stone-900 tracking-tight">
                 Project Wiki Generator
               </p>
             </div>
           </button>
 
-          <div className="h-6 w-px bg-white/10 hidden md:block"></div>
-          
+          <div className="h-6 w-px bg-stone-200 hidden md:block" />
+
           <nav className="hidden md:flex items-center gap-2">
             <NavLink
               to="/app/dashboard"
@@ -54,8 +54,8 @@ export default function AppLayout() {
                 cn(
                   'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200',
                   isActive
-                    ? 'bg-white/10 text-white'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                    ? 'bg-sky-100 text-sky-900 border border-sky-200/80'
+                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border border-transparent'
                 )
               }
             >
@@ -69,8 +69,8 @@ export default function AppLayout() {
                 cn(
                   'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200',
                   isActive
-                    ? 'bg-white/10 text-white'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                    ? 'bg-sky-100 text-sky-900 border border-sky-200/80'
+                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border border-transparent'
                 )
               }
             >
@@ -81,14 +81,15 @@ export default function AppLayout() {
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Mobile Links */}
           <div className="md:hidden flex items-center gap-1.5 mr-2">
             <NavLink
               to="/app/dashboard"
               className={({ isActive }) =>
                 cn(
-                  'p-2 rounded-xl transition-all',
-                  isActive ? 'bg-white/10 text-white shadow-sm' : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                  'p-2 rounded-xl transition-all border',
+                  isActive
+                    ? 'bg-sky-100 text-sky-900 border-sky-200 shadow-sm'
+                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border-transparent'
                 )
               }
             >
@@ -98,8 +99,10 @@ export default function AppLayout() {
               to="/app/history"
               className={({ isActive }) =>
                 cn(
-                  'p-2 rounded-xl transition-all',
-                  isActive ? 'bg-white/10 text-white shadow-sm' : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                  'p-2 rounded-xl transition-all border',
+                  isActive
+                    ? 'bg-sky-100 text-sky-900 border-sky-200 shadow-sm'
+                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border-transparent'
                 )
               }
             >
@@ -107,22 +110,21 @@ export default function AppLayout() {
             </NavLink>
           </div>
 
-          {/* User Profile Dropdown */}
           <div className="relative" ref={profileRef}>
             <button
               onClick={() => setIsProfileOpen(!isProfileOpen)}
-              className="w-9 h-9 rounded-full bg-gradient-to-br from-zinc-800 to-zinc-900 border border-white/10 flex items-center justify-center hover:ring-2 hover:ring-fuchsia-500/50 hover:border-fuchsia-500/30 transition-all focus:outline-none group shadow-lg"
+              className="w-9 h-9 rounded-full bg-stone-100 border border-stone-200 flex items-center justify-center hover:ring-2 hover:ring-sky-200 hover:border-sky-300 transition-all focus:outline-none group shadow-sm"
               aria-label="User menu"
             >
-              <User className="w-5 h-5 text-zinc-300 group-hover:text-fuchsia-200 transition-colors" />
+              <User className="w-5 h-5 text-stone-600 group-hover:text-sky-800 transition-colors" />
             </button>
 
             {isProfileOpen && (
-              <div className="absolute right-0 mt-3 w-64 rounded-2xl border border-white/10 bg-[#121212]/95 backdrop-blur-xl shadow-2xl shadow-black/50 overflow-hidden py-1 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="px-4 py-4 border-b border-white/5 bg-white/[0.02]">
-                  <p className="text-xs text-zinc-400 font-medium mb-1">{t('signedInAs')}</p>
-                  <p className="text-sm font-semibold text-zinc-100 truncate flex items-center gap-2" title={identity}>
-                    <span className="inline-block w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)] shrink-0"></span>
+              <div className="absolute right-0 mt-3 w-64 rounded-2xl border border-stone-200 bg-white shadow-xl shadow-stone-900/10 overflow-hidden py-1 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="px-4 py-4 border-b border-stone-100 bg-stone-50/80">
+                  <p className="text-xs text-stone-500 font-medium mb-1">{t('signedInAs')}</p>
+                  <p className="text-sm font-semibold text-stone-900 truncate flex items-center gap-2" title={identity}>
+                    <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
                     {identity}
                   </p>
                 </div>
@@ -133,7 +135,7 @@ export default function AppLayout() {
                       setIsProfileOpen(false);
                       void signOut();
                     }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-all font-medium group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-rose-700 hover:text-rose-800 hover:bg-rose-50 rounded-xl transition-all font-medium group"
                   >
                     <LogOut className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
                     {t('signOut')}
@@ -149,7 +151,7 @@ export default function AppLayout() {
         <Outlet />
       </main>
 
-      <footer className="h-10 border-t border-white/10 bg-black/20 px-4 md:px-8 flex items-center justify-center text-xs text-zinc-500">
+      <footer className="h-10 border-t border-stone-200 bg-white/60 px-4 md:px-8 flex items-center justify-center text-xs text-stone-500">
         Project Wiki Generator · Powered by AI
       </footer>
     </div>
