@@ -10,16 +10,9 @@ services:
     container_name: wiki-api-container
     ports:
       - "8000:8000"
-    # 加载环境变量文件
+    # 加载环境变量文件 (参考 .env.example 创建 .env)
     env_file:
       - .env
-    # 也可以在这里定义默认值或非敏感变量
-    environment:
-      - PYTHONPATH=/app
-      - HOST=0.0.0.0
-      - PORT=8000
-      - VECTOR_STORE_PATH=/data/vector_stores
-      - REPO_STORE_PATH=/data/repos
     restart: always
     volumes:
       # 持久化卷（与 Fly.io 一致）：宿主机仓库根目录下的 data/ 挂载到容器 /data

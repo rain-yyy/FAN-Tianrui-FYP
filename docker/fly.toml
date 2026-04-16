@@ -12,7 +12,9 @@ primary_region = "sin"
   dockerfile = "Dockerfile"
 
 [env]
-  # 非敏感环境变量
+  # 非敏感环境变量（路径/端口）
+  # 敏感变量通过 fly secrets set 设置：
+  #   fly secrets set OPENROUTER_API_KEY=xxx SUPABASE_URL=xxx SUPABASE_KEY=xxx GITHUB_TOKEN=xxx
   PYTHONPATH = "/app"
   HOST = "0.0.0.0"
   PORT = "8000"

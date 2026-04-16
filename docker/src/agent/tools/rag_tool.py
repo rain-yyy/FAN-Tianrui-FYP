@@ -36,8 +36,8 @@ logger = logging.getLogger("app.agent.tools.rag")
 
 
 CATEGORY_TOP_K: Dict[str, int] = {
-    "code": 5,
-    "text": 2,
+    "code": 20,
+    "text": 20,
 }
 HYBRID_DENSE_WEIGHT = 0.6
 HYBRID_SPARSE_WEIGHT = 0.4
@@ -64,22 +64,18 @@ class RAGSearchTool:
     - 支持轻量模式（禁用 HyDE）
     """
     
-    HYDE_CACHE_SIZE = 32
     HYDE_MIN_QUERY_LENGTH = 30
     
-    def __init__(self, vector_store_path: str, use_hyde: bool = True):
+    def __init__(self, vector_store_path: str):
         """
         初始化 RAG 检索工具
         
         Args:
             vector_store_path: 向量库根目录路径
-            use_hyde: 是否启用 HyDE 增强
         """
         self.vector_store_path = vector_store_path
-        self.use_hyde = use_hyde
         self.stores: Dict[str, CategoryRetrievalUnit] = {}
         self._loaded = False
-        self._hyde_cache: Dict[str, str] = {}
     
     def _ensure_loaded(self) -> None:
         """确保向量库已加载，优先使用全局缓存"""
@@ -174,23 +170,25 @@ class RAGSearchTool:
         return extracted
     
     def _should_use_hyde(self, query: str) -> bool:
-        """判断是否应该使用 HyDE（性能优化）"""
-        if len(query.strip()) < self.HYDE_MIN_QUERY_LENGTH:
+        """判断是否应该使用 HyDE（性能优化）
+        
+        改用词数启发式：≥ 3 个有效单词才启用 HyDE，避免按字符长度误
+        跳过 "table extraction" 这类虽短但语义密集的多词查询。
+        """
+        stripped = query.strip()
+        # 有效单词 = 长度 > 2 的词（排除冠词、介词等噪声）
+        meaningful_words = [w for w in stripped.split() if len(w) > 2]
+        if len(meaningful_words) < 3:
             return False
         simple_patterns = ["what is", "where is", "how to", "list all", "show me"]
-        query_lower = query.lower()
+        query_lower = stripped.lower()
         for pattern in simple_patterns:
             if query_lower.startswith(pattern):
                 return False
         return True
     
     def _generate_hyde_document(self, question: str) -> str:
-        """使用 HyDE 生成假设性文档（带缓存）"""
-        cache_key = question[:200]
-        if cache_key in self._hyde_cache:
-            logger.info(f"[HyDE] Cache hit for query: {question[:50]}...")
-            return self._hyde_cache[cache_key]
-        
+        """使用 HyDE 生成假设性文档"""
         try:
             provider, model = get_model_config(CONFIG, "hyde_generation")
             llm = get_ai_client(provider, model=model)
@@ -201,15 +199,7 @@ class RAGSearchTool:
             if not isinstance(hyde_doc, str):
                 hyde_doc = str(hyde_doc)
             
-            hyde_doc = hyde_doc.strip()
-            
-            if len(self._hyde_cache) >= self.HYDE_CACHE_SIZE:
-                oldest_key = next(iter(self._hyde_cache))
-                del self._hyde_cache[oldest_key]
-            self._hyde_cache[cache_key] = hyde_doc
-            
-            logger.info(f"[HyDE] Generated hypothetical document: {len(hyde_doc)} chars")
-            return hyde_doc
+            return hyde_doc.strip()
             
         except Exception as e:
             logger.error(f"[HyDE] Failed to generate: {e}")
@@ -218,8 +208,7 @@ class RAGSearchTool:
     def execute(
         self,
         query: str,
-        top_k: int = 5,
-        use_hyde: Optional[bool] = None
+        top_k: int = 20
     ) -> ContextPiece:
         """
         执行 RAG 检索
@@ -227,7 +216,6 @@ class RAGSearchTool:
         Args:
             query: 搜索查询
             top_k: 返回结果数量
-            use_hyde: 是否使用 HyDE（默认使用初始化时的设置）
             
         Returns:
             ContextPiece: 包含检索结果的上下文片段
@@ -243,17 +231,8 @@ class RAGSearchTool:
                     metadata={"error": "no_stores"}
                 )
             
-            should_use_hyde = use_hyde if use_hyde is not None else self.use_hyde
-            retrieval_query = query
-            
-            if should_use_hyde and self._should_use_hyde(query):
-                hyde_doc = self._generate_hyde_document(query)
-                retrieval_query = f"{query}\n\n{hyde_doc}"
-            elif should_use_hyde:
-                logger.info(f"[HyDE] Skipped for short/simple query: {query[:50]}...")
-            
             candidates = self._gather_hybrid_candidates(
-                retrieval_query,
+                query,
                 category_top_k=CATEGORY_TOP_K,
             )
             
@@ -288,8 +267,8 @@ class RAGSearchTool:
                 result_lines.append("-" * 40)
                 
                 content = doc.page_content.strip()
-                if len(content) > 1000:
-                    content = content[:1000] + "..."
+                if len(content) > 2200:
+                    content = content[:2200] + "..."
                 result_lines.append(content)
                 result_lines.append("")
                 
@@ -303,7 +282,6 @@ class RAGSearchTool:
                     "query": query,
                     "num_results": len(chosen),
                     "sources": sources,
-                    "used_hyde": should_use_hyde,
                 }
             )
             
@@ -326,10 +304,18 @@ class RAGSearchTool:
 
         def _fetch_category(category, unit):
             base_k = max(int(category_top_k.get(category, 3)), 1)
-            dense_k = min(base_k * 4, 20)
-            sparse_k = min(base_k * 3, 15)
+            dense_k = min(base_k * 4, 30)
+            sparse_k = min(base_k * 3, 20)
+            
+            # 只有在 text 类别的 dense search 时使用 HyDE
+            dense_query = question
+            if category == "text" and self._should_use_hyde(question):
+                hyde_doc = self._generate_hyde_document(question)
+                dense_query = f"{question}\n\n{hyde_doc}"
+                logger.info(f"[HyDE] Used for 'text' category dense search")
+
             return self._collect_candidates_for_category(
-                category, unit, question, dense_k, sparse_k
+                category, unit, question, dense_k, sparse_k, dense_query=dense_query
             )
 
         if len(self.stores) <= 1:
@@ -352,7 +338,7 @@ class RAGSearchTool:
             cand.final_score = score
         
         final_candidates.sort(key=lambda x: x.final_score, reverse=True)
-        return final_candidates[:30]
+        return final_candidates[:50]
     
     def _collect_candidates_for_category(
         self,
@@ -361,18 +347,38 @@ class RAGSearchTool:
         question: str,
         dense_k: int,
         sparse_k: int,
+        dense_query: Optional[str] = None
     ) -> List[RankedCandidate]:
         """为指定类别收集候选（dense + sparse 并行）"""
         candidates: Dict[str, RankedCandidate] = {}
+        
+        # 如果没有提供特殊的 dense_query，则使用原始 question
+        actual_dense_query = dense_query if dense_query is not None else question
 
         def _dense_search():
             try:
                 return unit.dense_store.similarity_search_with_relevance_scores(
-                    question, k=dense_k
+                    actual_dense_query, k=dense_k
                 )
             except Exception as e:
                 logger.warning(f"Dense search failed for {category}: {e}")
                 return []
+
+        def _sparse_search():
+            if unit.sparse_index is None or sparse_k <= 0:
+                return []
+            try:
+                return unit.sparse_index.search(question, top_k=sparse_k)
+            except Exception as e:
+                logger.warning(f"Sparse search failed for {category}: {e}")
+                return []
+
+        # 并行执行 dense 和 sparse
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            dense_future = pool.submit(_dense_search)
+            sparse_future = pool.submit(_sparse_search)
+            dense_hits = dense_future.result()
+            sparse_hits = sparse_future.result()
 
         def _sparse_search():
             if unit.sparse_index is None or sparse_k <= 0:

@@ -1,3 +1,4 @@
 {
-    "git.ignoreLimitWarning": true
+    "terminal.integrated.fontFamily": "MesloLGS NF",
+    "terminal.integrated.fontSize": 14
 }

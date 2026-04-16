@@ -148,7 +148,7 @@ class WikiContentGenerator:
                     progress = 50.0 + (completed_now / total) * 35.0
                     self.progress_callback(
                         progress,
-                        f"正在生成 Wiki 内容 ({completed_now}/{total})..."
+                        f"Generating Wiki content ({completed_now}/{total})..."
                     )
                 return section, file_path
             except Exception as exc:

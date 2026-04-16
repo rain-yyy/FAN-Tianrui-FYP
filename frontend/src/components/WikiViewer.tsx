@@ -498,7 +498,7 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl,
                   </h1>
                 </div>
 
-                <div className="prose prose-stone prose-lg max-w-none prose-headings:font-bold prose-headings:text-stone-900 prose-p:text-stone-700 prose-a:text-sky-700 hover:prose-a:text-sky-800 prose-code:text-teal-800 prose-code:bg-teal-50 prose-pre:bg-stone-100 prose-pre:border prose-pre:border-stone-200 prose-img:rounded-xl">
+                <div className="prose prose-stone prose-lg max-w-none prose-headings:font-bold prose-headings:text-stone-900 prose-p:text-stone-700 prose-a:text-sky-700 hover:prose-a:text-sky-800 prose-code:text-teal-800 prose-code:bg-teal-50 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:font-medium prose-code:text-sm prose-pre:bg-stone-100 prose-pre:border prose-pre:border-stone-200 prose-img:rounded-xl">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeHighlight]}
@@ -521,7 +521,7 @@ export default function WikiViewer({ userId, structureUrl, contentUrls, repoUrl,
                         <span className="w-1 h-6 bg-gradient-to-b from-sky-500 to-teal-500 rounded-full group-hover:h-8 transition-all duration-300"/>
                         {section.heading}
                       </h2>
-                      <div className="prose prose-stone prose-lg max-w-none prose-p:text-stone-700 prose-pre:bg-stone-100 prose-pre:border prose-pre:border-stone-200">
+                      <div className="prose prose-stone prose-lg max-w-none prose-p:text-stone-700 prose-pre:bg-stone-100 prose-pre:border prose-pre:border-stone-200 prose-code:text-teal-800 prose-code:bg-teal-50 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:font-medium prose-code:text-sm">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
                           rehypePlugins={[rehypeHighlight]}

@@ -11,19 +11,11 @@ Thumbs.db
 # RepoMapper artifacts
 .repomap.tags.cache.v*
 
-# Project specific generated outputs
-vector_store/
-debug_outputs/
-wiki_section_json/
-wiki_structure_raw/
-wiki_structure.json
-
 # 仓库根持久化目录（vector_stores、repos 等）
 /data/
 
-
-
 frontend/node_modules/
 frontend/.next/
-
-docker/vector_stores/
+frontend/tsconfig.tsbuildinfo
+.vercel
+.env*.local

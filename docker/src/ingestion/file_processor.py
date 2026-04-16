@@ -6,6 +6,24 @@ from src.config import CONFIG, load_config
 
 # TODO: 只处理中文，英文，符号，数字，其他语言的内容直接忽略
 
+# 明确无语义价值、不应进入任何向量库的文件类型
+# SVG/CSS/HTML 等资产文件、图像、字体、媒体等
+NOISE_EXTENSIONS: frozenset[str] = frozenset({
+    # 样式 / 标记
+    "css", "scss", "sass", "less", "styl",
+    "html", "htm", "xhtml", "xml",
+    # 图像 / 矢量
+    "svg", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "avif", "ico",
+    # 字体
+    "woff", "woff2", "eot", "ttf", "otf",
+    # 媒体
+    "mp4", "mp3", "wav", "ogg", "webm", "avi", "mov",
+    # 文档二进制
+    "pdf", "docx", "xlsx", "pptx", "doc", "xls", "ppt",
+    # 其他构建产物 / 无内容
+    "map", "snap", "patch",
+})
+
 SPECIAL_CODE_FILENAMES = {
     "dockerfile",
     "makefile",
@@ -18,9 +36,33 @@ SPECIAL_CODE_FILENAMES = {
     "requirements.txt",
 }
 
-SPECIAL_TEXT_FILENAMES = {
+# 始终跳过的目录名（无论 config 怎么配置），用 set 做 O(1) 查找
+# 注意：目录名带前缀点（如 .git），不做任何 strip 处理
+ALWAYS_SKIP_DIRS: frozenset[str] = frozenset({
+    ".git",
+    ".github",
+    ".gitlab",
+    ".svn",
+    ".hg",
+    ".bzr",
+})
+
+# 始终跳过的文件名（无语义价值或版权/法律文本）
+ALWAYS_SKIP_FILENAMES: frozenset[str] = frozenset({
     "license",
     "license.txt",
+    "license.md",
+    "licence",
+    "licence.txt",
+    "licence.md",
+    "copying",
+    "copying.txt",
+    "notice",
+    "notice.txt",
+    "patents",
+})
+
+SPECIAL_TEXT_FILENAMES = {
     "changelog",
     "changelog.md",
     "readme",
@@ -75,7 +117,8 @@ def find_relevant_files(repo_path: str, config: dict) -> list[str]:
         dirs[:] = [
             d
             for d in dirs
-            if not _matches_any(
+            if d not in ALWAYS_SKIP_DIRS
+            and not _matches_any(
                 os.path.join(rel_root, d).replace("\\", "/").lstrip("./"),
                 excluded_dirs,
             )
@@ -85,6 +128,9 @@ def find_relevant_files(repo_path: str, config: dict) -> list[str]:
         for filename in files:
             file_path = os.path.join(root, filename)
             rel_file_path = os.path.relpath(file_path, repo_path).replace("\\", "/")
+
+            if filename.lower() in ALWAYS_SKIP_FILENAMES:
+                continue
 
             if _matches_any(rel_file_path, excluded_files) or _matches_any(
                 filename, excluded_files
@@ -128,8 +174,12 @@ def split_code_and_text_files(file_paths: list[str], config: dict) -> tuple[list
             code_files.append(path)
         elif suffix in text_exts or filename in SPECIAL_TEXT_FILENAMES:
             text_files.append(path)
+        elif suffix in NOISE_EXTENSIONS:
+            # 无语义价值的资产文件，直接丢弃
+            pass
         else:
-            # 默认将剩余的文本类文件归入文本向量库，避免遗漏核心描述信息
+            # 未知扩展名：作为纯文本尝试处理（如 Dockerfile 无后缀等）
+            # 已通过 is_binary() 保证不是二进制文件
             text_files.append(path)
 
     return code_files, text_files

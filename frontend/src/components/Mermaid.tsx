@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { AlertTriangle, RefreshCw, Code2 } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Code2, X, ZoomIn } from 'lucide-react';
 
 interface MermaidProps {
   chart: string;
@@ -83,7 +83,18 @@ export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [showSource, setShowSource] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [isZoomed, setIsZoomed] = useState(false);
   const renderAttemptRef = useRef(0);
+
+  // Close zoom on Escape key
+  useEffect(() => {
+    if (!isZoomed) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsZoomed(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isZoomed]);
 
   // Clean and validate chart code
   const { cleanedChart, isValid, validationError } = useMemo(() => {
@@ -348,10 +359,56 @@ export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
   }
 
   return (
-    <div 
-      ref={ref}
-      className="mermaid-container flex justify-center p-6 bg-stone-50 rounded-xl overflow-x-auto border border-stone-200"
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
+    <>
+      <div
+        ref={ref}
+        className="mermaid-container relative flex justify-center p-6 bg-stone-50 rounded-xl overflow-x-auto border border-stone-200 cursor-zoom-in group"
+        onClick={() => setIsZoomed(true)}
+        title="Click to enlarge"
+        dangerouslySetInnerHTML={{ __html: svg }}
+      />
+      <div className="flex justify-end mt-1">
+        <button
+          onClick={() => setIsZoomed(true)}
+          className="flex items-center gap-1 text-[11px] text-stone-400 hover:text-stone-600 transition-colors"
+          aria-label="Enlarge diagram"
+        >
+          <ZoomIn className="w-3 h-3" />
+          <span>Enlarge</span>
+        </button>
+      </div>
+      {isZoomed && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/75 flex items-center justify-center p-6 backdrop-blur-sm"
+          onClick={() => setIsZoomed(false)}
+        >
+          <div
+            className="relative max-w-[92vw] max-h-[88vh] overflow-auto bg-white rounded-2xl p-10 shadow-2xl [&_svg]:!max-width-none [&_svg]:!width-auto [&_svg]:!height-auto"
+            style={{ minWidth: '60vw' }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Reset SVG dimensions so it scales naturally in the modal */}
+            <style>{`
+              .mermaid-zoom-inner svg {
+                width: 100% !important;
+                height: auto !important;
+                max-width: 100% !important;
+              }
+            `}</style>
+            <div
+              className="mermaid-zoom-inner"
+              dangerouslySetInnerHTML={{ __html: svg }}
+            />
+          </div>
+          <button
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/20 text-white hover:bg-white/30 transition-colors"
+            onClick={() => setIsZoomed(false)}
+            aria-label="Close enlarged diagram"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+    </>
   );
 }

@@ -28,6 +28,7 @@ class AgentEvent:
     
     事件类型：
     - 'planning': 规划阶段 {status, question, intent, entities, plan_steps}
+    - 'subtask_parallel': 并行子任务 {status, subtasks_count, subtasks, elapsed_ms, results}
     - 'tool_call': 工具调用 {status, iteration, tool, operation, query, file_path, symbol_name, tools, elapsed_ms, results}
     - 'evaluation': 评估阶段 {status, iteration, is_sufficient, confidence, confidence_level, missing}
     - 'synthesis': 合成阶段 {status, answer_length, sources_count}
@@ -83,6 +84,14 @@ class AgentEvent:
                     formatted["file_path"] = args.get("file_path", "")
                 elif tool_name == "repo_map":
                     formatted["include_signatures"] = args.get("include_signatures", True)
+                elif tool_name == "lsp_resolve":
+                    formatted["symbol_name"] = args.get("symbol_name", "")
+                    formatted["operation"] = args.get("operation", "find_definition")
+                    if args.get("file_hint"):
+                        formatted["file_hint"] = args.get("file_hint")
+                elif tool_name == "web_search":
+                    formatted["query"] = args.get("query", "")[:100]
+                    formatted["search_type"] = args.get("search_type", "general")
                 elif tool_name == "grep_search":
                     formatted["pattern"] = args.get("pattern", "")[:100]
                     formatted["is_regex"] = args.get("is_regex", False)
@@ -326,6 +335,8 @@ class AgentRunner:
                 "file_read": "📄",
                 "repo_map": "🗺️",
                 "grep_search": "⚡",
+                "lsp_resolve": "🎯",
+                "web_search": "🌐",
             }
             
             entry: Dict[str, Any] = {
@@ -404,7 +415,24 @@ def _get_tool_description(tool: str, args: Dict[str, Any]) -> str:
         is_regex = args.get("is_regex", False)
         mode = "regex" if is_regex else "text"
         return f"Grep search ({mode}): \"{pattern}\""
-    
+
+    elif tool == "lsp_resolve":
+        symbol = args.get("symbol_name", "")
+        op = args.get("operation", "find_definition")
+        op_descriptions = {
+            "find_definition": f"Locate definition of `{symbol}`",
+            "find_references": f"Find all references to `{symbol}`",
+            "hover": f"Get signature of `{symbol}`",
+        }
+        return op_descriptions.get(op, f"LSP resolve: {op}({symbol})")
+
+    elif tool == "web_search":
+        query = args.get("query", "")
+        if len(query) > 60:
+            query = query[:60] + "..."
+        search_type = args.get("search_type", "general")
+        return f"Web search ({search_type}): \"{query}\""
+
     else:
         return f"Run tool {tool}"
 

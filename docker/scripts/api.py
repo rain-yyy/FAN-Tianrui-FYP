@@ -13,26 +13,44 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from dotenv import load_dotenv
-load_dotenv("../.env")
+load_dotenv("../../.env")
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
+import time
+from pydantic import BaseModel, Field, model_validator
 
-from src.storage.supabase_client import SupabaseClient, SupabaseStorageError
+from src.storage.supabase_client import (
+    SupabaseClient,
+    SupabaseStorageError,
+    WIKI_GENERATION_CACHE_MAX_AGE_DAYS,
+)
+from src.utils.github_repo_metadata import (
+    coerce_stargazers_int,
+    github_metadata_needs_refresh,
+    parse_owner_repo_from_url,
+    refresh_github_metadata_batch,
+)
 from src.agent import run_agent, AgentRunner
 from src.config import CONFIG
 from src.clients.ai_client_factory import get_ai_client, get_model_config
 
 # 初始化日志
 from src.utils.logger import setup_logger
-from src.utils.repo_utils import get_repo_name
+from src.utils.repo_utils import get_repo_disk_directory_name
 logger = setup_logger("api")
 
 # 导入业务逻辑和管理模块
 from src.core.wiki_pipeline import execute_generation_task, VECTOR_STORE_ROOT, REPO_STORE_ROOT
 from src.core.chat import answer_question, answer_question_stream
+from src.ingestion.embedding_utils import (
+    OPENROUTER_API_BASE,
+    OPENROUTER_EMBEDDING_MODEL,
+    OpenRouterEmbeddings,
+    get_openrouter_embeddings,
+)
 
 
 def _normalize_vector_store_path(raw_path: Optional[str], repo_url: str) -> str:
@@ -46,9 +64,9 @@ def _normalize_vector_store_path(raw_path: Optional[str], repo_url: str) -> str:
     # 旧版本地 Docker 可能存储了 /app/vector_stores/xxx，映射到当前 VECTOR_STORE_ROOT
     if path_str.startswith("/app/vector_stores/"):
         suffix = path_str[len("/app/vector_stores/"):].lstrip("/")
-        path_str = str(VECTOR_STORE_ROOT / suffix) if suffix else str(VECTOR_STORE_ROOT / get_repo_name(repo_url))
+        path_str = str(VECTOR_STORE_ROOT / suffix) if suffix else str(VECTOR_STORE_ROOT / get_repo_disk_directory_name(repo_url))
     elif path_str == "/app/vector_stores":
-        path_str = str(VECTOR_STORE_ROOT / get_repo_name(repo_url))
+        path_str = str(VECTOR_STORE_ROOT / get_repo_disk_directory_name(repo_url))
     return path_str
 
 
@@ -91,6 +109,37 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 
+_EMBED_DEBUG_MAX_STRINGS = 200
+_EMBED_DEBUG_MAX_CHARS_PER_STRING = 120_000
+
+
+class EmbeddingDebugRequest(BaseModel):
+    """
+    测试 OpenRouter 嵌入：可贴一段 text，或提交多段 texts（如从剪贴板批量粘贴拆分后的数组）。
+    与 wiki / vector_store 使用相同的 get_openrouter_embeddings() 与批次逻辑。
+    """
+
+    text: Optional[str] = Field(default=None, description="单段文本")
+    texts: Optional[List[str]] = Field(default=None, description="多段文本列表")
+    diagnose_raw: bool = Field(
+        default=False,
+        description="True：仅对前 100 条调用 embeddings.create，并返回 SDK model_dump（便于对照 fly 上 curl）",
+    )
+
+    @model_validator(mode="after")
+    def _require_some_text(self) -> "EmbeddingDebugRequest":
+        has_list = self.texts is not None and len(self.texts) > 0
+        has_single = self.text is not None and str(self.text).strip() != ""
+        if not has_list and not has_single:
+            raise ValueError("请提供非空的 text 或 texts")
+        return self
+
+    def normalized_texts(self) -> List[str]:
+        if self.texts is not None and len(self.texts) > 0:
+            return list(self.texts)
+        return [self.text or ""]
+
+
 def _to_jsonable_builtin(value: Any) -> Any:
     """
     将 numpy/自定义对象中的标量递归转换为 Python 原生可 JSON 序列化类型。
@@ -113,6 +162,9 @@ def _to_jsonable_builtin(value: Any) -> Any:
 
 
 # ============ API Endpoints ============
+
+# 单次请求内同步刷新条数上限（其余交给 BackgroundTasks），避免仅依赖后台导致实例收起前未写入
+GITHUB_METADATA_SYNC_REFRESH_CAP = 8
 
 # ============ Global State ============
 # 存储正在运行的异步任务，以便可以被强制终止
@@ -197,12 +249,15 @@ async def generate_wiki(request: Request):
             raise HTTPException(status_code=400, detail="Missing url_link or user_id")
 
         supabase_client = SupabaseClient()
-        cached_result = supabase_client.build_cached_task_result(url_link)
+        cached_result = supabase_client.build_cached_task_result(
+            url_link, max_cache_age_days=WIKI_GENERATION_CACHE_MAX_AGE_DAYS
+        )
         logger.info(
-            "缓存检查: input_url=%s normalized_url=%s hit=%s",
+            "缓存检查: input_url=%s normalized_url=%s hit=%s (TTL<= %s 天)",
             url_link,
             supabase_client._normalize_repo_url(url_link),
             bool(cached_result),
+            WIKI_GENERATION_CACHE_MAX_AGE_DAYS,
         )
 
         # 生成唯一任务 ID
@@ -278,6 +333,95 @@ async def list_tasks_api(request: Request):
     supabase_client = SupabaseClient()
     all_tasks = supabase_client.get_all_tasks(user_id)
     return {"tasks": all_tasks}
+
+
+@app.post("/dashboard/repos")
+async def list_dashboard_repositories_api(request: Request):
+    """
+    工作台仓库卡片：以 `repositories` 表中已索引的仓库为准（含 R2 结构与内容 URL），
+    仅展示当前用户曾成功生成/命中缓存的 repo；返回 task_id 供前端进入 /wiki/:taskId。
+    """
+    data = await request.json()
+    user_id = data.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Missing user_id")
+
+    supabase_client = SupabaseClient()
+    try:
+        repos = supabase_client.get_user_dashboard_repositories(user_id)
+    except Exception as e:
+        logger.exception("列出工作台仓库失败")
+        raise HTTPException(status_code=503, detail=f"Failed to list dashboard repositories: {e}") from e
+
+    return {"repos": repos}
+
+
+@app.post("/repos/github-metadata")
+async def repos_github_metadata_api(request: Request, background_tasks: BackgroundTasks):
+    """
+    返回已缓存的 stars / 展示用简介（GitHub 简介优先，否则 LLM description）。
+    对需要更新的仓库在后台顺序刷新，且每条记录遵守 24h TTL。
+    """
+    data = await request.json()
+    repo_urls = data.get("repo_urls")
+    if not isinstance(repo_urls, list):
+        raise HTTPException(status_code=400, detail="repo_urls must be a list")
+
+    supabase_client = SupabaseClient()
+    if not supabase_client.client:
+        raise HTTPException(status_code=503, detail="Database not configured")
+
+    ordered_keys: List[str] = []
+    seen_norm: set[str] = set()
+
+    for raw in repo_urls:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        key = supabase_client._normalize_repo_url(raw)
+        if not key or key in seen_norm:
+            continue
+        seen_norm.add(key)
+        ordered_keys.append(key)
+
+    rows_map: Dict[str, Any] = supabase_client.get_repositories_for_urls(ordered_keys)
+
+    to_refresh: List[str] = []
+    for key in ordered_keys:
+        row = rows_map.get(key)
+        if github_metadata_needs_refresh(row) and parse_owner_repo_from_url(key):
+            to_refresh.append(key)
+
+    sync_part = to_refresh[:GITHUB_METADATA_SYNC_REFRESH_CAP]
+    async_part = to_refresh[GITHUB_METADATA_SYNC_REFRESH_CAP:]
+    if sync_part:
+        refresh_github_metadata_batch(supabase_client, sync_part)
+        rows_map.update(supabase_client.get_repositories_for_urls(sync_part))
+    if async_part:
+        background_tasks.add_task(refresh_github_metadata_batch, SupabaseClient(), async_part)
+
+    metadata: Dict[str, Any] = {}
+    for key in ordered_keys:
+        row = rows_map.get(key)
+        gdesc = (row or {}).get("github_short_description") if row else None
+        llm_desc = (row or {}).get("description") if row else None
+        if isinstance(gdesc, str) and gdesc.strip():
+            display_desc = gdesc.strip()
+        elif isinstance(llm_desc, str) and llm_desc.strip():
+            display_desc = llm_desc.strip()
+        else:
+            display_desc = None
+
+        stars_out = coerce_stargazers_int((row or {}).get("stargazers_count") if row else None)
+
+        stale = github_metadata_needs_refresh(row)
+        metadata[key] = {
+            "repo_url": key,
+            "stars": stars_out,
+            "description": display_desc,
+            "stale": stale,
+        }
+
+    return {"metadata": metadata}
 
 
 @app.post("/task/{task_id}/cancel")
@@ -360,6 +504,98 @@ async def health_check():
     return {"status": "ok"}
 
 
+@app.post("/debug/embeddings")
+async def debug_embeddings_api(body: EmbeddingDebugRequest):
+    """
+    诊断 OpenRouter 嵌入：与生产共用 OpenRouterEmbeddings（含 encoding_format=float）。
+    若生产 RAG 失败而此处成功，重点对比输入规模（token/条数）与环境变量 OPENROUTER_API_KEY。
+    """
+    texts = body.normalized_texts()
+    if len(texts) > _EMBED_DEBUG_MAX_STRINGS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"最多 {_EMBED_DEBUG_MAX_STRINGS} 条字符串，当前 {len(texts)}",
+        )
+    for idx, chunk in enumerate(texts):
+        if len(chunk) > _EMBED_DEBUG_MAX_CHARS_PER_STRING:
+            raise HTTPException(
+                status_code=400,
+                detail=f"texts[{idx}] 长度超过 {_EMBED_DEBUG_MAX_CHARS_PER_STRING}",
+            )
+
+    loop = asyncio.get_event_loop()
+
+    def _run_raw_diagnose(emb: OpenRouterEmbeddings) -> dict:
+        batch = texts[:100]
+        response = emb._embeddings_create(batch, "debug/diagnose_raw")
+        try:
+            dumped = response.model_dump()
+        except Exception:
+            dumped = {"_repr": repr(response)}
+        return _to_jsonable_builtin(dumped)
+
+    def _run_full_embed() -> List[List[float]]:
+        emb = get_openrouter_embeddings()
+        return emb.embed_documents(texts)
+
+    t0 = time.perf_counter()
+    try:
+        if body.diagnose_raw:
+            emb = get_openrouter_embeddings()
+            if not isinstance(emb, OpenRouterEmbeddings):
+                raise HTTPException(
+                    status_code=500,
+                    detail="内部错误：嵌入实现不是 OpenRouterEmbeddings",
+                )
+            raw = await loop.run_in_executor(None, lambda: _run_raw_diagnose(emb))
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            data_list = raw.get("data") if isinstance(raw, dict) else None
+            has_vectors = isinstance(data_list, list) and len(data_list) > 0
+            err = raw.get("error") if isinstance(raw, dict) else None
+            return {
+                "success": bool(has_vectors),
+                "mode": "diagnose_raw",
+                "elapsed_ms": elapsed_ms,
+                "model": OPENROUTER_EMBEDDING_MODEL,
+                "base_url": OPENROUTER_API_BASE,
+                "batch_submitted": min(len(texts), 100),
+                "total_texts": len(texts),
+                "openrouter_response": raw,
+                "error": err,
+            }
+
+        vectors = await loop.run_in_executor(None, _run_full_embed)
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        if not vectors:
+            return {
+                "success": True,
+                "mode": "full",
+                "elapsed_ms": elapsed_ms,
+                "embeddings_count": 0,
+                "dimensions": None,
+                "first_vector_preview": None,
+                "model": OPENROUTER_EMBEDDING_MODEL,
+                "base_url": OPENROUTER_API_BASE,
+            }
+        return {
+            "success": True,
+            "mode": "full",
+            "elapsed_ms": elapsed_ms,
+            "embeddings_count": len(vectors),
+            "dimensions": len(vectors[0]),
+            "first_vector_preview": vectors[0][:8],
+            "model": OPENROUTER_EMBEDDING_MODEL,
+            "base_url": OPENROUTER_API_BASE,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("POST /debug/embeddings 失败")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
 @app.get("/profile")
 async def get_profile_api(user_id: str):
     """
@@ -405,30 +641,13 @@ async def get_file_content_api(request: Request):
     if not repo_url or not file_path:
         raise HTTPException(status_code=400, detail="Missing repo_url or file_path")
 
-    supabase_client = SupabaseClient()
-    repo_info = supabase_client.get_repo_information(repo_url)
-    if not repo_info:
-        raise HTTPException(status_code=404, detail="Repository not found")
-
-    folder_raw = repo_info.get("local_path")
-    if folder_raw is None or not str(folder_raw).strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Repository local_path is missing; expected folder name under REPO_STORE_PATH",
-        )
-    folder = str(folder_raw).strip()
-    folder_path = Path(folder)
-    if folder_path.is_absolute() or len(folder_path.parts) != 1 or folder_path.name in (".", ".."):
-        raise HTTPException(status_code=400, detail="local_path must be a single directory name")
-
-    repo_root = REPO_STORE_ROOT.expanduser() / folder_path.name
-    target_path = _resolve_path_under_root(repo_root, file_path)
-    if target_path is None or not target_path.is_file():
-        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-
-    content = target_path.read_text(encoding="utf-8", errors="replace")
+    repo_name = repo_url.split("/")[-1]
+    file_path = "data/repos/" + repo_name + "/" + file_path
+    print(Path(__file__).resolve().parent.parent.parent)
+    file_path = Path(__file__).resolve().parent.parent.parent / file_path
+    print(file_path)
+    content = Path(file_path).read_text(encoding="utf-8", errors="replace")
     return {"content": content}
-    
 
 @app.post("/chat")
 async def chat_with_repo_api(request: Request):

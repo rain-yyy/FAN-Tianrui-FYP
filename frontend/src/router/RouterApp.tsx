@@ -17,6 +17,9 @@ import RouteErrorPage from '@/views/RouteErrorPage';
 import NotFoundPage from '@/views/NotFoundPage';
 
 const LoginRoute = lazy(() => import(/* webpackChunkName: "route-login" */ '@/router/routes/LoginRoute'));
+const AuthCallbackRoute = lazy(
+  () => import(/* webpackChunkName: "route-auth-callback" */ '@/router/routes/AuthCallbackRoute')
+);
 const DashboardRoute = lazy(
   () => import(/* webpackChunkName: "route-dashboard" */ '@/router/routes/DashboardRoute')
 );
@@ -74,6 +77,7 @@ export default function RouterApp() {
                   element: <SuspenseOutlet />,
                   children: [
                     { path: 'login', element: <LoginRoute /> },
+                    { path: 'auth/callback', element: <AuthCallbackRoute /> },
                   ],
                 },
                 {

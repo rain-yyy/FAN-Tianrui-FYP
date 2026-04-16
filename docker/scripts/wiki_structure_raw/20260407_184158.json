@@ -1,0 +1,196 @@
+```json
+{
+  "title": "PDFMathTranslate Documentation",
+  "description": "Comprehensive documentation for PDFMathTranslate, a tool for scientific PDF document translation preserving layouts.",
+  "lastIndexed": "2026-04-07",
+  "toc": [
+    {
+      "id": "project-overview",
+      "title": "Project Overview",
+      "files": [
+        "README.md",
+        "app.json",
+        "pdf2zh/__init__.py"
+      ],
+      "children": [
+        {
+          "id": "what-it-does",
+          "title": "What it Does",
+          "files": [
+            "README.md"
+          ]
+        },
+        {
+          "id": "installation-and-usage",
+          "title": "Installation and Usage",
+          "files": [
+            "README.md",
+            "docs/README_GUI.md",
+            "Dockerfile",
+            "docker-compose.yml",
+            "script/Dockerfile.China",
+            "script/Dockerfile.Demo"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "core-translation-pipeline",
+      "title": "Core Translation Pipeline",
+      "files": [
+        "pdf2zh/pdf2zh.py",
+        "pdf2zh/high_level.py",
+        "pdf2zh/converter.py",
+        "pdf2zh/pdfinterp.py",
+        "pdf2zh/doclayout.py",
+        "test/test_converter.py",
+        "test/test_doclayout.py"
+      ],
+      "children": [
+        {
+          "id": "document-parsing-and-layout",
+          "title": "Document Parsing and Layout",
+          "files": [
+            "pdf2zh/pdfinterp.py",
+            "pdf2zh/doclayout.py",
+            "pdf2zh/converter.py",
+            "test/test_doclayout.py"
+          ]
+        },
+        {
+          "id": "translation-process",
+          "title": "Translation Process",
+          "files": [
+            "pdf2zh/converter.py",
+            "pdf2zh/high_level.py",
+            "pdf2zh/pdf2zh.py",
+            "test/test_converter.py"
+          ]
+        },
+        {
+          "id": "translation-services",
+          "title": "Translation Services",
+          "files": [
+            "pdf2zh/translator.py",
+            "test/test_translator.py",
+            "docs/ADVANCED.md"
+          ]
+        },
+        {
+          "id": "translation-cache",
+          "title": "Translation Cache",
+          "files": [
+            "pdf2zh/cache.py",
+            "test/test_cache.py",
+            "pdf2zh/translator.py"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "kernel-architecture",
+      "title": "Kernel Architecture",
+      "files": [
+        "pdf2zh/kernel/protocol.py",
+        "pdf2zh/kernel/registry.py",
+        "pdf2zh/kernel/legacy.py",
+        "pdf2zh/kernel/precise.py",
+        "pdf2zh/kernel/v2_bridge.py",
+        "pdf2zh/kernel/v2_worker.py",
+        "test/test_kernel.py"
+      ],
+      "children": [
+        {
+          "id": "kernel-protocol-and-registry",
+          "title": "Kernel Protocol and Registry",
+          "files": [
+            "pdf2zh/kernel/protocol.py",
+            "pdf2zh/kernel/registry.py",
+            "test/test_kernel.py"
+          ]
+        },
+        {
+          "id": "legacy-kernel-v1",
+          "title": "Legacy Kernel (v1)",
+          "files": [
+            "pdf2zh/kernel/legacy.py",
+            "test/test_kernel.py"
+          ]
+        },
+        {
+          "id": "precise-kernel-v2",
+          "title": "Precise Kernel (v2)",
+          "files": [
+            "pdf2zh/kernel/precise.py",
+            "pdf2zh/kernel/v2_bridge.py",
+            "pdf2zh/kernel/v2_worker.py",
+            "test/test_kernel.py"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "user-interfaces-and-apis",
+      "title": "User Interfaces and APIs",
+      "files": [
+        "pdf2zh/gui.py",
+        "pdf2zh/pdf2zh.py",
+        "pdf2zh/mcp_server.py",
+        "pdf2zh/backend.py",
+        "docs/APIS.md",
+        "test/test_cli.py"
+      ],
+      "children": [
+        {
+          "id": "command-line-interface",
+          "title": "Command Line Interface",
+          "files": [
+            "pdf2zh/pdf2zh.py",
+            "test/test_cli.py",
+            "README.md",
+            "docs/ADVANCED.md"
+          ]
+        },
+        {
+          "id": "graphical-user-interface",
+          "title": "Graphical User Interface",
+          "files": [
+            "pdf2zh/gui.py",
+            "docs/README_GUI.md",
+            "README.md"
+          ]
+        },
+        {
+          "id": "programmatic-apis",
+          "title": "Programmatic APIs",
+          "files": [
+            "docs/APIS.md",
+            "pdf2zh/backend.py",
+            "pdf2zh/mcp_server.py",
+            "pdf2zh/high_level.py"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "configuration-and-settings",
+      "title": "Configuration and Settings",
+      "files": [
+        "pdf2zh/config.py",
+        "docs/ADVANCED.md"
+      ]
+    },
+    {
+      "id": "development-and-contributing",
+      "title": "Development and Contributing",
+      "files": [
+        "README.md",
+        ".pre-commit-config.yaml",
+        "docs/CODE_OF_CONDUCT.md",
+        "script/build-win64.ps1",
+        "script/setup.bat"
+      ]
+    }
+  ]
+}
+```

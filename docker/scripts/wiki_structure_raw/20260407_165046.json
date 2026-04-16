@@ -1,0 +1,175 @@
+```json
+{
+  "title": "JSON Crack Documentation",
+  "description": "Comprehensive documentation for JSON Crack, an open-source JSON editor and visualizer, covering its web application, VS Code extension, and React component library.",
+  "lastIndexed": "2026-04-07",
+  "toc": [
+    {
+      "id": "project-overview",
+      "title": "Project Overview",
+      "files": [
+        "README.md",
+        "apps/www/src/layout/Landing/HeroSection.tsx",
+        "apps/www/src/layout/Landing/Features.tsx",
+        "apps/www/src/layout/Landing/Section1.tsx",
+        "apps/www/src/layout/Landing/Section2.tsx",
+        "apps/www/src/layout/Landing/Section3.tsx",
+        "apps/www/src/layout/Landing/FAQ.tsx",
+        "apps/www/src/pages/index.tsx"
+      ],
+      "children": [
+        {
+          "id": "key-features",
+          "title": "Key Features",
+          "files": [
+            "README.md",
+            "apps/www/src/layout/Landing/Features.tsx"
+          ]
+        },
+        {
+          "id": "integrations",
+          "title": "Integrations",
+          "files": [
+            "README.md",
+            "apps/vscode/README.md",
+            "packages/jsoncrack-react/README.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "web-application",
+      "title": "Web Application (jsoncrack.com)",
+      "files": [
+        "apps/www/src/pages/_app.tsx",
+        "apps/www/src/pages/editor.tsx",
+        "apps/www/src/layout/PageLayout/index.tsx",
+        "apps/www/src/layout/PageLayout/Navbar.tsx",
+        "apps/www/src/layout/PageLayout/Footer.tsx",
+        "apps/www/src/lib/utils/mantineColorScheme.ts",
+        "apps/www/src/constants/globalStyle.ts",
+        "apps/www/src/constants/theme.ts"
+      ],
+      "children": [
+        {
+          "id": "editor-interface",
+          "title": "Editor Interface",
+          "files": [
+            "apps/www/src/features/editor/LiveEditor.tsx",
+            "apps/www/src/features/editor/TextEditor.tsx",
+            "apps/www/src/features/editor/BottomBar.tsx",
+            "apps/www/src/features/editor/FullscreenDropzone.tsx",
+            "apps/www/src/features/editor/ExternalMode.tsx",
+            "apps/www/src/features/editor/Toolbar/index.tsx",
+            "apps/www/src/features/editor/Toolbar/FileMenu.tsx",
+            "apps/www/src/features/editor/Toolbar/ThemeToggle.tsx",
+            "apps/www/src/features/editor/Toolbar/ToolsMenu.tsx",
+            "apps/www/src/features/editor/Toolbar/ViewMenu.tsx",
+            "apps/www/src/enums/viewMode.enum.ts"
+          ]
+        },
+        {
+          "id": "json-visualization",
+          "title": "JSON Visualization",
+          "files": [
+            "apps/www/src/features/editor/views/GraphView/index.tsx",
+            "apps/www/src/features/editor/views/GraphView/lib/jsonParser.ts",
+            "apps/www/src/features/editor/views/GraphView/CustomNode/index.tsx",
+            "apps/www/src/features/editor/views/GraphView/CustomNode/ObjectNode.tsx",
+            "apps/www/src/features/editor/views/GraphView/CustomNode/TextNode.tsx",
+            "apps/www/src/features/editor/views/GraphView/CustomNode/TextRenderer.tsx",
+            "apps/www/src/features/editor/views/GraphView/CustomEdge/index.tsx",
+            "apps/www/src/features/editor/views/GraphView/lib/utils/calculateNodeSize.ts",
+            "apps/www/src/features/editor/views/GraphView/lib/utils/getChildrenEdges.ts",
+            "apps/www/src/features/editor/views/GraphView/lib/utils/getOutgoers.ts",
+            "apps/www/src/features/editor/views/GraphView/stores/useGraph.ts",
+            "apps/www/src/features/editor/views/GraphView/OptionsMenu.tsx",
+            "apps/www/src/features/editor/views/GraphView/ZoomControl.tsx",
+            "apps/www/src/features/editor/views/TreeView/index.tsx",
+            "apps/www/src/features/editor/views/TreeView/Label.tsx",
+            "apps/www/src/features/editor/views/TreeView/Value.tsx"
+          ]
+        },
+        {
+          "id": "data-processing-and-tools",
+          "title": "Data Processing and Tools",
+          "files": [
+            "apps/www/src/features/modals/ModalController.tsx",
+            "apps/www/src/features/modals/ImportModal/index.tsx",
+            "apps/www/src/features/modals/DownloadModal/index.tsx",
+            "apps/www/src/features/modals/JQModal/index.tsx",
+            "apps/www/src/features/modals/JPathModal/index.tsx",
+            "apps/www/src/features/modals/SchemaModal/index.tsx",
+            "apps/www/src/features/modals/TypeModal/index.tsx",
+            "apps/www/src/lib/utils/json2go.js",
+            "apps/www/src/lib/utils/generateType.ts",
+            "apps/www/src/lib/utils/jsonAdapter.ts",
+            "apps/www/src/lib/utils/search.ts",
+            "apps/www/src/hooks/useJsonQuery.ts",
+            "apps/www/src/enums/file.enum.ts"
+          ]
+        },
+        {
+          "id": "state-management",
+          "title": "State Management",
+          "files": [
+            "apps/www/src/store/useJson.ts",
+            "apps/www/src/store/useFile.ts",
+            "apps/www/src/store/useConfig.ts",
+            "apps/www/src/store/useModal.ts",
+            "apps/www/src/features/modals/modalTypes.ts"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vscode-extension",
+      "title": "VS Code Extension",
+      "files": [
+        "apps/vscode/ext-src/extension.ts",
+        "apps/vscode/ext-src/webview.ts",
+        "apps/vscode/src/App.tsx",
+        "apps/vscode/src/index.tsx",
+        "apps/vscode/src/components/NodeModal.tsx",
+        "apps/vscode/package.json",
+        "apps/vscode/vite.config.ts"
+      ]
+    },
+    {
+      "id": "jsoncrack-react-package",
+      "title": "jsoncrack-react Package",
+      "files": [
+        "packages/jsoncrack-react/src/JSONCrackComponent.tsx",
+        "packages/jsoncrack-react/src/parser.ts",
+        "packages/jsoncrack-react/src/types.ts",
+        "packages/jsoncrack-react/src/index.ts",
+        "packages/jsoncrack-react/src/components/CustomNode.tsx",
+        "packages/jsoncrack-react/src/components/ObjectNode.tsx",
+        "packages/jsoncrack-react/src/components/TextNode.tsx",
+        "packages/jsoncrack-react/src/components/TextRenderer.tsx",
+        "packages/jsoncrack-react/src/components/CustomEdge.tsx",
+        "packages/jsoncrack-react/src/components/Controls.tsx",
+        "packages/jsoncrack-react/src/utils/calculateNodeSize.ts",
+        "packages/jsoncrack-react/src/theme.ts",
+        "packages/jsoncrack-react/package.json"
+      ]
+    },
+    {
+      "id": "development-and-deployment",
+      "title": "Development and Deployment",
+      "files": [
+        "CONTRIBUTING.md",
+        "package.json",
+        "pnpm-workspace.yaml",
+        "turbo.json",
+        "apps/www/Dockerfile",
+        "apps/www/docker-compose.yml",
+        "apps/www/nginx.conf",
+        "apps/www/.env.development",
+        "apps/www/next-sitemap.config.js",
+        "apps/www/next-env.d.ts"
+      ]
+    }
+  ]
+}
+```

@@ -1,0 +1,127 @@
+{
+  "communities": {
+    "0": [
+      "app/rust/src/api/stream.rs",
+      "app/rust/src/api/webrtc.rs",
+      "app/rust/src/api/logging.rs",
+      "app/rust/src/api/mod.rs",
+      "app/rust/src/api/http.rs",
+      "app/rust/src/api/model.rs",
+      "app/rust/src/api/crypto.rs",
+      "app/assets/web/main.js",
+      "app/assets/web/main.js:firstRequestFiles",
+      "app/assets/web/main.js:pinRequestFiles",
+      "app/assets/web/main.js:makeRequest",
+      "app/assets/web/main.js:fetchI18n",
+      "app/assets/web/main.js:init",
+      "app/assets/web/main.js:handleSuccess",
+      "app/assets/web/main.js:handleFilesDisplay",
+      "app/assets/web/main.js:escapeHtml",
+      "app/assets/web/main.js:formatBytes",
+      "app/assets/web/main.js:getKeys",
+      "app/rust_builder/ios/Classes/dummy_file.c",
+      "app/rust_builder/macos/Classes/dummy_file.c"
+    ],
+    "1": [
+      "app/windows/runner/flutter_window.cpp",
+      "app/windows/runner/utils.cpp",
+      "app/windows/runner/win32_window.cpp",
+      "app/windows/runner/winrt_ext.cpp",
+      "app/windows/runner/main.cpp"
+    ],
+    "2": [
+      "core/src/http/server/client_cert_verifier.rs",
+      "core/src/http/server/response.rs",
+      "core/src/http/server/error.rs",
+      "core/src/http/server/mod.rs",
+      "core/src/http/server/collect_to_json.rs"
+    ],
+    "3": [
+      "server/src/config/error.rs",
+      "server/src/config/mod.rs",
+      "server/src/config/state.rs",
+      "server/src/config/scheduler.rs",
+      "server/src/config/init.rs",
+      "server/src/main.rs"
+    ],
+    "4": [
+      "core/src/crypto/token.rs",
+      "core/src/crypto/nonce.rs",
+      "core/src/crypto/mod.rs",
+      "core/src/crypto/hash.rs",
+      "core/src/crypto/cert.rs"
+    ],
+    "5": [
+      "core/src/http/client/v3.rs",
+      "core/src/http/client/mod.rs",
+      "core/src/http/client/v2.rs",
+      "core/src/http/client/url.rs"
+    ],
+    "6": [
+      "core/src/http/mod.rs",
+      "core/src/http/state.rs",
+      "core/src/http/dto.rs",
+      "core/src/http/dto_v2.rs"
+    ],
+    "7": [
+      "core/src/http/server/controller/web.rs",
+      "core/src/http/server/controller/v3.rs",
+      "core/src/http/server/controller/mod.rs",
+      "core/src/http/server/controller/v2.rs"
+    ],
+    "8": [
+      "core/src/model/discovery.rs",
+      "core/src/model/mod.rs",
+      "core/src/model/transfer.rs"
+    ],
+    "9": [
+      "core/src/util/base64.rs",
+      "core/src/util/time.rs",
+      "core/src/util/mod.rs"
+    ],
+    "10": [
+      "core/src/webrtc/webrtc.rs",
+      "core/src/webrtc/signaling.rs",
+      "core/src/webrtc/mod.rs"
+    ],
+    "11": [
+      "server/src/util/base64.rs",
+      "server/src/util/mod.rs",
+      "server/src/util/ip.rs"
+    ],
+    "12": [
+      "app/rust/src/lib.rs",
+      "app/rust/src/frb_generated.rs"
+    ],
+    "13": [
+      "app/rust/src/util/mod.rs",
+      "app/rust/src/util/bytes.rs"
+    ],
+    "14": [
+      "core/src/lib.rs",
+      "core/src/main.rs"
+    ],
+    "15": [
+      "server/src/controller/ws_controller.rs",
+      "server/src/controller/mod.rs"
+    ]
+  },
+  "summaries": {
+    "0": "This community provides the core client-side functionality for a web application, likely a file-sharing or streaming service. The Rust `api` module exposes various backend services (streaming, WebRTC, HTTP, crypto, logging) to the frontend. The `main.js` file then leverages these APIs to manage user interactions, handle file requests (initial and pinned), display data, and manage internationalization, forming the primary user interface and interaction layer. The `dummy_file.c` entries suggest a mobile/desktop wrapper for the Rust core.",
+    "1": "This community of files is responsible for the core implementation of the Windows desktop application for a Flutter project. It handles the creation and management of the main application window (`flutter_window.cpp`, `win32_window.cpp`), utility functions specific to the Windows environment (`utils.cpp`), and the application's entry point (`main.cpp`). Essentially, it provides the native Windows shell that hosts and runs the Flutter UI, enabling the cross-platform application to function on the Windows operating system.",
+    "2": "This community, `core/src/http/server`, is responsible for the core HTTP server functionality within the project. It handles incoming HTTP requests, processes client certificates for authentication (`client_cert_verifier`), constructs and sends HTTP responses (`response`), manages server-side errors (`error`), and provides utilities like collecting request bodies into JSON (`collect_to_json`). Essentially, it defines how the application receives, processes, and responds to web traffic.",
+    "3": "This community of code is responsible for the core server configuration and initialization. It defines the application's overall state, handles error management, sets up scheduling, and manages the initial bootstrapping process. Essentially, it's the foundational layer that prepares and runs the main server application, integrating with other business logic communities by providing a stable and configured environment.",
+    "4": "This community, `core/src/crypto`, is responsible for providing foundational cryptographic primitives and utilities within the project. It handles essential security aspects such as token generation and validation, nonce management for preventing replay attacks, secure hashing for data integrity, and certificate handling for identity verification and secure communication. Its core function is to establish and maintain a secure environment for all other project components, ensuring data authenticity, confidentiality, and integrity.",
+    "5": "This community of code is responsible for managing and executing HTTP requests to external services. It provides different versions of an HTTP client (`v2`, `v3`) likely to support evolving API standards or different underlying implementations, along with utilities for URL manipulation. This component is crucial for any part of the application that needs to communicate with other systems or fetch data from the internet, acting as the primary outbound communication layer.",
+    "6": "This community defines the core HTTP API for the application. It handles request/response serialization (DTOs, including versioned ones), manages shared application state accessible to HTTP handlers, and likely sets up the overall HTTP server infrastructure. It acts as the primary interface for external systems to interact with the application's business logic.",
+    "7": "This community, `core/src/http/server/controller`, is responsible for defining and implementing the various HTTP API endpoints and web routes exposed by the application's core server. It acts as the gateway for external client interactions, handling incoming requests and orchestrating the business logic required to generate appropriate responses. The presence of `v2.rs` and `v3.rs` suggests a versioned API, indicating a strategy for managing API evolution and backward compatibility. `web.rs` likely handles user-facing web routes or a separate web interface.",
+    "8": "This community defines the core data structures and models used throughout the application. `model/mod.rs` likely orchestrates these definitions, while `discovery.rs` and `transfer.rs` specifically define data models related to service discovery (e.g., how services find each other) and data transfer operations (e.g., payloads for moving data between services). It forms the foundational data layer upon which all business logic and communication within the project are built.",
+    "9": "This community, `core/src/util`, provides foundational, general-purpose utility functions essential for various parts of the project. Specifically, `base64.rs` handles encoding/decoding binary data, and `time.rs` likely manages time-related operations (e.g., formatting, conversions, timestamp generation). These utilities are building blocks, ensuring consistency and reusability for common tasks across the entire codebase, preventing redundant implementations and promoting maintainability.",
+    "10": "This community, `webrtc`, provides the core WebRTC functionality for the application. It handles establishing peer-to-peer connections, managing media streams, and facilitating real-time communication. The `signaling.rs` module specifically deals with the signaling protocol necessary for WebRTC session negotiation, while the main `webrtc.rs` orchestrates the overall WebRTC lifecycle. It's crucial for any features requiring live audio, video, or data exchange between users.",
+    "11": "This community, `server/src/util`, provides foundational utility functions for the server. It encapsulates common, reusable helper logic that doesn't belong to a specific business domain but is broadly useful across the server application.  Specifically, it handles tasks like Base64 encoding/decoding and IP address manipulation, ensuring consistent and efficient handling of these common operations throughout the project.",
+    "12": "This community defines the core business logic of the application, implemented in Rust. `lib.rs` contains the main Rust application code, while `frb_generated.rs` likely holds FFI (Foreign Function Interface) bindings generated by a tool like Flutter Rust Bridge. This setup allows other parts of the project (e.g., a Flutter UI) to seamlessly interact with and leverage the high-performance, safe Rust backend.",
+    "13": "This community, centered around `app/rust/src/util/`, provides foundational utility functions for the Rust codebase. Specifically, `bytes.rs` likely offers common byte manipulation or conversion routines. It underpins various services by providing reusable, low-level helpers, promoting code efficiency and consistency across the project.",
+    "14": "This community represents the core application logic and entry points. `lib.rs` likely contains reusable modules, data structures, and business logic that can be consumed by other parts of the project or external consumers. `main.rs` is the primary executable entry point, responsible for orchestrating the application's startup, configuration, and overall flow, utilizing the components defined in `lib.rs`. Together, they form the project's fundamental operational unit.",
+    "15": "This community, primarily represented by `ws_controller.rs` and its module definition in `mod.rs`, is responsible for handling WebSocket connections within the server. It likely manages real-time communication, processing incoming WebSocket messages, and dispatching events or data to connected clients. This fits into the overall project by providing the real-time interaction layer, crucial for features requiring instant updates or bidirectional communication, such as live dashboards, chat, or collaborative tools."
+  }
+}

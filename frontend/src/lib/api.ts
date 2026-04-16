@@ -1,4 +1,5 @@
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').trim() || 'http://localhost:8000';
+//const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').trim() || 'http://localhost:8000';
+const API_BASE_URL = 'http://localhost:8000';
 
 /**
  * Normalize repo URL for consistent comparison with backend-stored URLs.
@@ -175,6 +176,33 @@ export interface TasksResponse {
   tasks: TaskStatusResponse[];
 }
 
+/** 工作台卡片：以 repositories 表为准，含跳转 Wiki 用的 task_id */
+export interface DashboardRepoEntry {
+  repo_url: string;
+  task_id: string;
+  github_short_description?: string | null;
+  description?: string | null;
+  stargazers_count?: number | null;
+  vector_store_path?: string | null;
+  last_updated?: string | null;
+}
+
+export interface DashboardReposResponse {
+  repos: DashboardRepoEntry[];
+}
+
+/** 来自 DB 缓存的 GitHub stars + 展示文案（后端可能标记 stale 并在后台刷新） */
+export interface RepoGithubMetadataEntry {
+  repo_url: string;
+  stars: number | null;
+  description: string | null;
+  stale: boolean;
+}
+
+export interface RepoGithubMetadataResponse {
+  metadata: Record<string, RepoGithubMetadataEntry>;
+}
+
 const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
@@ -233,6 +261,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ user_id }),
     });
+  },
+
+  getDashboardRepos: async (user_id: string): Promise<DashboardReposResponse> => {
+    return requestJson<DashboardReposResponse>('/dashboard/repos', {
+      method: 'POST',
+      body: JSON.stringify({ user_id }),
+    });
+  },
+
+  getRepoGithubMetadata: async (
+    repoUrls: string[]
+  ): Promise<Record<string, RepoGithubMetadataEntry>> => {
+    const data = await requestJson<RepoGithubMetadataResponse>('/repos/github-metadata', {
+      method: 'POST',
+      body: JSON.stringify({ repo_urls: repoUrls }),
+    });
+    return data.metadata ?? {};
   },
 
   cancelTask: async (taskId: string): Promise<boolean> => {

@@ -1,0 +1,363 @@
+```json
+{
+  "title": "vphone-cli Documentation",
+  "description": "Documentation for vphone-cli, a tool to boot virtual iPhones (iOS 26) using Apple's Virtualization.framework, including custom firmware and jailbreak variants.",
+  "lastIndexed": "2026-04-07",
+  "toc": [
+    {
+      "id": "project-overview",
+      "title": "Project Overview",
+      "files": [
+        "README.md",
+        "Package.swift",
+        "sources/Info.plist",
+        "sources/vphone.entitlements",
+        "sources/vphone-cli/main.swift",
+        "sources/vphone-cli/VPhoneAppDelegate.swift",
+        "sources/vphone-cli/VPhoneCLI.swift",
+        "sources/vphone-cli/VPhoneError.swift"
+      ],
+      "children": [
+        {
+          "id": "firmware-variants",
+          "title": "Firmware Variants",
+          "files": [
+            "README.md",
+            "research/0_binary_patch_comparison.md",
+            "sources/FirmwarePatcher/Pipeline/FirmwarePipeline.swift"
+          ]
+        },
+        {
+          "id": "setup-and-prerequisites",
+          "title": "Setup and Prerequisites",
+          "files": [
+            "README.md",
+            "scripts/setup_machine.sh",
+            "scripts/setup_tools.sh",
+            "scripts/setup_venv.sh",
+            "scripts/setup_venv_linux.sh",
+            "scripts/boot_host_preflight.sh",
+            "requirements.txt"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "virtual-machine-management",
+      "title": "Virtual Machine Management",
+      "files": [
+        "README.md",
+        "sources/vphone-cli/VPhoneVirtualMachine.swift",
+        "sources/vphone-cli/VPhoneVirtualMachineManifest.swift",
+        "sources/vphone-cli/VPhoneVirtualMachineView.swift",
+        "sources/vphone-cli/VPhoneHardwareModel.swift",
+        "scripts/vm_create.sh",
+        "scripts/vm_manifest.py",
+        "scripts/vm_backup.sh",
+        "scripts/vm_restore.sh",
+        "scripts/vm_switch.sh",
+        "research/VPhoneVirtualMachineRefactored.swift"
+      ]
+    },
+    {
+      "id": "firmware-patching-pipeline",
+      "title": "Firmware Patching Pipeline",
+      "files": [
+        "sources/FirmwarePatcher/Pipeline/FirmwarePipeline.swift",
+        "sources/FirmwarePatcher/Core/PatcherProtocol.swift",
+        "sources/FirmwarePatcher/Core/PatchRecord.swift",
+        "sources/FirmwarePatcher/Core/PatcherError.swift",
+        "sources/FirmwarePatcher/Binary/BinaryBuffer.swift",
+        "sources/FirmwarePatcher/Binary/MachOHelpers.swift",
+        "sources/FirmwarePatcher/ARM64/ARM64Disassembler.swift",
+        "sources/FirmwarePatcher/ARM64/ARM64Encoder.swift",
+        "scripts/fw_prepare.sh",
+        "scripts/fw_manifest.py"
+      ],
+      "children": [
+        {
+          "id": "firmware-manifest-generation",
+          "title": "Firmware Manifest Generation",
+          "files": [
+            "sources/FirmwarePatcher/Manifest/FirmwareManifest.swift",
+            "scripts/fw_manifest.py",
+            "research/firmware_manifest_and_origins.md",
+            "research/manifest_and_refactoring_summary.md"
+          ]
+        },
+        {
+          "id": "iboot-patching",
+          "title": "iBoot Patching",
+          "files": [
+            "sources/FirmwarePatcher/IBoot/IBootPatcher.swift",
+            "sources/FirmwarePatcher/IBoot/IBootJBPatcher.swift",
+            "research/iboot_patches.md",
+            "sources/FirmwarePatcher/AVPBooter/AVPBooterPatcher.swift"
+          ]
+        },
+        {
+          "id": "kernel-patching",
+          "title": "Kernel Patching",
+          "files": [
+            "sources/FirmwarePatcher/Kernel/KernelPatcher.swift",
+            "sources/FirmwarePatcher/Kernel/KernelPatcherBase.swift",
+            "sources/FirmwarePatcher/Kernel/KernelJBPatcher.swift",
+            "sources/FirmwarePatcher/Kernel/KernelJBPatcherBase.swift",
+            "research/kernel_jb_patch_notes.md",
+            "research/kernel_patch_jb/PATCH_DOC_FRAMEWORK.md",
+            "research/kernel_patcher_verification.md",
+            "research/kernel_patch_base_11_15_validation.md",
+            "research/kernel_patch_base_16_20_validation.md",
+            "research/kernel_patch_base_first5_validation.md",
+            "research/kernel_patch_sandbox_hooks_17_26_validation.md"
+          ],
+          "children": [
+            {
+              "id": "kernel-jb-patches",
+              "title": "Kernel Jailbreak Patches",
+              "files": [
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchAmfiExecve.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchAmfiTrustcache.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchBsdInitAuth.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchCredLabel.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchDounmount.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchHookCredLabel.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchIoucMacf.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchKcall10.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchLoadDylinker.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchMacMount.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchNvram.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchPortToMap.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchPostValidation.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchProcPidinfo.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchProcSecurity.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchSandboxExtended.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchSecureRoot.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchSharedRegion.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchSpawnPersona.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchSyscallmask.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchTaskConversion.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchTaskForPid.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchThidCrash.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchVmFault.swift",
+                "sources/FirmwarePatcher/Kernel/JBPatches/KernelJBPatchVmProtect.swift",
+                "research/kernel_patch_jb/patch_amfi_cdhash_in_trustcache.md",
+                "research/kernel_patch_jb/patch_amfi_execve_kill_path.md",
+                "research/kernel_patch_jb/patch_bsd_init_auth.md",
+                "research/kernel_patch_jb/patch_convert_port_to_map.md",
+                "research/kernel_patch_jb/patch_cred_label_update_execve.md",
+                "research/kernel_patch_jb/patch_dounmount.md",
+                "research/kernel_patch_jb/patch_hook_cred_label_update_execve.md",
+                "research/kernel_patch_jb/patch_io_secure_bsd_root.md",
+                "research/kernel_patch_jb/patch_iouc_failed_macf.md",
+                "research/kernel_patch_jb/patch_kcall10.md",
+                "research/kernel_patch_jb/patch_load_dylinker.md",
+                "research/kernel_patch_jb/patch_mac_mount.md",
+                "research/kernel_patch_jb/patch_nvram_verify_permission.md",
+                "research/kernel_patch_jb/patch_post_validation_additional.md",
+                "research/kernel_patch_jb/patch_proc_pidinfo.md",
+                "research/kernel_patch_jb/patch_proc_security_policy.md",
+                "research/kernel_patch_jb/patch_sandbox_hooks_extended.md",
+                "research/kernel_patch_jb/patch_shared_region_map.md",
+                "research/kernel_patch_jb/patch_spawn_validate_persona.md",
+                "research/kernel_patch_jb/patch_syscallmask_apply_to_proc.md",
+                "research/kernel_patch_jb/patch_task_conversion_eval_internal.md",
+                "research/kernel_patch_jb/patch_task_for_pid.md",
+                "research/kernel_patch_jb/patch_thid_should_crash.md",
+                "research/kernel_patch_jb/patch_vm_fault_enter_prepare.md",
+                "research/kernel_patch_jb/patch_vm_map_protect.md"
+              ]
+            },
+            {
+              "id": "kernel-standard-patches",
+              "title": "Kernel Standard Patches",
+              "files": [
+                "sources/FirmwarePatcher/Kernel/Patches/KernelPatchApfsGraft.swift",
+                "sources/FirmwarePatcher/Kernel/Patches/KernelPatchApfsMount.swift",
+                "sources/FirmwarePatcher/Kernel/Patches/KernelPatchApfsSeal.swift",
+                "sources/FirmwarePatcher/Kernel/Patches/KernelPatchApfsSnapshot.swift",
+                "sources/FirmwarePatcher/Kernel/Patches/KernelPatchBsdInit.swift",
+                "sources/FirmwarePatcher/Kernel/Patches/KernelPatchDebugger.swift",
+                "sources/FirmwarePatcher/Kernel/Patches/KernelPatchDyldPolicy.swift",
+                "sources/FirmwarePatcher/Kernel/Patches/KernelPatchLaunchConstraints.swift",
+                "sources/FirmwarePatcher/Kernel/Patches/KernelPatchPostValidation.swift",
+                "sources/FirmwarePatcher/Kernel/Patches/KernelPatchSandbox.swift"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "txm-patching",
+          "title": "TXM Patching",
+          "files": [
+            "sources/FirmwarePatcher/TXM/TXMPatcher.swift",
+            "sources/FirmwarePatcher/TXM/TXMDevPatcher.swift",
+            "research/txm_fullchain_analysis.md",
+            "research/txm_jb_patches.md",
+            "research/txm_selector24_analysis.md",
+            "research/txm_variant_diff.md"
+          ]
+        },
+        {
+          "id": "device-tree-patching",
+          "title": "DeviceTree Patching",
+          "files": [
+            "sources/FirmwarePatcher/DeviceTree/DeviceTreePatcher.swift"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "custom-firmware-installation",
+      "title": "Custom Firmware Installation",
+      "files": [
+        "README.md",
+        "scripts/cfw_install.sh",
+        "scripts/cfw_install_dev.sh",
+        "scripts/cfw_install_jb.sh",
+        "scripts/ramdisk_build.py",
+        "scripts/ramdisk_send.sh",
+        "scripts/vphone_jb_setup.sh",
+        "scripts/vphone_jb_setup.plist",
+        "scripts/tweakloader/README.md",
+        "scripts/tweakloader/TweakLoader.m"
+      ],
+      "children": [
+        {
+          "id": "daemon-injection",
+          "title": "Daemon Injection",
+          "files": [
+            "scripts/patchers/cfw_daemons.py",
+            "scripts/patchers/cfw_patch_jetsam.py",
+            "scripts/patchers/cfw_patch_cache_loader.py",
+            "scripts/patchers/cfw_patch_mobileactivationd.py",
+            "scripts/patchers/cfw_patch_seputil.py",
+            "research/cfw_patch_launchd_jetsam.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vphone-cli-application",
+      "title": "VPhone CLI Application",
+      "files": [
+        "sources/vphone-cli/VPhoneCLI.swift",
+        "sources/vphone-cli/VPhoneControl.swift",
+        "sources/vphone-cli/VPhoneHostControl.swift",
+        "sources/vphone-cli/VPhoneAppDelegate.swift",
+        "sources/vphone-cli/VPhoneWindowController.swift",
+        "sources/vphone-cli/VPhoneMenuController.swift"
+      ],
+      "children": [
+        {
+          "id": "app-management",
+          "title": "App Management",
+          "files": [
+            "sources/vphone-cli/VPhoneMenuApps.swift",
+            "sources/vphone-cli/VPhoneAppBrowserModel.swift",
+            "sources/vphone-cli/VPhoneAppBrowserView.swift",
+            "sources/vphone-cli/VPhoneAppWindowController.swift",
+            "sources/vphone-cli/VPhoneInstallPackage.swift",
+            "scripts/vphoned/vphoned_apps.h",
+            "scripts/vphoned/vphoned_apps.m",
+            "scripts/vphoned/vphoned_install.h",
+            "scripts/vphoned/vphoned_install.m",
+            "scripts/vphoned/vphoned_url.h",
+            "scripts/vphoned/vphoned_url.m"
+          ]
+        },
+        {
+          "id": "file-and-keychain-browsing",
+          "title": "File and Keychain Browsing",
+          "files": [
+            "sources/vphone-cli/VPhoneFileBrowserModel.swift",
+            "sources/vphone-cli/VPhoneFileBrowserView.swift",
+            "sources/vphone-cli/VPhoneFileWindowController.swift",
+            "sources/vphone-cli/VPhoneKeychainBrowserModel.swift",
+            "sources/vphone-cli/VPhoneKeychainBrowserView.swift",
+            "sources/vphone-cli/VPhoneKeychainItem.swift",
+            "sources/vphone-cli/VPhoneKeychainWindowController.swift",
+            "sources/vphone-cli/VPhoneRemoteFile.swift",
+            "scripts/vphoned/vphoned_files.h",
+            "scripts/vphoned/vphoned_files.m",
+            "scripts/vphoned/vphoned_keychain.h",
+            "scripts/vphoned/vphoned_keychain.m"
+          ]
+        },
+        {
+          "id": "location-and-sensor-simulation",
+          "title": "Location and Sensor Simulation",
+          "files": [
+            "sources/vphone-cli/VPhoneLocationProvider.swift",
+            "sources/vphone-cli/VPhoneMenuLocation.swift",
+            "scripts/vphoned/vphoned_location.h",
+            "scripts/vphoned/vphoned_location.m",
+            "sources/vphone-cli/VPhoneTouchIDMonitor.swift"
+          ]
+        },
+        {
+          "id": "screen-recording-and-screenshots",
+          "title": "Screen Recording and Screenshots",
+          "files": [
+            "sources/vphone-cli/VPhoneScreenRecorder.swift",
+            "sources/vphone-cli/VPhoneMenuRecord.swift",
+            "sources/vphone-cli/VPhoneQuickLookController.swift"
+          ]
+        },
+        {
+          "id": "vphoned-xpc-service",
+          "title": "VPhoned XPC Service",
+          "files": [
+            "scripts/vphoned/vphoned.m",
+            "scripts/vphoned/vphoned.h",
+            "scripts/vphoned/vphoned.plist",
+            "scripts/vphoned/entitlements.plist",
+            "scripts/vphoned/Makefile",
+            "scripts/vphoned/vphoned_protocol.h",
+            "scripts/vphoned/vphoned_protocol.m",
+            "scripts/vphoned/vphoned_accessibility.h",
+            "scripts/vphoned/vphoned_accessibility.m",
+            "scripts/vphoned/vphoned_clipboard.h",
+            "scripts/vphoned/vphoned_clipboard.m",
+            "scripts/vphoned/vphoned_devmode.h",
+            "scripts/vphoned/vphoned_devmode.m",
+            "scripts/vphoned/vphoned_hid.h",
+            "scripts/vphoned/vphoned_hid.m",
+            "scripts/vphoned/vphoned_notify.h",
+            "scripts/vphoned/vphoned_notify.m",
+            "scripts/vphoned/vphoned_settings.h",
+            "scripts/vphoned/vphoned_settings.m",
+            "research/devmode_xpc_protocol.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "external-integrations",
+      "title": "External Integrations",
+      "files": [
+        "scripts/pymobiledevice3_bridge.py",
+        "README.md"
+      ]
+    },
+    {
+      "id": "research-and-analysis",
+      "title": "Research and Analysis",
+      "files": [
+        "research/0_binary_patch_comparison.md",
+        "research/kernel_info/kernel_index.tsv",
+        "research/kernel_info/summary.tsv",
+        "research/kernel_fairplay_kexts.md",
+        "research/machine_identifier_storage_analysis.md",
+        "research/keyboard_event_pipeline.md",
+        "research/kernel_patch_jb/runtime_verification/README.md",
+        "research/kernel_patch_jb/runtime_verification/ida_patch_chain_report.md",
+        "research/kernel_patch_jb/runtime_verification/runtime_verification_summary.md",
+        "skills/kernel-analysis-vphone600/SKILL.md",
+        "skills/kernel-analysis-vphone600/agents/openai.yaml",
+        "skills/kernel-analysis-vphone600/references/kernel-info-queries.md"
+      ]
+    }
+  ]
+}
+```

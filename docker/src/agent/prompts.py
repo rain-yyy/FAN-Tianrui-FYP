@@ -75,9 +75,9 @@ Classify the user's question into one of these categories:
 
 | Intent | Description | Primary Strategy | Typical Depth |
 |--------|-------------|------------------|---------------|
-| **location** | "Where is X defined?" | code_graph → file_read | Light |
-| **mechanism** | "How does X work?" | code_graph + rag_search | Deep |
-| **call_chain** | "How does request flow from A to B?" | code_graph chain | Deep |
+| **location** | "Where is X defined?" | lsp_resolve → code_graph → file_read | Light |
+| **mechanism** | "How does X work?" | code_graph + lsp_resolve + rag_search | Deep |
+| **call_chain** | "How does request flow from A to B?" | lsp_resolve → code_graph chain | Deep |
 | **impact_analysis** | "What does changing X affect?" | code_graph refs + tests | Deep |
 | **debugging** | "Why does X fail?" | error site tracing | Deep |
 | **architecture** | "What's the architecture?" | repo_map + rag_search | Light–Deep |
@@ -91,6 +91,9 @@ Classify the user's question into one of these categories:
 | **repo_overview** | "What does this project do?" | repo_map + rag_search | Light |
 | **followup_clarification** | Clarification of previous answer | conversation history | Direct |
 | **general** | Greetings, generic questions | none | Direct |
+| **version_check** | "What is the latest version of X?" | web_search | Light |
+| **api_docs** | "How do I use X API?" (external lib) | web_search + rag_search | Light |
+| **external_reference** | External CVE, pricing, changelog | web_search | Light |
 | **implementation** | Fallback for code exploration | code_graph + file_read | Deep |
 
 ## Available Tools
@@ -104,6 +107,14 @@ Classify the user's question into one of these categories:
    - `get_file_symbols(file_path)`: Get symbols in a file
 4. **file_read**: Read specific file contents. Use AFTER identifying which file to read.
 5. **grep_search**: Live-repo lexical search (ripgrep-backed when installed). Good for exact strings, config values, error messages, TODOs. Optional: `case_sensitive`, `path_prefix`, `max_results`, `context_lines`.
+6. **lsp_resolve**: Precise symbol location using static analysis (rope/tree-sitter). Best for:
+   - Disambiguating symbols when code_graph returns multiple candidates
+   - Precise `find_definition` or `find_references` for code-centric intents
+   - Operations: `find_definition`, `find_references`, `hover`
+7. **web_search**: Search the web for external knowledge:
+   - Package versions, CVEs, API documentation for external libraries
+   - Use for intents: `version_check`, `api_docs`, `external_reference`
+   - `search_type`: `general` | `version` | `cve` | `code_docs`
 
 ## Output Format
 Return a JSON object with this EXACT structure:
@@ -111,7 +122,7 @@ Return a JSON object with this EXACT structure:
 {{
     "requires_tools": true|false,
     "direct_answer": "If requires_tools is false, provide the answer here. Otherwise null.",
-    "intent": "location|mechanism|call_chain|impact_analysis|debugging|architecture|change_guidance|concept|usage|topic_coverage|relationship|evidence|section_locator|repo_overview|followup_clarification|general|implementation",
+    "intent": "location|mechanism|call_chain|impact_analysis|debugging|architecture|change_guidance|concept|usage|topic_coverage|relationship|evidence|section_locator|repo_overview|followup_clarification|general|version_check|api_docs|external_reference|implementation",
     "entities": ["symbol1", "topic_or_module", "..."],
     "constraints": ["must check X", "considering Y"],
     "expected_evidence_types": ["definition", "direct_call", "route_config", "test_assertion", "documentation", "lexical_match", "semantic_match"],
@@ -136,6 +147,8 @@ Return a JSON object with this EXACT structure:
 ## Guidelines
 - **For doc/concept/topic questions**: rag_search is the primary tool — it IS sufficient on its own.
 - **For code questions**: Cheap structural tools first — repo_map → code_graph → rag_search → file_read.
+- **For location/call_chain**: Try lsp_resolve first when entity name is known — it resolves faster and more precisely than code_graph.
+- **For external knowledge** (version_check, api_docs, cve): Use web_search directly — do NOT use rag_search for external library facts.
 - For architecture: Start with repo_map, supplement with rag_search.
 - For mechanism/call_chain: Start with code_graph to find anchors.
 - For debugging: Find error site first, then trace upstream.
@@ -182,7 +195,8 @@ Based on the query intent and current state, use this decision matrix:
 | Current State | Missing Info | Recommended Tool | Arguments |
 |---------------|-------------|------------------|-----------|
 | No repo overview | Architecture understanding | repo_map | include_signatures=true, max_depth=3 |
-| No anchor found | Symbol definition | code_graph | operation="find_definition", symbol_name="X" |
+| No anchor found | Symbol definition | lsp_resolve | operation="find_definition", symbol_name="X" |
+| lsp_resolve returned ambiguous | Structural callers/callees | code_graph | operation="find_definition", symbol_name="X" |
 | Anchor found, need callers | Call relationships | code_graph | operation="find_callers", symbol_name="X" |
 | Anchor found, need callees | What it calls | code_graph | operation="find_callees", symbol_name="X" |
 | Know file, need details | Implementation | file_read | file_path="X", start_line=N, end_line=M |
@@ -190,14 +204,16 @@ Based on the query intent and current state, use this decision matrix:
 | Need exact string match | Config values, error msgs | grep_search | pattern="search string", is_regex=false |
 | Need pattern match | Multi-file pattern locate | grep_search | pattern="regex_pattern", is_regex=true |
 | Need file symbols | Module structure | code_graph | operation="get_file_symbols", file_path="X" |
+| External version/CVE/API question | External knowledge | web_search | query="...", search_type="version\|cve\|code_docs" |
 
 ## Intent-Based Tool Preferences
 
 | Intent Category | Primary Tools | Secondary Tools |
 |----------------|---------------|-----------------|
-| **Code-centric** (location, mechanism, call_chain, debugging, impact_analysis) | code_graph, file_read | rag_search, repo_map |
+| **Code-centric** (location, mechanism, call_chain, debugging, impact_analysis) | lsp_resolve, code_graph, file_read | rag_search, repo_map |
 | **Doc-centric** (concept, topic_coverage, section_locator, repo_overview) | rag_search, grep_search | repo_map |
 | **Hybrid** (architecture, relationship, usage, evidence, change_guidance) | rag_search, code_graph | repo_map, file_read, grep_search |
+| **External** (version_check, api_docs, external_reference) | web_search | rag_search |
 
 ## Available Tools (with exact argument schemas)
 
@@ -231,6 +247,18 @@ Text or regex search across **live** repository files (ripgrep when available). 
 {{"tool": "grep_search", "arguments": {{"pattern": "search_text_or_regex", "is_regex": false, "file_pattern": "optional glob", "case_sensitive": false, "path_prefix": "optional subdir under repo", "max_results": 50, "context_lines": 2}}}}
 ```
 
+### 6. lsp_resolve
+Precise symbol resolution via static analysis (rope for Python, regex fallback for other languages). Faster and more accurate than code_graph for simple definition lookups.
+```json
+{{"tool": "lsp_resolve", "arguments": {{"symbol_name": "MyClass", "operation": "find_definition|find_references|hover", "file_hint": "optional/path/hint.py"}}}}
+```
+
+### 7. web_search
+Search the internet for external knowledge: package versions, CVEs, API docs for external libraries.
+```json
+{{"tool": "web_search", "arguments": {{"query": "search query", "search_type": "general|version|cve|code_docs", "max_results": 5, "domain_filter": "optional domain"}}}}
+```
+
 ## Output Format
 Prefer returning a **parallel plan** when tools are independent:
 ```json
@@ -245,12 +273,13 @@ Prefer returning a **parallel plan** when tools are independent:
 
 ## Key Rules
 1. **For doc-centric intents**, rag_search alone is acceptable — no need to pair with code_graph.
-2. **For code-centric intents**, prefer structural tools (code_graph) before semantic (rag_search).
-3. **After finding an anchor, expand structurally** — use find_callers/find_callees.
-4. **Return max 3 tools per iteration** — avoid overwhelming.
-5. **Deduplicate** — don't repeat the same tool with same arguments.
-6. **file_read requires known file path** — don't guess paths, find them first via code_graph, grep_search, or repo_map.
-7. **After grep_search finds hits**, prefer **file_read** on the top 1–2 matching files (with a tight line window around the hit) to verify code or quote exact snippets — especially for code-centric or debugging intents.
+2. **For code-centric intents**, prefer lsp_resolve first (faster, exact), then code_graph for structural expansion.
+3. **For external_reference/version_check/api_docs**, use web_search directly — internal tools won't help.
+4. **After finding an anchor, expand structurally** — use find_callers/find_callees.
+5. **Return max 3 tools per iteration** — avoid overwhelming.
+6. **Deduplicate** — don't repeat the same tool with same arguments.
+7. **file_read requires known file path** — don't guess paths, find them first via lsp_resolve, code_graph, grep_search, or repo_map.
+8. **After grep_search finds hits**, prefer **file_read** on the top 1–2 matching files to verify code or quote exact snippets.
 """
     + OUTPUT_LANGUAGE_EN
     + """
@@ -474,11 +503,12 @@ NEVER present "Likely" or "Unknown" conclusions as "Confirmed".
 Only list files that would help the user explore further.
 
 ## Mermaid Diagram Guidelines
-Generate diagrams ONLY when they add clarity:
+Generate diagrams ONLY when they add clarity and are explicitly requested or highly beneficial for:
 - **architecture questions**: Component/class diagram
 - **mechanism/call_chain**: Flowchart or sequence diagram
 - **debugging**: Flowchart showing error path
-- **location/concept**: Usually NO diagram needed
+
+If no diagram is needed, set the "mermaid" field to null.
 
 Diagram rules:
 - Use `graph TD` for flows, `classDiagram` for relationships
@@ -490,7 +520,7 @@ Diagram rules:
 ```json
 {{
     "answer": "The direct answer with embedded [file:line] citations",
-    "mermaid": "graph TD\\n  A[Start] --> B[End]",
+    "mermaid": "Raw Mermaid only (e.g. graph TD\\n  A[Start] --> B[End]), or null if no diagram is needed",
     "sources": ["file1.py:10-20", "file2.ts:ClassName"],
     "confidence": "high|medium|low",
     "caveats": ["Any limitations or uncertainties"]

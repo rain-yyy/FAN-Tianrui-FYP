@@ -1,0 +1,268 @@
+```json
+{
+  "title": "LocalSend Documentation",
+  "description": "LocalSend is a free, open-source app for securely sharing files and messages with nearby devices over a local network without an internet connection.",
+  "lastIndexed": "2026-04-07",
+  "toc": [
+    {
+      "id": "project-overview",
+      "title": "Project Overview",
+      "files": [
+        "README.md",
+        "CONTRIBUTING.md",
+        "CHANGELOG.md",
+        "app/lib/main.dart",
+        "app/lib/config/init.dart",
+        "app/lib/config/refena.dart",
+        "app/lib/config/theme.dart",
+        "app/pubspec.yaml",
+        "common/lib/constants.dart"
+      ]
+    },
+    {
+      "id": "core-architecture",
+      "title": "Core Architecture",
+      "children": [
+        {
+          "id": "flutter-application",
+          "title": "Flutter Application Structure",
+          "files": [
+            "app/lib/main.dart",
+            "app/lib/config/init.dart",
+            "app/lib/config/refena.dart",
+            "app/lib/config/theme.dart",
+            "app/lib/pages/home_page.dart",
+            "app/lib/pages/home_page_controller.dart",
+            "app/lib/provider/app_arguments_provider.dart",
+            "app/lib/provider/device_info_provider.dart",
+            "app/lib/provider/version_provider.dart",
+            "app/lib/provider/window_dimensions_provider.dart",
+            "app/lib/util/native/platform_check.dart"
+          ]
+        },
+        {
+          "id": "rust-backend",
+          "title": "Rust Backend Services",
+          "files": [
+            "app/rust/src/lib.rs",
+            "app/rust/src/frb_generated.rs",
+            "app/rust/src/api/mod.rs",
+            "app/rust/src/api/http.rs",
+            "app/rust/src/api/crypto.rs",
+            "app/rust/src/api/webrtc.rs",
+            "app/rust/src/api/stream.rs",
+            "app/rust/src/api/logging.rs",
+            "app/rust/src/util/bytes.rs",
+            "core/src/lib.rs",
+            "core/src/main.rs"
+          ]
+        },
+        {
+          "id": "data-models",
+          "title": "Data Models and State Management",
+          "files": [
+            "app/lib/model/cross_file.dart",
+            "app/lib/model/log_entry.dart",
+            "app/lib/model/persistence/favorite_device.dart",
+            "app/lib/model/persistence/receive_history_entry.dart",
+            "app/lib/model/state/nearby_devices_state.dart",
+            "app/lib/model/state/send/send_session_state.dart",
+            "app/lib/model/state/server/receive_session_state.dart",
+            "app/lib/model/state/settings_state.dart",
+            "common/lib/model/device.dart",
+            "common/lib/model/dto/multicast_dto.dart",
+            "common/lib/model/dto/prepare_upload_request_dto.dart",
+            "common/lib/model/file_type.dart",
+            "common/lib/model/stored_security_context.dart"
+          ]
+        },
+        {
+          "id": "network-communication",
+          "title": "Network Communication and Discovery",
+          "files": [
+            "app/lib/provider/network/nearby_devices_provider.dart",
+            "app/lib/provider/network/scan_facade.dart",
+            "app/lib/provider/network/server/server_provider.dart",
+            "app/lib/provider/network/server/controller/receive_controller.dart",
+            "app/lib/provider/network/server/controller/send_controller.dart",
+            "app/lib/provider/network/webrtc/signaling_provider.dart",
+            "common/lib/src/isolate/child/multicast_discovery_isolate.dart",
+            "common/lib/src/task/discovery/multicast_discovery.dart",
+            "common/lib/util/network_interfaces.dart",
+            "core/src/http/server/mod.rs",
+            "core/src/http/client/mod.rs",
+            "core/src/model/discovery.rs"
+          ]
+        },
+        {
+          "id": "security-and-cryptography",
+          "title": "Security and Cryptography",
+          "files": [
+            "app/lib/provider/security_provider.dart",
+            "app/lib/util/security_helper.dart",
+            "core/src/crypto/mod.rs",
+            "core/src/crypto/cert.rs",
+            "core/src/crypto/hash.rs",
+            "core/src/crypto/nonce.rs",
+            "core/src/crypto/token.rs",
+            "core/src/http/server/client_cert_verifier.rs",
+            "common/lib/model/stored_security_context.dart"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "file-transfer-flows",
+      "title": "File Transfer Flows",
+      "children": [
+        {
+          "id": "sending-files",
+          "title": "Sending Files",
+          "files": [
+            "app/lib/pages/send_page.dart",
+            "app/lib/pages/selected_files_page.dart",
+            "app/lib/pages/tabs/send_tab.dart",
+            "app/lib/pages/tabs/send_tab_vm.dart",
+            "app/lib/provider/network/send_provider.dart",
+            "app/lib/provider/selection/selected_sending_files_provider.dart",
+            "app/lib/util/native/file_picker.dart",
+            "app/lib/util/native/content_uri_helper.dart",
+            "common/lib/src/task/upload/http_upload.dart",
+            "app/lib/model/state/send/send_session_state.mapper.dart",
+            "app/lib/model/state/send/sending_file.dart"
+          ]
+        },
+        {
+          "id": "receiving-files",
+          "title": "Receiving Files",
+          "files": [
+            "app/lib/pages/receive_page.dart",
+            "app/lib/pages/receive_options_page.dart",
+            "app/lib/pages/tabs/receive_tab.dart",
+            "app/lib/pages/tabs/receive_tab_vm.dart",
+            "app/lib/provider/network/server/controller/receive_controller.dart",
+            "app/lib/provider/receive_history_provider.dart",
+            "app/lib/provider/selection/selected_receiving_files_provider.dart",
+            "app/lib/util/native/file_saver.dart",
+            "app/lib/model/state/server/receive_session_state.dart",
+            "app/lib/model/state/server/receiving_file.dart",
+            "app/lib/model/persistence/receive_history_entry.dart"
+          ]
+        },
+        {
+          "id": "web-share",
+          "title": "Web Share Functionality",
+          "files": [
+            "app/lib/pages/web_send_page.dart",
+            "app/assets/web/index.html",
+            "app/assets/web/main.js",
+            "app/lib/model/state/send/web/web_send_session.dart",
+            "app/lib/model/state/send/web/web_send_file.dart",
+            "core/src/http/server/controller/web.rs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "user-interface-and-experience",
+      "title": "User Interface and Experience",
+      "children": [
+        {
+          "id": "localization",
+          "title": "Localization and Internationalization",
+          "files": [
+            "app/lib/gen/strings.g.dart",
+            "app/assets/i18n/en.json",
+            "app/assets/i18n/de.json",
+            "app/lib/util/i18n.dart",
+            "app/lib/pages/language_page.dart"
+          ]
+        },
+        {
+          "id": "settings-and-configuration",
+          "title": "Settings and Configuration",
+          "files": [
+            "app/lib/pages/tabs/settings_tab.dart",
+            "app/lib/pages/tabs/settings_tab_controller.dart",
+            "app/lib/pages/tabs/settings_tab_vm.dart",
+            "app/lib/model/state/settings_state.dart",
+            "app/lib/provider/settings_provider.dart",
+            "app/lib/provider/persistence_provider.dart",
+            "app/lib/util/shared_preferences/shared_preferences_file.dart",
+            "app/lib/util/shared_preferences/shared_preferences_portable.dart"
+          ]
+        },
+        {
+          "id": "platform-integrations",
+          "title": "Platform Integrations",
+          "files": [
+            "app/android/app/src/main/kotlin/org/localsend/localsend_app/MainActivity.kt",
+            "app/android/app/src/main/kotlin/org/localsend/localsend_app/QuickTileService.kt",
+            "app/ios/Runner/AppDelegate.swift",
+            "app/ios/ShareExtension/ShareViewController.swift",
+            "app/macos/Runner/AppDelegate.swift",
+            "app/macos/ShareExtension/ShareController.swift",
+            "app/windows/runner/main.cpp",
+            "app/linux/main.cc",
+            "app/lib/util/native/autostart_helper.dart",
+            "app/lib/util/native/tray_helper.dart",
+            "app/lib/util/native/context_menu_helper.dart"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "utilities-and-helpers",
+      "title": "Utilities and Helpers",
+      "files": [
+        "app/lib/util/alias_generator.dart",
+        "app/lib/util/file_path_helper.dart",
+        "app/lib/util/file_size_helper.dart",
+        "app/lib/util/file_speed_helper.dart",
+        "app/lib/util/ip_helper.dart",
+        "app/lib/util/rhttp.dart",
+        "app/lib/util/rust.dart",
+        "app/lib/util/simple_server.dart",
+        "common/lib/util/logger.dart",
+        "common/lib/util/task_runner.dart",
+        "common/lib/isolate.dart",
+        "common/lib/src/util/isolate_helper.dart"
+      ]
+    },
+    {
+      "id": "troubleshooting-and-debugging",
+      "title": "Troubleshooting and Debugging",
+      "files": [
+        "app/lib/pages/troubleshoot_page.dart",
+        "app/lib/pages/debug/debug_page.dart",
+        "app/lib/pages/debug/discovery_debug_page.dart",
+        "app/lib/pages/debug/http_logs_page.dart",
+        "app/lib/pages/debug/security_debug_page.dart",
+        "app/lib/provider/logging/discovery_logs_provider.dart",
+        "app/lib/provider/logging/http_logs_provider.dart",
+        "app/lib/model/log_entry.dart",
+        "core/src/http/server/error.rs",
+        "server/src/config/error.rs"
+      ]
+    },
+    {
+      "id": "development-and-build-process",
+      "title": "Development and Build Process",
+      "files": [
+        "CONTRIBUTING.md",
+        "app/flutter_rust_bridge.yaml",
+        "app/rust-toolchain.toml",
+        "app/rust_builder/cargokit/build_tool/bin/build_tool.dart",
+        "app/rust_builder/cargokit/build_tool/lib/src/builder.dart",
+        "app/rust_builder/cargokit/build_tool/lib/src/cargo.dart",
+        "app/rust_builder/cargokit/build_tool/lib/src/rustup.dart",
+        "scripts/compile_android_apk.sh",
+        "scripts/compile_ios.sh",
+        "scripts/compile_macos.sh",
+        "scripts/compile_windows_exe.ps1",
+        "scripts/compile_linux_appimage.sh"
+      ]
+    }
+  ]
+}
+```

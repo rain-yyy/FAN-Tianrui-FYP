@@ -5,17 +5,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ArrowUp, 
   Loader2, 
-  Sparkles,
   X,
   Bot,
   History,
   MessageSquare,
   Plus,
-  ChevronRight,
   Trash2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { api, normalizeRepoUrl, ChatMessage, ChatResponse, AgentChatResponse, ChatMode, ChatHistoryItem, AgentTrajectoryStep, LiveToolStep } from '@/lib/api';
+import { api, normalizeRepoUrl, ChatMessage, AgentChatResponse, ChatMode, ChatHistoryItem, AgentTrajectoryStep } from '@/lib/api';
 import { MessageItem, DisplayMessage } from './MessageItem';
 import SourcesPanel, { parseSource } from './SourcesPanel';
 import CodeViewer from './CodeViewer';
@@ -41,25 +39,12 @@ export default function ChatInterface({
   onChatLoaded,
 }: ChatInterfaceProps) {
   const [mode, setMode] = useState<'closed' | 'open'>('closed');
-  const [chatMode, setChatMode] = useState<ChatMode>('rag');
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [currentRepoUrl, setCurrentRepoUrl] = useState(repoUrl);
 
   useEffect(() => {
     setCurrentRepoUrl(repoUrl);
   }, [repoUrl]);
-
-  useEffect(() => {
-    const savedMode = localStorage.getItem('chat_mode_preference');
-    if (savedMode === 'agent' || savedMode === 'rag') {
-      setChatMode(savedMode);
-    }
-  }, []);
-
-  const handleSetChatMode = (newMode: ChatMode) => {
-    setChatMode(newMode);
-    localStorage.setItem('chat_mode_preference', newMode);
-  };
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState<string>('');
@@ -265,7 +250,7 @@ export default function ChatInterface({
       role: 'user',
       content: question,
       timestamp: new Date(),
-      mode: chatMode,
+      mode: 'agent',
     };
     setMessages(prev => [...prev, userMessage]);
 
@@ -273,7 +258,7 @@ export default function ChatInterface({
     setLiveAgentLogs([]);
     setLiveSteps([]);
     setStreamingAnswer('');
-    setLoadingStatus(chatMode === 'agent' ? t('analyzingStatus') : t('retrievingDocs'));
+    setLoadingStatus(t('analyzingStatus'));
 
     // Helper to add a live step
     const addStep = (step: LiveStep) => {
@@ -292,11 +277,10 @@ export default function ChatInterface({
     };
 
     try {
-      if (chatMode === 'agent') {
-        // Agent mode (streaming with detailed steps)
-        let stepCounter = 0;
+      // Agent mode (streaming with detailed steps)
+      let stepCounter = 0;
 
-        addStep({
+      addStep({
           id: 'planning',
           type: 'planning',
           status: 'running',
@@ -477,137 +461,6 @@ export default function ChatInterface({
           isNew: false, // Don't use typewriter effect since we already streamed
         };
         setMessages(prev => [...prev, assistantMessage]);
-        
-      } else {
-        // RAG mode with streaming
-        addStep({
-          id: 'retrieval',
-          type: 'retrieval',
-          status: 'running',
-          title: t('retrievalTitle'),
-          description: t('retrievalDesc'),
-        });
-
-        let finalAnswer = '';
-        let finalSources: string[] = [];
-        let responseChatId = chatId;
-
-        try {
-          for await (const event of api.askQuestionStream({
-            user_id: userId,
-            question,
-            repo_url: repoUrl,
-            chat_id: chatId,
-            conversation_history: buildConversationHistory(),
-            current_page_context: currentPageContext,
-          })) {
-            if (event.type === 'retrieval_start') {
-              updateStep('retrieval', {
-                description: `${t('retrievalQuery')}: ${String(event.data.query || '').slice(0, 50)}...`,
-              });
-              continue;
-            }
-
-            if (event.type === 'hyde_generated') {
-              addStep({
-                id: 'hyde',
-                type: 'hyde',
-                status: 'done',
-                title: t('hydeTitle'),
-                description: t('hydeDesc'),
-              });
-              continue;
-            }
-
-            if (event.type === 'retrieval_done') {
-              const docCount = Number(event.data.doc_count || 0);
-              const sources = (event.data.sources as string[]) || [];
-              updateStep('retrieval', {
-                status: 'done',
-                title: t('foundDocs', { n: docCount }),
-                description: sources.length > 0 ? sources.slice(0, 2).join(', ') : undefined,
-              });
-              
-              addStep({
-                id: 'generation',
-                type: 'synthesis',
-                status: 'running',
-                title: t('generatingAnswer'),
-                description: t('generatingAnswerDesc'),
-              });
-              continue;
-            }
-
-            if (event.type === 'answer_delta') {
-              const delta = String(event.data.delta || '');
-              finalAnswer += delta;
-              setStreamingAnswer(prev => prev + delta);
-              continue;
-            }
-
-            if (event.type === 'answer_done') {
-              finalAnswer = String(event.data.answer || finalAnswer);
-              finalSources = (event.data.sources as string[]) || [];
-              updateStep('generation', {
-                status: 'done',
-                title: t('answerDone'),
-              });
-              continue;
-            }
-
-            if (event.type === 'complete') {
-              responseChatId = String(event.data.chat_id || chatId);
-              finalSources = (event.data.sources as string[]) || finalSources;
-              continue;
-            }
-
-            if (event.type === 'error') {
-              throw new Error(String(event.data.error || 'RAG stream failed'));
-            }
-          }
-
-          setChatId(responseChatId);
-          loadChatHistory();
-
-          const assistantMessage: DisplayMessage = {
-            id: generateId(),
-            role: 'assistant',
-            content: finalAnswer,
-            timestamp: new Date(),
-            sources: finalSources,
-            mode: 'rag',
-            isNew: false, // Don't use typewriter since we streamed
-          };
-          setMessages(prev => [...prev, assistantMessage]);
-          
-        } catch (streamError) {
-          // Fallback to non-streaming API if streaming fails
-          console.warn('Streaming failed, falling back to blocking API:', streamError);
-          
-          const response: ChatResponse = await api.askQuestion({
-            user_id: userId,
-            question,
-            repo_url: repoUrl,
-            chat_id: chatId,
-            conversation_history: buildConversationHistory(),
-            current_page_context: currentPageContext,
-          });
-          
-          setChatId(response.chat_id);
-          loadChatHistory();
-
-          const assistantMessage: DisplayMessage = {
-            id: generateId(),
-            role: 'assistant',
-            content: response.answer,
-            timestamp: new Date(),
-            sources: response.sources,
-            mode: 'rag',
-            isNew: true,
-          };
-          setMessages(prev => [...prev, assistantMessage]);
-        }
-      }
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to send message';
@@ -618,7 +471,7 @@ export default function ChatInterface({
         content: errorMessage,
         timestamp: new Date(),
         isError: true,
-        mode: chatMode,
+        mode: 'agent',
       };
       setMessages(prev => [...prev, errorDisplayMessage]);
     } finally {
@@ -767,11 +620,14 @@ export default function ChatInterface({
                     chatHistory.map((item) => {
                       const effectiveChatId = item.chat_id ?? item.id;
                       return (
-                      <button
+                      <div
                         key={item.id}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => handleLoadChat(item)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleLoadChat(item)}
                         className={cn(
-                          "w-full text-left p-2.5 rounded-lg transition-all group",
+                          "w-full text-left p-2.5 rounded-lg transition-all group cursor-pointer",
                           chatId === effectiveChatId
                             ? "bg-sky-100 border border-sky-200"
                             : "hover:bg-stone-100 border border-transparent"
@@ -811,7 +667,7 @@ export default function ChatInterface({
                             minute: '2-digit'
                           })}
                         </div>
-                      </button>
+                      </div>
                     );
                     })
                   )}
@@ -829,20 +685,14 @@ export default function ChatInterface({
                   )}
                   {messages.length === 0 && !isLoading && !isChatLoading && (
                     <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                      <div className="w-16 h-16 rounded-3xl bg-sky-50 border border-sky-100 flex items-center justify-center mb-6 shadow-sm">
-                        {chatMode === 'agent' ? (
-                          <Bot className="w-8 h-8 text-teal-700" />
-                        ) : (
-                          <Sparkles className="w-8 h-8 text-sky-600" />
-                        )}
+                      <div className="w-16 h-16 rounded-3xl bg-teal-50 border border-teal-100 flex items-center justify-center mb-6 shadow-sm">
+                        <Bot className="w-8 h-8 text-teal-700" />
                       </div>
                       <h2 className="text-2xl font-semibold text-stone-900 mb-3">
-                        {chatMode === 'agent' ? t('agentDeepAnalysis') : t('quickQA')}
+                        {t('agentDeepAnalysis')}
                       </h2>
                       <p className="text-[15px] text-stone-600 max-w-md leading-relaxed">
-                        {chatMode === 'agent' 
-                          ? t('agentDesc')
-                          : t('ragDesc')}
+                        {t('agentDesc')}
                       </p>
                     </div>
                   )}
@@ -859,20 +709,13 @@ export default function ChatInterface({
                       <div className="ml-2 md:ml-12 p-4 rounded-xl bg-stone-50 border border-stone-200">
                         <LiveStepFlow 
                           steps={liveSteps}
-                          isAgent={chatMode === 'agent'}
+                          isAgent={true}
                           currentPhase={loadingStatus}
                           streamingAnswer={streamingAnswer}
                         />
                         {liveSteps.length === 0 && (
-                          <div className={cn(
-                            "flex items-center gap-3 text-sm",
-                            chatMode === 'agent' ? "text-teal-700" : "text-sky-700"
-                          )}>
-                            {chatMode === 'agent' ? (
-                              <Bot className="w-4 h-4 animate-pulse" />
-                            ) : (
-                              <Sparkles className="w-4 h-4 animate-pulse" />
-                            )}
+                          <div className="flex items-center gap-3 text-sm text-teal-700">
+                            <Bot className="w-4 h-4 animate-pulse" />
                             <span className="font-medium tracking-wide">{loadingStatus || 'Thinking...'}</span>
                           </div>
                         )}
@@ -890,41 +733,16 @@ export default function ChatInterface({
                         value={inputValue}
                         onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
-                        placeholder={chatMode === 'agent' ? "Ask Agent to analyze code..." : "Ask a question..."}
+                        placeholder="Ask Agent to analyze the codebase..."
                         className="w-full bg-transparent border-none outline-none text-[15px] text-stone-900 placeholder:text-stone-400 resize-none px-4 py-3.5 max-h-[200px] leading-relaxed"
                         rows={1}
                         disabled={isLoading}
                         aria-label="Follow-up question"
                       />
                       <div className="flex items-center justify-between px-3 pb-3">
-                        {/* Mode Switcher inside Input Area */}
                         <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => handleSetChatMode('rag')}
-                            className={cn(
-                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all border",
-                              chatMode === 'rag'
-                                ? "bg-sky-100 text-sky-900 border-sky-200"
-                                : "text-stone-500 border-transparent hover:text-stone-800 hover:bg-stone-100"
-                            )}
-                            title="Quick answer mode"
-                          >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>Chat</span>
-                          </button>
-                          <button
-                            onClick={() => handleSetChatMode('agent')}
-                            className={cn(
-                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all border",
-                              chatMode === 'agent'
-                                ? "bg-teal-100 text-teal-900 border-teal-200"
-                                : "text-stone-500 border-transparent hover:text-stone-800 hover:bg-stone-100"
-                            )}
-                            title="Agent deep analysis mode"
-                          >
-                            <Bot className="w-3.5 h-3.5" />
-                            <span>Agent</span>
-                          </button>
+                          <Bot className="w-3.5 h-3.5 text-teal-600" />
+                          <span className="text-[11px] font-medium text-teal-700">Agent</span>
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -934,12 +752,10 @@ export default function ChatInterface({
                             className={cn(
                               "p-2 rounded-xl transition-all shadow-sm",
                               inputValue.trim() && !isLoading
-                                ? chatMode === 'agent'
-                                  ? "bg-teal-600 text-white hover:bg-teal-500"
-                                  : "bg-sky-600 text-white hover:bg-sky-500"
+                                ? "bg-teal-600 text-white hover:bg-teal-500"
                                 : "bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200"
                             )}
-                            aria-label="Send follow-up"
+                            aria-label="Send message"
                           >
                             <ArrowUp className="w-4 h-4" />
                           </button>

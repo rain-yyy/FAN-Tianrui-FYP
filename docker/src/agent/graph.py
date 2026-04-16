@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import replace
 from datetime import datetime
@@ -42,6 +43,7 @@ from src.agent.state import (
     SOFT_ANCHOR_INTENTS,
     LIGHT_RETRIEVAL_INTENTS,
     DEEP_EXPLORATION_INTENTS,
+    EXTERNAL_KNOWLEDGE_INTENTS,
 )
 from src.agent.prompts import (
     get_planner_prompt,
@@ -56,6 +58,8 @@ from src.agent.tools import (
     FileReadTool,
     RepoMapTool,
     GrepSearchTool,
+    LSPResolveTool,
+    WebSearchTool,
 )
 from src.clients.ai_client_factory import get_ai_client, get_model_config
 from src.config import CONFIG
@@ -65,10 +69,10 @@ logger = logging.getLogger("app.agent.graph")
 
 # Intent → default tool ordering (code-centric vs doc-centric).
 INTENT_TOOL_STRATEGIES: Dict[QueryIntent, List[str]] = {
-    # Code-centric
-    QueryIntent.LOCATION: ["code_graph", "file_read"],
-    QueryIntent.MECHANISM: ["code_graph", "file_read", "rag_search"],
-    QueryIntent.CALL_CHAIN: ["code_graph", "file_read"],
+    # Code-centric — lsp_resolve 作为 code_graph 的精确补充
+    QueryIntent.LOCATION: ["lsp_resolve", "code_graph", "file_read"],
+    QueryIntent.MECHANISM: ["code_graph", "lsp_resolve", "file_read", "rag_search"],
+    QueryIntent.CALL_CHAIN: ["lsp_resolve", "code_graph", "file_read"],
     QueryIntent.IMPACT_ANALYSIS: ["code_graph", "rag_search"],
     QueryIntent.DEBUGGING: ["code_graph", "file_read", "rag_search"],
     QueryIntent.CHANGE_GUIDANCE: ["code_graph", "file_read", "rag_search"],
@@ -83,6 +87,10 @@ INTENT_TOOL_STRATEGIES: Dict[QueryIntent, List[str]] = {
     QueryIntent.SECTION_LOCATOR: ["rag_search", "grep_search", "repo_map"],
     QueryIntent.REPO_OVERVIEW: ["repo_map", "rag_search"],
     QueryIntent.FOLLOWUP_CLARIFICATION: ["rag_search", "file_read"],
+    # External knowledge — web_search 优先
+    QueryIntent.VERSION_CHECK: ["web_search"],
+    QueryIntent.API_DOCS: ["web_search", "rag_search"],
+    QueryIntent.EXTERNAL_REFERENCE: ["web_search", "rag_search"],
 }
 
 class AnswerPath:
@@ -117,13 +125,17 @@ class AgentGraphRunner:
         self.repo_root = repo_root
         self.max_iterations = max_iterations
         self.on_event = on_event
-        self.language = language
+        self.language = "en"  # Force English for all user-visible content
         
         self.rag_tool = RAGSearchTool(vector_store_path)
         self.graph_tool = CodeGraphTool(graph_path) if graph_path else None
         self.file_tool = FileReadTool(repo_root) if repo_root else None
         self.repo_map_tool = RepoMapTool(repo_root) if repo_root else None
         self.grep_tool = GrepSearchTool(repo_root) if repo_root else None
+        self.lsp_tool = LSPResolveTool(repo_root) if repo_root else None
+        # Web 搜索工具：从 CONFIG 读取配置
+        web_cfg = CONFIG.get("web_search", {})
+        self.web_tool = WebSearchTool(config=web_cfg)
         
         # 分层模型配置：快速模型用于规划/评估，强模型用于合成
         self._init_tiered_models()
@@ -240,6 +252,14 @@ class AgentGraphRunner:
                 state.is_ready = True
             else:
                 # Deep 路径：迭代式检索与评估（受控循环）
+                # 首轮尝试并行子任务分解（exploration_plan 有多个步骤时）
+                if (
+                    len(state.exploration_plan) >= 2
+                    and state.query_intent not in EXTERNAL_KNOWLEDGE_INTENTS
+                ):
+                    self._run_parallel_subtasks(state)
+                    # 子任务结果已合并入 context_scratchpad；继续正常迭代评估
+                
                 while not state.is_ready and state.iteration_count < state.max_iterations:
                     state = self._node_tool_executor(state)
                     state = self._node_evaluator(state)
@@ -279,7 +299,105 @@ class AgentGraphRunner:
             "caveats": state.caveats,
             "error": state.error,
         }
-    
+
+    # ---- Sub-agent 并行子任务 ----
+
+    def _run_parallel_subtasks(self, state: AgentState) -> None:
+        """
+        并行执行 exploration_plan 中的前 N 个子任务（轻量 LIGHT 路径）。
+
+        每个子任务独立选择并调用一个工具，结果合并入 context_scratchpad
+        和 subtask_results。这相当于对复杂问题做「横向并发探索」，
+        为后续迭代提供更丰富的初始上下文。
+
+        触发条件（由 run() 控制）：
+        - DEEP 路径 + exploration_plan >= 2 步 + 非外部知识意图
+        """
+        subtasks = state.exploration_plan[:3]  # 最多并行 3 个
+        logger.info("[SubtaskParallel] Running %d parallel subtasks: %s", len(subtasks), subtasks)
+
+        self._emit_event("subtask_parallel", {
+            "status": "start",
+            "subtasks_count": len(subtasks),
+            "subtasks": subtasks,
+        })
+        started_at = time.time()
+
+        def _execute_subtask(subtask: str) -> Optional[ContextPiece]:
+            """为单个子任务选工具并执行（单工具，不经 LLM router）"""
+            # 基于意图做简单工具映射，避免再调一次 LLM（保持轻量）
+            intent = state.query_intent
+            entity_hint = state.entities[0] if state.entities else ""
+
+            if intent in (QueryIntent.LOCATION, QueryIntent.CALL_CHAIN):
+                if entity_hint and self.lsp_tool:
+                    return self._timed_execute_tool(
+                        "lsp_resolve",
+                        {"symbol_name": entity_hint, "operation": "find_references"},
+                    )
+                elif entity_hint and self.graph_tool:
+                    return self._timed_execute_tool(
+                        "code_graph",
+                        {"operation": "find_definition", "symbol_name": entity_hint},
+                    )
+            
+            if intent in EXTERNAL_KNOWLEDGE_INTENTS:
+                return self._timed_execute_tool(
+                    "web_search",
+                    {"query": subtask, "search_type": "general"},
+                )
+
+            # 通用回退：用子任务描述做 RAG 搜索
+            return self._timed_execute_tool(
+                "rag_search",
+                {"query": subtask, "top_k": 20},
+            )
+
+        subtask_results: List[Dict[str, Any]] = []
+        futures = {}
+        with ThreadPoolExecutor(max_workers=min(3, len(subtasks))) as executor:
+            for st in subtasks:
+                futures[executor.submit(_execute_subtask, st)] = st
+            for future in as_completed(futures):
+                subtask_str = futures[future]
+                try:
+                    result = future.result()
+                    if result and float(getattr(result, "relevance_score", 0.0)) > 0.0:
+                        state.context_scratchpad.append(result)
+                        state.subtask_results.append(result)
+                        subtask_results.append({
+                            "subtask": subtask_str[:80],
+                            "tool": result.source,
+                            "success": True,
+                            "relevance": float(result.relevance_score),
+                        })
+                    else:
+                        subtask_results.append({
+                            "subtask": subtask_str[:80],
+                            "tool": result.source if result else "unknown",
+                            "success": False,
+                        })
+                except Exception as exc:
+                    logger.warning("[SubtaskParallel] Subtask failed: %s — %s", subtask_str[:60], exc)
+                    subtask_results.append({
+                        "subtask": subtask_str[:80],
+                        "tool": "unknown",
+                        "success": False,
+                    })
+
+        elapsed_ms = int((time.time() - started_at) * 1000)
+        logger.info(
+            "[SubtaskParallel] Done in %dms — %d/%d succeeded",
+            elapsed_ms, sum(1 for r in subtask_results if r.get("success")), len(subtasks),
+        )
+        self._emit_event("subtask_parallel", {
+            "status": "done",
+            "subtasks_count": len(subtasks),
+            "subtasks": subtasks,
+            "elapsed_ms": elapsed_ms,
+            "results": subtask_results,
+        })
+
     def _compress_session(self, state: AgentState) -> AgentState:
         """
         压缩会话历史，提取关键实体和摘要
@@ -572,7 +690,7 @@ class AgentGraphRunner:
                 if not has_rag:
                     selected_tools.insert(0, {
                         "tool": "rag_search",
-                        "arguments": {"query": state.original_question, "top_k": 5}
+                        "arguments": {"query": state.original_question, "top_k": 20}
                     })
                 if not has_repo_map and self.repo_map_tool and state.query_intent in (
                     QueryIntent.ARCHITECTURE, QueryIntent.REPO_OVERVIEW
@@ -616,6 +734,11 @@ class AgentGraphRunner:
                         "arguments": {"include_signatures": True}
                     })
         
+        # 查询富化：将过短的 rag/grep 查询扩展为包含具体上下文的完整描述
+        self._enrich_tool_queries(state, selected_tools)
+
+        self._inject_deep_followup_tools(state, selected_tools)
+
         # 去重和限制
         dedup: Dict[str, Dict[str, Any]] = {}
         for item in selected_tools:
@@ -623,7 +746,201 @@ class AgentGraphRunner:
             dedup[key] = item
         selected_tools = list(dedup.values())[:3]
         return selected_tools
-    
+
+    _CODE_FILE_SUFFIXES: tuple[str, ...] = (
+        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".pyi",
+        ".rs", ".go", ".java", ".kt", ".swift", ".vue", ".svelte",
+    )
+
+    @classmethod
+    def _is_code_repo_path(cls, path: str) -> bool:
+        if not path or path == "unknown":
+            return False
+        raw = path.split(":", 1)[-1].strip()
+        return any(raw.endswith(s) for s in cls._CODE_FILE_SUFFIXES)
+
+    def _extract_priority_file_path(self, state: AgentState) -> Optional[str]:
+        for piece in reversed(state.context_scratchpad):
+            if piece.source == "grep_search":
+                for m in piece.metadata.get("grep_matches") or []:
+                    fp = m.get("file")
+                    if fp and self._is_code_repo_path(fp):
+                        return str(fp)
+            if piece.source == "rag_search":
+                for src in piece.metadata.get("sources") or []:
+                    fp = src.split(":", 1)[-1].strip() if ":" in src else src.strip()
+                    if self._is_code_repo_path(fp):
+                        return fp
+        for piece in reversed(state.context_scratchpad):
+            if piece.file_path and self._is_code_repo_path(piece.file_path):
+                return piece.file_path
+        return None
+
+    @staticmethod
+    def _entities_look_like_code_symbols(entities: List[str]) -> bool:
+        if not entities:
+            return False
+        for e in entities:
+            t = (e or "").strip()
+            if len(t) < 2 or " " in t or any(sep in t for sep in ("/", "\\", ".md")):
+                return False
+        return True
+
+    def _heuristic_grep_pattern(self, state: AgentState) -> str:
+        blob = " ".join(
+            state.rewritten_queries[:2]
+            if state.rewritten_queries
+            else [state.original_question]
+        )
+        tokens = re.findall(r"[A-Za-z][A-Za-z0-9_]{2,}", blob)
+        stop = {
+            "the", "and", "for", "are", "how", "what", "when", "why", "this", "that",
+            "with", "from", "into", "not", "but", "has", "have", "was", "were", "does",
+            "did", "can", "use", "using", "used", "one", "any", "all", "out", "our",
+            "you", "its", "way", "may", "via",
+        }
+        seen: set[str] = set()
+        kws: List[str] = []
+        for t in tokens:
+            tl = t.lower()
+            if tl in stop or tl in seen:
+                continue
+            seen.add(tl)
+            kws.append(t)
+            if len(kws) >= 4:
+                break
+        if len(kws) < 2:
+            return ""
+        return "|".join(re.escape(k) for k in kws)
+
+    def _inject_deep_followup_tools(
+        self,
+        state: AgentState,
+        selected_tools: List[Dict[str, Any]],
+    ) -> None:
+        """
+        深度探索（mechanism 等）：在 RAG/ grep 已经给出源码路径后，主动插入 file_read；
+        对「自然语言实体」补充词法 grep，避免 code_graph find_definition 全程空转。
+        """
+        if state.query_intent not in DEEP_EXPLORATION_INTENTS:
+            return
+
+        called = {c.tool for c in state.tool_calls_history}
+        planned = {t["tool"] for t in selected_tools}
+
+        if (
+            self.file_tool
+            and ToolType.FILE_READ not in called
+            and "file_read" not in planned
+            and state.iteration_count >= 1
+        ):
+            path = self._extract_priority_file_path(state)
+            if path:
+                selected_tools.insert(
+                    0,
+                    {
+                        "tool": "file_read",
+                        "arguments": {"file_path": path, "max_lines": 240},
+                    },
+                )
+
+        if (
+            state.iteration_count == 0
+            and self.grep_tool
+            and "grep_search" not in called
+            and "grep_search" not in planned
+            and not self._entities_look_like_code_symbols(state.entities)
+        ):
+            pat = self._heuristic_grep_pattern(state)
+            if pat:
+                selected_tools.append({
+                    "tool": "grep_search",
+                    "arguments": {
+                        "pattern": pat,
+                        "max_results": 24,
+                        "is_regex": True,
+                        "case_sensitive": False,
+                    },
+                })
+
+        # Anti-stagnation：连续 ≥ 2 轮置信度 ≤ 0.5 且仍有 missing_pieces 时，
+        # 注入一条尚未被 rag_search 尝试过的 missing_piece 作为精准查询，
+        # 打破"相同工具相同参数"的死循环。
+        if (
+            state.iteration_count >= 2
+            and state.confidence_score <= 0.5
+            and state.missing_pieces
+        ):
+            tried_rag_queries = {
+                str(call.arguments.get("query") or "").lower()
+                for call in state.tool_calls_history
+                if call.tool == ToolType.RAG_SEARCH
+            }
+            current_tools = {t["tool"] for t in selected_tools}
+            for piece in state.missing_pieces:
+                if len(piece) > 20 and piece.lower() not in tried_rag_queries:
+                    if "rag_search" not in current_tools:
+                        selected_tools.append({
+                            "tool": "rag_search",
+                            "arguments": {"query": piece, "top_k": 20},
+                        })
+                    break
+
+    def _build_contextual_query(self, state: AgentState, keyword: str) -> str:
+        """
+        将单词/短语 keyword 扩展为包含具体缺失信息的富查询。
+
+        优先从 missing_pieces 中找包含 keyword 的最长条目；
+        其次直接使用 missing_pieces 中最长的条目；
+        最后回退到把 keyword 拼入原始问题。
+        """
+        kw_lower = keyword.lower()
+        if state.missing_pieces:
+            relevant = [m for m in state.missing_pieces if kw_lower in m.lower()]
+            if relevant:
+                return max(relevant, key=len)[:250]
+            best = max(state.missing_pieces, key=len)
+            if len(best) > len(keyword):
+                return best[:250]
+        if kw_lower in state.original_question.lower():
+            return state.original_question[:250]
+        return f"{keyword} {state.original_question}"[:250]
+
+    def _enrich_tool_queries(self, state: AgentState, selected_tools: List[Dict[str, Any]]) -> None:
+        """
+        扩展本轮工具计划中过短（< 25 chars）的查询。
+
+        避免 tool_router 生成单词级 grep/rag 查询（如 "table"、"translate"）
+        而无法定位具体实现。enrichment 策略：
+        - rag_search：短 query → 用 missing_pieces / 原始问题补全
+        - grep_search（无 grep_tool）：短 pattern → 同上，存入 args["query"]
+          供 _execute_tool 中的 rag fallback 使用
+        已在 tool_calls_history 中出现过的查询不重复注入。
+        """
+        already_tried: set = {
+            str(call.arguments.get("query") or call.arguments.get("pattern") or "")
+            for call in state.tool_calls_history
+        }
+
+        for item in selected_tools:
+            tool_name = item["tool"]
+            args = item["arguments"]
+
+            if tool_name == "rag_search":
+                q = (args.get("query") or "").strip()
+                if len(q) < 25:
+                    enriched = self._build_contextual_query(state, q)
+                    if len(enriched) > len(q) and enriched not in already_tried:
+                        args["query"] = enriched
+
+            elif tool_name == "grep_search" and not self.grep_tool:
+                # grep 无 repo_root 时会 fallback 到 rag；预置富查询供 _execute_tool 使用
+                pat = (args.get("pattern") or "").strip()
+                if len(pat) < 25:
+                    enriched = self._build_contextual_query(state, pat)
+                    if len(enriched) > len(pat) and enriched not in already_tried:
+                        args["query"] = enriched
+
     def _get_fallback_tools(self, state: AgentState) -> List[Dict[str, Any]]:
         """获取回退工具列表（doc-intent 优先 rag_search）"""
         tools = []
@@ -637,7 +954,7 @@ class AgentGraphRunner:
             if state.entities and self.graph_tool:
                 tools.append({"tool": "code_graph", "arguments": {"operation": "find_definition", "symbol_name": state.entities[0]}})
             else:
-                tools.append({"tool": "rag_search", "arguments": {"query": state.original_question, "top_k": 5}})
+                tools.append({"tool": "rag_search", "arguments": {"query": state.original_question, "top_k": 20}})
         
         return tools
 
@@ -874,27 +1191,46 @@ class AgentGraphRunner:
                         state.add_anchor(anchor)
         
         elif tool_name == "rag_search":
-            # 从 RAG 结果中提取锚点（基于来源信息）
+            # 从 RAG 结果中提取锚点；源码路径提升为 DEFINITION 类，便于机制类问题通过硬门控
             sources = result.metadata.get("sources", [])
-            for source in sources[:2]:
+            for source in sources[:3]:
                 if ":" in source:
                     parts = source.split(":", 1)
                     file_path = parts[1] if len(parts) > 1 else parts[0]
                 else:
                     file_path = source
-                    
                 if file_path and file_path != "unknown":
+                    is_code = self._is_code_repo_path(file_path)
+                    conf = max(float(result.relevance_score) * 0.82 + 0.05, 0.72) if is_code else float(result.relevance_score) * 0.7
                     anchor = Anchor(
-                        anchor_type=AnchorType.REFERENCE,
+                        anchor_type=AnchorType.DEFINITION if is_code else AnchorType.REFERENCE,
                         symbol_name=file_path.split("/")[-1].split(".")[0],
                         file_path=file_path,
-                        confidence=result.relevance_score * 0.7,
-                        metadata={"from_rag": True}
+                        confidence=min(conf, 0.92),
+                        metadata={"from_rag": True, "code_hit": is_code},
                     )
                     state.add_anchor(anchor)
 
         elif tool_name == "grep_search":
             matches = result.metadata.get("grep_matches") or []
+
+            # grep 无 repo_root 时 fallback 到 rag_search；result.source 为 "rag_search"。
+            # 此时 grep_matches 为空，改用 rag-style sources 提取锚点。
+            if not matches and result.source == "rag_search":
+                sources = result.metadata.get("sources", [])
+                for source in sources[:3]:
+                    file_path = source.split(":", 1)[-1].strip() if ":" in source else source.strip()
+                    if file_path and file_path != "unknown" and self._is_code_repo_path(file_path):
+                        anchor = Anchor(
+                            anchor_type=AnchorType.REFERENCE,
+                            symbol_name=(tool_args.get("pattern") or tool_args.get("query") or "match")[:80],
+                            file_path=file_path,
+                            confidence=min(float(result.relevance_score) * 0.75, 0.80),
+                            metadata={"from_grep_rag_fallback": True},
+                        )
+                        state.add_anchor(anchor)
+                return
+
             pat = tool_args.get("pattern") or result.metadata.get("pattern") or "match"
             for m in matches[:5]:
                 fp = m.get("file")
@@ -1066,9 +1402,16 @@ class AgentGraphRunner:
         
         # 检查 2：证据类型覆盖
         evidence_types = {e.evidence_type for e in state.evidence_cards}
-        has_structural = EvidenceType.DEFINITION in evidence_types or EvidenceType.DIRECT_CALL in evidence_types
+        # LEXICAL_MATCH + definition_anchors 视为足够的结构化证据：
+        # RAG 命中代码文件（LEXICAL_MATCH）且存在定义锚点，说明已定位到实现位置，
+        # 无需强制要求只有 file_read / code_graph 才算结构化。
+        has_structural = (
+            EvidenceType.DEFINITION in evidence_types
+            or EvidenceType.DIRECT_CALL in evidence_types
+            or (EvidenceType.LEXICAL_MATCH in evidence_types and bool(definition_anchors))
+        )
         has_semantic = EvidenceType.SEMANTIC_MATCH in evidence_types or EvidenceType.DOCUMENTATION in evidence_types
-        
+
         if not has_structural:
             if (is_soft_anchor_intent or is_doc_intent) and has_semantic:
                 # 文档/软意图有语义证据即可
@@ -1103,7 +1446,7 @@ class AgentGraphRunner:
 
     @staticmethod
     def _rerank_evidence(state: AgentState) -> None:
-        """按证据类型权重 + 原始 relevance 重排，截断到前 15 条。"""
+        """按证据类型权重 + 原始 relevance 重排，截断到前 30 条。"""
         type_weight = {
             EvidenceType.DEFINITION: 1.0,
             EvidenceType.DIRECT_CALL: 0.9,
@@ -1122,8 +1465,8 @@ class AgentGraphRunner:
             return w * conf
 
         state.evidence_cards.sort(key=score, reverse=True)
-        if len(state.evidence_cards) > 15:
-            state.evidence_cards = state.evidence_cards[:15]
+        if len(state.evidence_cards) > 30:
+            state.evidence_cards = state.evidence_cards[:30]
     
     def _node_synthesizer(self, state: AgentState) -> AgentState:
         """
@@ -1163,6 +1506,16 @@ class AgentGraphRunner:
                 citation = evidence.get_citation()
                 if citation and citation.lower() != "unknown" and citation not in state.sources:
                     state.sources.append(citation)
+            
+            # 强制注入 context_scratchpad 中所有检索到的原始来源
+            for piece in state.context_scratchpad:
+                # 检查 piece.file_path 或 metadata 中的 source
+                source_path = piece.file_path or piece.metadata.get("source") or piece.metadata.get("file_path")
+                if source_path and isinstance(source_path, str) and source_path.lower() != "unknown":
+                    # 统一格式处理（如果是 RAG 的 category:path 格式，提取 path）
+                    clean_source = source_path.split(":", 1)[-1] if ":" in source_path and not source_path.startswith("/") else source_path
+                    if clean_source not in state.sources:
+                        state.sources.append(clean_source)
                     
         except Exception as e:
             logger.error(f"[Synthesizer] Failed: {e}")
@@ -1210,7 +1563,7 @@ class AgentGraphRunner:
             if tool_name == "rag_search":
                 return self.rag_tool.execute(
                     query=args.get("query", ""),
-                    top_k=args.get("top_k", 5)
+                    top_k=args.get("top_k", 20)
                 )
             elif tool_name == "code_graph" and self.graph_tool:
                 return self.graph_tool.execute(
@@ -1229,6 +1582,35 @@ class AgentGraphRunner:
                     include_signatures=args.get("include_signatures", True),
                     max_depth=args.get("max_depth", 3)
                 )
+            elif tool_name == "lsp_resolve" and self.lsp_tool:
+                return self.lsp_tool.execute(
+                    symbol_name=args.get("symbol_name", ""),
+                    operation=args.get("operation", "find_definition"),
+                    file_hint=args.get("file_hint"),
+                )
+            elif tool_name == "lsp_resolve" and not self.lsp_tool:
+                # No repo_root: fall back to code_graph or rag
+                symbol = (args.get("symbol_name") or "").strip()
+                if symbol and self.graph_tool:
+                    return self.graph_tool.execute(
+                        operation="find_definition",
+                        symbol_name=symbol,
+                    )
+                if symbol:
+                    return self.rag_tool.execute(query=symbol, top_k=20)
+                return ContextPiece(
+                    source="lsp_resolve",
+                    content="lsp_resolve requires repo_root; no repo configured.",
+                    relevance_score=0.0,
+                    metadata={"error": "no_repo_root"},
+                )
+            elif tool_name == "web_search":
+                return self.web_tool.execute(
+                    query=args.get("query", ""),
+                    search_type=args.get("search_type", "general"),
+                    max_results=int(args.get("max_results", 5)),
+                    domain_filter=args.get("domain_filter"),
+                )
             elif tool_name == "grep_search" and self.grep_tool:
                 return self.grep_tool.execute(
                     pattern=args.get("pattern", ""),
@@ -1240,10 +1622,11 @@ class AgentGraphRunner:
                     context_lines=int(args.get("context_lines", 2)),
                 )
             elif tool_name == "grep_search" and not self.grep_tool:
-                pat = (args.get("pattern") or "").strip()
-                q = pat or (args.get("query") or "").strip()
+                # 优先使用 _enrich_tool_queries 预置的富上下文 query，
+                # 再退而使用原始 pattern；避免以单词级短串检索。
+                q = (args.get("query") or args.get("pattern") or "").strip()
                 if q:
-                    return self.rag_tool.execute(query=q, top_k=args.get("top_k", 5))
+                    return self.rag_tool.execute(query=q, top_k=args.get("top_k", 20))
                 return ContextPiece(
                     source="grep_search",
                     content="grep_search requires repo_root; pattern was empty and no RAG query to fall back.",
@@ -1261,7 +1644,7 @@ class AgentGraphRunner:
                 q = (args.get("query") or "").strip()
                 if not q:
                     q = "repository structure overview"
-                return self.rag_tool.execute(query=q, top_k=args.get("top_k", 5))
+                return self.rag_tool.execute(query=q, top_k=args.get("top_k", 20))
             elif tool_name == "code_graph" and not self.graph_tool:
                 parts = [p for p in (args.get("symbol_name"), args.get("file_path")) if p]
                 q = " ".join(str(p) for p in parts) if parts else (args.get("query") or "").strip()
@@ -1284,7 +1667,7 @@ class AgentGraphRunner:
                         relevance_score=0.0,
                         metadata={"error": "fallback_no_query", "requested_tool": tool_name},
                     )
-                return self.rag_tool.execute(query=q, top_k=args.get("top_k", 5))
+                return self.rag_tool.execute(query=q, top_k=args.get("top_k", 20))
                 
         except Exception as e:
             logger.error(f"Tool {tool_name} execution failed: {e}")

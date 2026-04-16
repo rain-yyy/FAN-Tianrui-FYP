@@ -1,8 +1,13 @@
 import os
-from typing import Optional, List
+from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 from supabase import create_client, Client
 import dotenv
+
+from src.utils.wiki_cache_policy import (
+    WIKI_GENERATION_CACHE_MAX_AGE_DAYS,
+    wiki_generation_cache_is_stale,
+)
 
 dotenv.load_dotenv()
 
@@ -118,7 +123,7 @@ class SupabaseClient:
                 "repo_url": repo_url,
                 "status": "pending",
                 "progress": 0.0,
-                "current_step": "等待执行",
+                "current_step": "Waiting for execution",
                 "created_at": "now()",
                 "last_updated": "now()"
             }).execute()
@@ -248,6 +253,47 @@ class SupabaseClient:
         except Exception as e:
             raise SupabaseStorageError(f"Failed to fetch repositories: {e}") from e
 
+    def get_repositories_for_urls(self, repo_urls: List[str]) -> Dict[str, Optional[dict]]:
+        """
+        批量拉取 repositories 行，key 为调用方传入 URL 经 normalize 后的字符串。
+        缺失时回退到 get_repo_information（含模糊匹配），避免 N+1 全走模糊查询。
+        """
+        if not self.client:
+            return {}
+        ordered_unique: List[str] = []
+        for u in repo_urls:
+            n = self._normalize_repo_url(u or "")
+            if not n or n in ordered_unique:
+                continue
+            ordered_unique.append(n)
+
+        if not ordered_unique:
+            return {}
+
+        by_key: Dict[str, dict] = {}
+        try:
+            resp = (
+                self.client.table("repositories")
+                .select("*")
+                .in_("repo_url", ordered_unique)
+                .execute()
+            )
+            for row in resp.data or []:
+                rk = self._normalize_repo_url(row.get("repo_url") or "")
+                if rk:
+                    by_key[rk] = row
+        except Exception as e:
+            print(f"[Supabase] Error batch-fetch repositories: {e}")
+
+        for k in ordered_unique:
+            if k in by_key:
+                continue
+            row = self.get_repo_information(k)
+            if row:
+                by_key[k] = row
+
+        return {k: by_key.get(k) for k in ordered_unique}
+
     def get_repo_information(self, repo_url: str):
         """
         Get a repo information from Supabase.
@@ -281,10 +327,51 @@ class SupabaseClient:
             print(f"[Supabase] Error getting repo information: {e}")
             return None
 
-    def build_cached_task_result(self, repo_url: str):
+    def _repository_wiki_cache_ttl_fresh_db(
+        self, db_repo_url: str, max_age_days: int, repo_info: dict
+    ) -> bool:
+        """
+        True = 仍可短路 /generate。优先 rpc：用 Postgres `timezone('utc', now())` 与行内 `last_updated` 比较。
+        RPC 未部署或失败时，仅用行内 `last_updated` + 应用 UTC 回退（日志会提示）。
+        """
+        if max_age_days < 0:
+            return True
+        if not self.client:
+            return not wiki_generation_cache_is_stale(repo_info, max_age_days)
+
+        try:
+            resp = (
+                self.client.rpc(
+                    "repository_wiki_cache_ttl_fresh",
+                    {"p_repo_url": db_repo_url, "p_max_age_days": max_age_days},
+                ).execute()
+            )
+            data = resp.data
+            if isinstance(data, bool):
+                return data
+            if isinstance(data, list):
+                if not data:
+                    return False
+                row0 = data[0]
+                if isinstance(row0, bool):
+                    return row0
+                return bool(row0)
+            return bool(data)
+        except Exception as e:
+            print(
+                "[Supabase] repository_wiki_cache_ttl_fresh RPC 不可用或未执行 "
+                f"supabase_migrations 中的 SQL，回退为仅基于表字段 last_updated + 应用 UTC：{e}"
+            )
+            return not wiki_generation_cache_is_stale(repo_info, max_age_days)
+
+    def build_cached_task_result(self, repo_url: str, max_cache_age_days: Optional[int] = None):
         """
         Build task result payload from repositories table for cache hit.
         Returns None when required wiki artifacts are missing.
+
+        max_cache_age_days: 传入时（如 WIKI_GENERATION_CACHE_MAX_AGE_DAYS），按 `repositories.last_updated`
+        判断；优先在数据库内与 `now() UTC` 比较（rpc），未部署则回退应用时钟。
+        None 表示不校验时效（如工作台列表仍展示「有产物但偏旧」的仓库）。
         """
         repo_info = self.get_repo_information(repo_url)
         if not repo_info:
@@ -297,6 +384,17 @@ class SupabaseClient:
         if not r2_structure_url or not r2_content_urls:
             return None
 
+        db_key = (repo_info.get("repo_url") or "").strip() or self._normalize_repo_url(repo_url)
+        if max_cache_age_days is not None and not self._repository_wiki_cache_ttl_fresh_db(
+            db_key, max_cache_age_days, repo_info
+        ):
+            print(
+                f"[Supabase] Wiki cache stale for {repo_url!r} "
+                f"(repositories.last_updated vs DB now, TTL {max_cache_age_days}d), "
+                "skip short-circuit — full regeneration."
+            )
+            return None
+
         return {
             "r2_structure_url": r2_structure_url,
             "r2_content_urls": r2_content_urls,
@@ -305,6 +403,52 @@ class SupabaseClient:
             "vector_store_path": repo_info.get("vector_store_path"),
             "repo_url": self._normalize_repo_url(repo_url),
         }
+
+    def get_user_dashboard_repositories(self, user_id: str) -> List[dict]:
+        """
+        工作台展示用：仅包含 `repositories` 表中已具备完整 wiki 产物的仓库（与缓存命中条件一致），
+        且该用户存在已完成/缓存任务。卡片数据以 repositories 行为准；task_id 用于跳转 Wiki。
+        """
+        if not self.client:
+            return []
+
+        tasks = self.get_all_tasks(user_id)
+        if not tasks:
+            return []
+
+        per_repo: Dict[str, dict] = {}
+        for t in tasks:
+            if t.get("status") not in ("completed", "cached"):
+                continue
+            ru = t.get("repo_url")
+            if not ru:
+                continue
+            norm = self._normalize_repo_url(ru)
+            if not norm:
+                continue
+            created = t.get("created_at") or ""
+            task_id = t.get("task_id")
+            prev = per_repo.get(norm)
+            if not prev or (created and created > (prev.get("created_at") or "")):
+                per_repo[norm] = {"task_id": task_id, "created_at": created}
+
+        result: List[dict] = []
+        for norm, meta in per_repo.items():
+            if not self.build_cached_task_result(norm):
+                continue
+            row = self.get_repo_information(norm) or {}
+            result.append({
+                "repo_url": norm,
+                "task_id": meta["task_id"],
+                "github_short_description": row.get("github_short_description"),
+                "description": row.get("description"),
+                "stargazers_count": row.get("stargazers_count"),
+                "vector_store_path": row.get("vector_store_path"),
+                "last_updated": row.get("last_updated"),
+            })
+
+        result.sort(key=lambda item: item.get("last_updated") or "", reverse=True)
+        return result
 
     # ============ Chat Related Methods ============
 
@@ -427,7 +571,14 @@ class SupabaseClient:
             print(f"[Supabase] Error deleting chat history: {e}")
             return False
 
-    def update_repository_information(self, repo_url: str, r2_structure_url: Optional[str], r2_content_urls: Optional[List[str]], vector_store_path: Optional[str], description: Optional[str] = None):
+    def update_repository_information(
+        self,
+        repo_url: str,
+        r2_structure_url: Optional[str],
+        r2_content_urls: Optional[List[str]],
+        vector_store_path: Optional[str],
+        description: Optional[str] = None,
+    ):
         """
         Update repository information in Supabase using upsert.
         """
@@ -456,6 +607,37 @@ class SupabaseClient:
             return True
         except Exception as e:
             print(f"[Supabase] Error updating repository information (upsert): {e}")
+            return False
+
+    def update_github_public_metadata(
+        self,
+        repo_url: str,
+        *,
+        github_short_description: Optional[str] = None,
+        stargazers_count: Optional[int] = None,
+    ) -> bool:
+        """
+        写入 GitHub 公开元数据（stars、GitHub 简介）与刷新时间；不触碰 LLM description。
+        使用 upsert：在 ON CONFLICT 时只更新本 payload 中的列，避免纯 update 匹配 0 行时无写入；
+        新行仅含元数据列时其余字段为 NULL，后续 Wiki upsert 会补全。
+        """
+        if not self.client:
+            return False
+        repo_url = self._normalize_repo_url(repo_url)
+        try:
+            data: dict = {
+                "repo_url": repo_url,
+                "github_metadata_updated_at": "now()",
+                "last_updated": "now()",
+            }
+            if github_short_description is not None:
+                data["github_short_description"] = github_short_description
+            if stargazers_count is not None:
+                data["stargazers_count"] = stargazers_count
+            self.client.table("repositories").upsert(data).execute()
+            return True
+        except Exception as e:
+            print(f"[Supabase] Error updating GitHub public metadata: {e}")
             return False
 
     # ============ Profile Related Methods ============

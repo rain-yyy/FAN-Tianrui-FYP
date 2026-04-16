@@ -49,5 +49,5 @@ def get_model_config(config: dict, model_key: str) -> Tuple[str, str]:
     ai_models = config.get("ai_models", {})
     provider = ai_models.get("provider", "openrouter")
     models = ai_models.get("models", {})
-    model_name = models.get(model_key, "anthropic/claude-3.5-sonnet")
+    model_name = models.get(model_key, "qwen/qwen3-235b-a22b-2507")
     return provider, model_name

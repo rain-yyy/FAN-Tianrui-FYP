@@ -35,11 +35,12 @@ export default function AppLayout() {
             aria-label="Go to Dashboard"
           >
             <div className="w-9 h-9 rounded-xl bg-sky-50 border border-sky-200/80 flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm">
-              <FileCode2 className="w-5 h-5 text-sky-700" />
+              {/* <FileCode2 className="w-5 h-5 text-sky-700" /> */}
+              <img src="/logo.png" alt="GitReader" className="w-5 h-5" />
             </div>
             <div>
               <p className="text-base font-semibold text-stone-900 tracking-tight">
-                Project Wiki Generator
+                GitReader
               </p>
             </div>
           </button>

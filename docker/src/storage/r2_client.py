@@ -291,7 +291,8 @@ def upload_wiki_to_r2(
     structure_local_path: Optional[Path] = None,
     content_dir: Optional[Path] = None,
     task_id: Optional[str] = None,
-) -> Tuple[Optional[str], Optional[List[str]]]:
+    graphrag_local_path: Optional[Path] = None,
+) -> Tuple[Optional[str], Optional[List[str]], Optional[str]]:
     """
     Upload wiki structure and content files to R2.
 
@@ -301,16 +302,17 @@ def upload_wiki_to_r2(
         structure_local_path: Local path to wiki_structure.json (optional, will upload dict if not provided)
         content_dir: Local directory containing content JSON files (optional)
         task_id: Optional task ID for path isolation
+        graphrag_local_path: Optional local graphrag_communities.json (same bucket prefix as wiki)
 
     Returns:
-        Tuple of (structure_url, content_urls) or (None, None) if upload fails
+        Tuple of (structure_url, content_urls, graphrag_url) — graphrag_url may be None if skipped
     """
     try:
         client = R2Client()
     except ValueError as e:
         print(f"[WARN] R2 client initialization failed: {e}")
         print("[INFO] Skipping R2 upload, will return local paths instead.")
-        return None, None
+        return None, None, None
 
     # Generate base path with task_id isolation
     repo_name = client._extract_repo_name(repo_url)
@@ -329,9 +331,18 @@ def upload_wiki_to_r2(
 
     if not structure_success:
         print("[ERROR] Failed to upload wiki structure to R2")
-        return None, None
+        return None, None, None
 
     structure_url = client.get_public_url(structure_key)
+
+    graphrag_url: Optional[str] = None
+    if graphrag_local_path and graphrag_local_path.is_file():
+        graphrag_key = f"{base_path}/graphrag_communities.json"
+        if client.upload_file(graphrag_local_path, graphrag_key):
+            graphrag_url = client.get_public_url(graphrag_key)
+            print(f"[INFO] Uploaded GraphRAG metadata to R2: {graphrag_key}")
+        else:
+            print("[WARN] Failed to upload graphrag_communities.json to R2")
 
     # Upload content files if provided
     content_urls = []
@@ -349,4 +360,4 @@ def upload_wiki_to_r2(
             else:
                 print("[WARN] Failed to upload any content files to R2")
     
-    return structure_url, content_urls if content_urls else None
+    return structure_url, content_urls if content_urls else None, graphrag_url

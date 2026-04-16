@@ -26,12 +26,12 @@ def _ensure_vector_store_exists(db_path: str) -> None:
 def load_knowledge_base(db_path: str) -> FAISS:
     """
     从本地加载 FAISS 向量数据库和嵌入模型。
-    使用 OpenRouter (baai/bge-m3) 进行 embedding。
+    使用 OpenRouter (qwen/qwen3-embedding-8b) 进行 embedding。
     """
     _ensure_vector_store_exists(db_path)
 
     logger.info(f"Loading knowledge base from {db_path}...")
-    # 必须使用与创建时相同的嵌入模型（OpenRouter baai/bge-m3）
+    # 必须使用与创建时相同的嵌入模型（OpenRouter qwen/qwen3-embedding-8b）
     embeddings = get_openrouter_embeddings()
 
     db = FAISS.load_local(db_path, embeddings, allow_dangerous_deserialization=True)

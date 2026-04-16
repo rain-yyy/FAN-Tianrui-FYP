@@ -1,3 +1,0 @@
-question,code_load_s,code_bm25_s,code_dense_s,text_load_s,text_bm25_s,text_dense_s,full_chat_hyde_on_s,full_chat_hyde_off_s
-How does the router work?,0.1024,0.0009,1.873,0.0584,0.0082,1.749,11.0264,9.8295
-What is the main entry point?,0.056,0.0029,1.7816,0.0598,0.0082,2.0494,15.9659,7.6602

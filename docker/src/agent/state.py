@@ -25,6 +25,8 @@ class ToolType(str, Enum):
     FILE_READ = "file_read"
     REPO_MAP = "repo_map"
     GREP_SEARCH = "grep_search"
+    LSP_RESOLVE = "lsp_resolve"
+    WEB_SEARCH = "web_search"
 
 
 class QueryIntent(str, Enum):
@@ -71,6 +73,10 @@ class QueryIntent(str, Enum):
     GENERAL = "general"
     # 兼容旧版本
     IMPLEMENTATION = "implementation"
+    # 外部知识类意图
+    VERSION_CHECK = "version_check"
+    API_DOCS = "api_docs"
+    EXTERNAL_REFERENCE = "external_reference"
 
 
 # ---- 意图分类辅助集合 ----
@@ -95,6 +101,12 @@ SOFT_ANCHOR_INTENTS = {
     QueryIntent.TOPIC_COVERAGE, QueryIntent.RELATIONSHIP, QueryIntent.EVIDENCE,
     QueryIntent.SECTION_LOCATOR, QueryIntent.REPO_OVERVIEW,
     QueryIntent.FOLLOWUP_CLARIFICATION, QueryIntent.GENERAL,
+    QueryIntent.VERSION_CHECK, QueryIntent.API_DOCS, QueryIntent.EXTERNAL_REFERENCE,
+}
+
+# 外部网络意图（需要 web_search）
+EXTERNAL_KNOWLEDGE_INTENTS = {
+    QueryIntent.VERSION_CHECK, QueryIntent.API_DOCS, QueryIntent.EXTERNAL_REFERENCE,
 }
 
 # 轻量检索即可回答的意图（只需 1 轮 RAG / repo_map）
@@ -102,6 +114,7 @@ LIGHT_RETRIEVAL_INTENTS = {
     QueryIntent.CONCEPT, QueryIntent.USAGE, QueryIntent.TOPIC_COVERAGE,
     QueryIntent.SECTION_LOCATOR, QueryIntent.REPO_OVERVIEW,
     QueryIntent.FOLLOWUP_CLARIFICATION,
+    QueryIntent.VERSION_CHECK, QueryIntent.API_DOCS, QueryIntent.EXTERNAL_REFERENCE,
 }
 
 # 需要深度多轮迭代的意图
@@ -431,6 +444,7 @@ class AgentState:
     # ========== 上下文收集（原始） ==========
     context_scratchpad: List[ContextPiece] = field(default_factory=list)
     missing_pieces: List[str] = field(default_factory=list)
+    subtask_results: List[ContextPiece] = field(default_factory=list)
     
     # ========== 工具调用追踪 ==========
     tool_calls_history: List[ToolCall] = field(default_factory=list)
@@ -477,7 +491,7 @@ class AgentState:
     def add_anchor(self, anchor: Anchor) -> None:
         """添加锚点"""
         self.anchors.append(anchor)
-        if anchor.confidence > 0.7:
+        if anchor.confidence >= 0.7:
             self.has_primary_anchor = True
     
     def add_evidence(self, evidence: EvidenceCard) -> None:
@@ -574,7 +588,11 @@ class AgentState:
                 self.evidence_cards.append(evidence)
     
     def _infer_evidence_type(self, piece: ContextPiece) -> EvidenceType:
-        """推断证据类型"""
+        """推断证据类型
+        
+        当 RAG 命中了真实代码文件（.py/.ts 等）时，提升为 LEXICAL_MATCH 而非
+        SEMANTIC_MATCH，使其能被 _hard_gate_check 的结构化证据检测识别。
+        """
         source = piece.source.lower()
         if "definition" in source or "find_definition" in source:
             return EvidenceType.DEFINITION
@@ -585,7 +603,16 @@ class AgentState:
         elif "grep" in source:
             return EvidenceType.LEXICAL_MATCH
         elif "rag" in source:
-            return EvidenceType.SEMANTIC_MATCH
+            _code_exts = (
+                ".py", ".pyi", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+                ".go", ".rs", ".java", ".kt", ".swift", ".vue", ".svelte",
+            )
+            sources = piece.metadata.get("sources", [])
+            has_code_source = any(
+                (s.split(":", 1)[-1].strip() if ":" in s else s.strip()).endswith(_code_exts)
+                for s in sources
+            )
+            return EvidenceType.LEXICAL_MATCH if has_code_source else EvidenceType.SEMANTIC_MATCH
         elif "graph" in source:
             return EvidenceType.DIRECT_CALL
         return EvidenceType.SEMANTIC_MATCH
@@ -691,6 +718,23 @@ class AgentState:
             trajectory.append(call.to_dict())
         return trajectory
     
+    def has_verified_code_evidence(self) -> bool:
+        """
+        机制/调用链类问题：停止检索前至少应有 file_read、结构化证据或可靠的词法命中，
+        否则仅有 RAG 语义块容易导致合成阶段「证据不足」却提前结束循环。
+        """
+        if any(
+            tc.tool == ToolType.FILE_READ and tc.success
+            for tc in self.tool_calls_history
+        ):
+            return True
+        types_found = {e.evidence_type for e in self.evidence_cards}
+        if EvidenceType.DEFINITION in types_found or EvidenceType.DIRECT_CALL in types_found:
+            return True
+        if EvidenceType.LEXICAL_MATCH in types_found:
+            return True
+        return False
+
     def get_compressed_history(self, max_turns: int = 4) -> str:
         """
         获取压缩后的对话历史
@@ -731,7 +775,11 @@ class AgentState:
         # 如果已经达到最大迭代次数的一半且有足够证据，可以停止
         if self.iteration_count >= self.max_iterations // 2:
             if len(self.evidence_cards) >= 3 and (self.has_primary_anchor or is_soft):
-                return True
+                if self.query_intent in DEEP_EXPLORATION_INTENTS:
+                    if self.has_verified_code_evidence():
+                        return True
+                else:
+                    return True
 
         # ========== 轻量检索意图：1 轮即够 ==========
 
@@ -804,15 +852,20 @@ class AgentState:
 
         # ========== 最终检查 ==========
 
-        # 如果迭代次数足够且有一些证据，可以停止
+        # 深度代码理解类：不能仅凭「多条语义片段」提前收束，否则从未 file_read / 无结构化证据
         if self.iteration_count >= 2 and len(self.evidence_cards) >= 2:
+            if self.query_intent in DEEP_EXPLORATION_INTENTS:
+                if self.has_verified_code_evidence():
+                    return True
+                if self.iteration_count >= self.max_iterations:
+                    return True
+                return False
             return True
 
-        # 轻量意图 1 轮就够
         if is_light and self.iteration_count >= 1:
             return True
 
-        return True
+        return False
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典，用于序列化"""

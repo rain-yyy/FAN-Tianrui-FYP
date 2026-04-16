@@ -62,6 +62,12 @@ body {
   min-height: 100vh;
 }
 
+/* Remove default backtick pseudo-elements added by @tailwindcss/typography around inline <code> */
+.prose :where(code):not(:where([class~="not-prose"] *))::before,
+.prose :where(code):not(:where([class~="not-prose"] *))::after {
+  content: none;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

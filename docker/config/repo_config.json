@@ -167,6 +167,34 @@
     },
     "wiki_generation": {
       "content_concurrency": 3
+    },
+    "community_detection": {
+      "file_level_collapse": true,
+      "resolution_parameter": 0.55,
+      "cross_file_call_weight": 1.0,
+      "same_directory_chain_weight": 0.22,
+      "merge_min_distinct_files": 2,
+      "merge_prefix_parts": 2,
+      "leiden_seed": 42
+    },
+    "web_search": {
+      "provider": "duckduckgo",
+      "tavily_api_key": "",
+      "serpapi_key": "",
+      "allowed_domains": [
+        "docs.python.org",
+        "github.com",
+        "pypi.org",
+        "npmjs.com",
+        "docs.rs",
+        "crates.io",
+        "pkg.go.dev",
+        "developer.mozilla.org",
+        "stackoverflow.com",
+        "nvd.nist.gov"
+      ],
+      "timeout": 10,
+      "max_results": 5
     }
   }
   

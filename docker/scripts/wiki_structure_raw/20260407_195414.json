@@ -1,0 +1,263 @@
+```json
+{
+  "title": "Motrix Documentation",
+  "description": "Motrix is a full-featured download manager that supports downloading HTTP, FTP, BitTorrent, Magnet, etc. This documentation provides an overview of its architecture, core functionalities, and development guidelines.",
+  "lastIndexed": "2026-04-07",
+  "toc": [
+    {
+      "id": "project-overview",
+      "title": "Project Overview",
+      "files": [
+        "README.md",
+        "package.json",
+        "src/main/Application.js",
+        "src/main/Launcher.js",
+        "src/main/index.js",
+        "src/renderer/pages/index/main.js"
+      ]
+    },
+    {
+      "id": "architecture",
+      "title": "Architecture",
+      "children": [
+        {
+          "id": "main-process",
+          "title": "Main Process (Electron)",
+          "files": [
+            "src/main/Application.js",
+            "src/main/Launcher.js",
+            "src/main/index.js",
+            "src/main/core/Context.js",
+            "src/main/core/ConfigManager.js",
+            "src/main/core/Logger.js",
+            "src/main/core/ExceptionHandler.js",
+            "src/main/ui/WindowManager.js",
+            "src/main/ui/MenuManager.js",
+            "src/main/ui/TrayManager.js",
+            "src/main/ui/ThemeManager.js",
+            "src/main/ui/DockManager.js",
+            "src/main/ui/TouchBarManager.js",
+            "src/main/utils/index.js",
+            "src/main/utils/menu.js"
+          ]
+        },
+        {
+          "id": "renderer-process",
+          "title": "Renderer Process (Vue.js)",
+          "files": [
+            "src/renderer/pages/index/main.js",
+            "src/renderer/pages/index/App.vue",
+            "src/renderer/router/index.js",
+            "src/renderer/store/index.js",
+            "src/renderer/store/modules/app.js",
+            "src/renderer/store/modules/preference.js",
+            "src/renderer/store/modules/task.js",
+            "src/renderer/api/Api.js",
+            "src/renderer/api/index.js",
+            "src/renderer/components/Main.vue"
+          ]
+        },
+        {
+          "id": "download-engine",
+          "title": "Download Engine (Aria2)",
+          "files": [
+            "src/main/core/Engine.js",
+            "src/main/core/EngineClient.js",
+            "src/main/configs/engine.js",
+            "src/shared/aria2/index.js",
+            "src/shared/aria2/lib/Aria2.js",
+            "src/shared/aria2/lib/JSONRPCClient.js",
+            "src/shared/aria2/lib/JSONRPCError.js",
+            "extra/darwin/x64/engine/aria2.conf",
+            "extra/linux/x64/engine/aria2.conf",
+            "extra/win32/x64/engine/aria2.conf"
+          ]
+        },
+        {
+          "id": "shared-utilities-and-constants",
+          "title": "Shared Utilities and Constants",
+          "files": [
+            "src/shared/constants.js",
+            "src/shared/configKeys.js",
+            "src/shared/ua.js",
+            "src/shared/utils/index.js",
+            "src/shared/utils/curl.js",
+            "src/shared/utils/rename.js",
+            "src/shared/utils/tracker.js",
+            "src/shared/utils/tray.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "task-management",
+      "title": "Task Management",
+      "children": [
+        {
+          "id": "adding-tasks",
+          "title": "Adding Tasks",
+          "files": [
+            "src/renderer/components/Task/AddTask.vue",
+            "src/renderer/components/Task/SelectTorrent.vue",
+            "src/renderer/store/modules/task.js",
+            "src/renderer/api/Api.js",
+            "src/renderer/utils/task.js",
+            "src/shared/utils/curl.js"
+          ]
+        },
+        {
+          "id": "task-lifecycle",
+          "title": "Task Lifecycle and Operations",
+          "files": [
+            "src/renderer/store/modules/task.js",
+            "src/renderer/api/Api.js",
+            "src/renderer/components/Task/TaskActions.vue",
+            "src/renderer/components/Task/TaskItemActions.vue",
+            "src/renderer/components/Task/TaskStatus.vue",
+            "src/renderer/components/Task/TaskProgress.vue",
+            "src/renderer/components/Task/TaskProgressInfo.vue",
+            "src/renderer/utils/native.js"
+          ]
+        },
+        {
+          "id": "task-details-and-display",
+          "title": "Task Details and Display",
+          "files": [
+            "src/renderer/components/Task/Index.vue",
+            "src/renderer/components/Task/TaskList.vue",
+            "src/renderer/components/Task/TaskItem.vue",
+            "src/renderer/components/TaskDetail/Index.vue",
+            "src/renderer/components/TaskDetail/TaskActivity.vue",
+            "src/renderer/components/TaskDetail/TaskFiles.vue",
+            "src/renderer/components/TaskDetail/TaskGeneral.vue",
+            "src/renderer/components/TaskDetail/TaskPeers.vue",
+            "src/renderer/components/TaskDetail/TaskTrackers.vue",
+            "src/renderer/components/TaskGraphic/Index.vue",
+            "src/renderer/components/TaskGraphic/Atom.vue"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "user-interface-and-experience",
+      "title": "User Interface and Experience",
+      "children": [
+        {
+          "id": "preferences-and-settings",
+          "title": "Preferences and Settings",
+          "files": [
+            "src/renderer/components/Preference/Index.vue",
+            "src/renderer/components/Preference/Basic.vue",
+            "src/renderer/components/Preference/Advanced.vue",
+            "src/renderer/components/Preference/Lab.vue",
+            "src/renderer/components/Preference/HistoryDirectory.vue",
+            "src/renderer/components/Preference/ThemeSwitcher.vue",
+            "src/renderer/store/modules/preference.js",
+            "src/main/core/ConfigManager.js"
+          ]
+        },
+        {
+          "id": "localization",
+          "title": "Localization",
+          "files": [
+            "src/shared/locales/LocaleManager.js",
+            "src/shared/locales/all.js",
+            "src/shared/locales/index.js",
+            "src/shared/locales/en-US/app.js",
+            "src/shared/locales/zh-CN/app.js",
+            "src/main/ui/Locale.js",
+            "src/renderer/components/Locale/index.js"
+          ]
+        },
+        {
+          "id": "theming",
+          "title": "Theming",
+          "files": [
+            "src/renderer/components/Theme/Index.scss",
+            "src/renderer/components/Theme/Default.scss",
+            "src/renderer/components/Theme/Dark.scss",
+            "src/renderer/components/Theme/Variables.scss",
+            "src/renderer/components/Theme/Dark/Variables.scss",
+            "src/renderer/components/Theme/Light/Variables.scss",
+            "src/main/ui/ThemeManager.js"
+          ]
+        },
+        {
+          "id": "native-ui-integrations",
+          "title": "Native UI Integrations",
+          "files": [
+            "src/renderer/components/Native/TitleBar.vue",
+            "src/renderer/components/Native/DynamicTray.vue",
+            "src/renderer/components/Native/Ipc.vue",
+            "src/renderer/components/Native/SelectDirectory.vue",
+            "src/renderer/components/Native/ShowInFolder.vue",
+            "src/renderer/utils/native.js",
+            "src/renderer/workers/tray.worker.js",
+            "src/shared/utils/tray.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "system-integrations",
+      "title": "System Integrations",
+      "children": [
+        {
+          "id": "auto-launch-and-updates",
+          "title": "Auto Launch and Updates",
+          "files": [
+            "src/main/core/AutoLaunchManager.js",
+            "src/main/core/UpdateManager.js",
+            "app-update.yml",
+            "electron-builder.json"
+          ]
+        },
+        {
+          "id": "protocol-and-file-handling",
+          "title": "Protocol and File Handling",
+          "files": [
+            "src/main/core/ProtocolManager.js",
+            "src/main/configs/protocol.js",
+            "src/main/Launcher.js"
+          ]
+        },
+        {
+          "id": "upnp-and-network",
+          "title": "UPnP and Network",
+          "files": [
+            "src/main/core/UPnPManager.js",
+            "src/main/Application.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "development-and-build",
+      "title": "Development and Build",
+      "children": [
+        {
+          "id": "electron-vue-config",
+          "title": "Electron-Vue Configuration",
+          "files": [
+            ".electron-vue/webpack.main.config.js",
+            ".electron-vue/webpack.renderer.config.js",
+            ".electron-vue/webpack.web.config.js",
+            ".electron-vue/build.js",
+            ".electron-vue/dev-client.js",
+            ".electron-vue/dev-runner.js"
+          ]
+        },
+        {
+          "id": "build-hooks",
+          "title": "Build Hooks",
+          "files": [
+            "build/afterPackHook.js",
+            "build/afterSignHook.js",
+            "electron-builder.json"
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
