@@ -405,12 +405,6 @@ class CommunityEngine:
 
         return self.community_summaries
 
-    def get_node_community(self, node_id: str) -> Optional[int]:
-        for comm_id, nodes in self.communities.items():
-            if node_id in nodes:
-                return comm_id
-        return None
-
     def save_results(self, output_path: str):
         results = {
             "communities": self.communities,

@@ -46,7 +46,7 @@ def find_relevant_files(repo_path: str) -> list[str]:
     return relevant_files
 
 
-def split_code_and_text_files(file_paths: list[str], config: dict) -> tuple[list[str], list[str]]:
+def split_code_and_text_files(file_paths: list[str]) -> tuple[list[str], list[str]]:
     code_files: list[str] = []
     text_files: list[str] = []
 
@@ -93,12 +93,5 @@ def generate_file_tree(repo_path: str) -> str:
     # 把相关文件的相对路径列表拼成一棵嵌套 dict，再递归渲染成 "├──/└──" 风格的文本目录树。
 
 
-def get_files_to_process(repo_path: str, config_path: str | None = None) -> list[str]:
+def get_files_to_process(repo_path: str) -> list[str]:
     return find_relevant_files(repo_path)
-
-
-if __name__ == "__main__":
-    result = generate_file_tree("/Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/src")
-
-    file_paths = get_files_to_process("/Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/src")
-    print(file_paths)

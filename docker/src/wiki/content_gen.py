@@ -9,7 +9,7 @@ import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -50,7 +50,6 @@ class WikiContentGenerator:
         *,
         repo_root: str | Path,
         json_output_dir: str | Path,
-        output_dir: str | Path | None = None,  # 保留以兼容旧调用者，不再使用
         prompt_template: ChatPromptTemplate | None = None,
         max_file_chars: int = 4000,
         max_section_chars: int = 16000,

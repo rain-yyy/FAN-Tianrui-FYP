@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, List, Tuple
 
 # 导入必要的模块
 from scripts.setup_repository import setup_repository
-from src.config import CONFIG_PATH, load_config, CONFIG
+from src.config import CONFIG_PATH
 from src.ingestion.file_processor import generate_file_tree, get_files_to_process, split_code_and_text_files
 from src.ingestion.docu_splitter import load_and_split_docs
 from src.ingestion.vector_store import upsert_vector_store
@@ -32,10 +32,6 @@ logger = logging.getLogger("api")
 
 # 项目根目录获取
 PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
-
-# 默认路径配置（保留为单任务回退，实际并发场景应使用 _task_output_dir 生成的任务级路径）
-DEFAULT_OUTPUT_PATH: Path = PROJECT_ROOT / "wiki_structure.json"
-DEFAULT_WIKI_SECTION_JSON_OUTPUT: Path = PROJECT_ROOT / "wiki_section_json"
 
 # 任务级工作目录根路径
 TASK_WORK_ROOT: Path = Path(os.getenv("TASK_WORK_PATH", str(PROJECT_ROOT / "task_workdirs")))
@@ -149,9 +145,6 @@ def run_structure_generation(
 
     repo_path = setup_repository(repo_url)
 
-    # 加载配置（用于验证配置文件有效性）
-    _ = load_config(str(config_path))
-
     _update_progress(task_id, 20, "Generating file tree...")
 
     file_tree = generate_file_tree(repo_path)
@@ -225,15 +218,14 @@ def run_rag_indexing(
     vector_store_path.mkdir(parents=True, exist_ok=True)
     
     # 获取需要处理的文件
-    config = load_config(str(config_path))
-    all_files = get_files_to_process(repo_path, str(config_path))
-    
+    all_files = get_files_to_process(repo_path)
+
     if not all_files:
         logger.warning("[RAG] No files found to index")
         return str(vector_store_path)
-    
+
     # 分离代码和文本文件
-    code_files, text_files = split_code_and_text_files(all_files, config)
+    code_files, text_files = split_code_and_text_files(all_files)
     
     logger.info(f"[RAG] Found {len(code_files)} code files, {len(text_files)} text files")
     

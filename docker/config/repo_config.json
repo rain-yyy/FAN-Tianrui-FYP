@@ -1,7 +1,4 @@
 {
-    "repository": {
-      "max_size_mb": 50000
-    },
     "ai_models": {
       "provider": "openrouter",
       "models": {

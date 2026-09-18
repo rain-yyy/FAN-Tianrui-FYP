@@ -405,16 +405,3 @@ def _require_str(obj: Dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Invalid JSON response: '{key}' 必须是非空字符串。")
     return value
-
-
-
-if __name__ == "__main__":
-    _level_name = os.getenv("LOG_LEVEL", "INFO").upper()
-    logging.basicConfig(
-        level=getattr(logging, _level_name, logging.INFO),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
-    repo_path = "/Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/src"
-    repo_map = _build_repo_map_context(repo_path)
-    logger.info("repo_map 长度=%d 字符", len(repo_map))
-    print(repo_map)

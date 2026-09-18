@@ -217,48 +217,6 @@ class SupabaseClient:
         except Exception as e:
             raise SupabaseStorageError(f"Failed to fetch repositories: {e}") from e
 
-    # TODO: what is the purpose of this function
-    def get_repositories_for_urls(self, repo_urls: List[str]) -> Dict[str, Optional[dict]]:
-        """
-        批量拉取 repositories 行，key 为调用方传入 URL 经 normalize 后的字符串。
-        缺失时回退到 get_repo_information（含模糊匹配），避免 N+1 全走模糊查询。
-        """
-        if not self.client:
-            return {}
-        ordered_unique: List[str] = []
-        for u in repo_urls:
-            n = self._normalize_repo_url(u or "")
-            if not n or n in ordered_unique:
-                continue
-            ordered_unique.append(n)
-
-        if not ordered_unique:
-            return {}
-
-        by_key: Dict[str, dict] = {}
-        try:
-            resp = (
-                self.client.table("repositories")
-                .select("*")
-                .in_("repo_url", ordered_unique)
-                .execute()
-            )
-            for row in resp.data or []:
-                rk = self._normalize_repo_url(row.get("repo_url") or "")
-                if rk:
-                    by_key[rk] = row
-        except Exception as e:
-            print(f"[Supabase] Error batch-fetch repositories: {e}")
-
-        for k in ordered_unique:
-            if k in by_key:
-                continue
-            row = self.get_repo_information(k)
-            if row:
-                by_key[k] = row
-
-        return {k: by_key.get(k) for k in ordered_unique}
-    
     ## TODO: What is the purpose of this function
     def get_all_repositories_metadata(self) -> List[dict]:
         """
@@ -549,45 +507,6 @@ class SupabaseClient:
         except Exception as e:
             print(f"[Supabase] Error updating repository information (upsert): {e}")
             return False
-
-    # ============ Profile Related Methods ============
-
-    def get_profile(self, user_id: str) -> Optional[dict]:
-        """
-        Get a user's profile from Supabase.
-        """
-        if not self.client:
-            return None
-        try:
-            response = self.client.table("profiles").select("*").eq("id", user_id).execute()
-            if response.data:
-                return response.data[0]
-            return None
-        except Exception as e:
-            print(f"[Supabase] Error getting profile: {e}")
-            return None
-
-    def upsert_profile_preferences(self, user_id: str, theme: Optional[str] = None) -> bool:
-        """
-        Update a user's theme preference.
-        """
-        if not self.client:
-            return False
-        try:
-            data: dict = {"id": user_id, "updated_at": "now()"}
-            if theme is not None:
-                if theme not in ("light", "dark"):
-                    return False
-                data["theme"] = theme
-            else:
-                return False
-
-            self.client.table("profiles").upsert(data).execute()
-            return True
-        except Exception as e:
-            print(f"[Supabase] Error upserting profile preferences: {e}")
-            return False
-
 
 def update_repo_vector_path(repo_url: str, vector_store_path: str):
     """
