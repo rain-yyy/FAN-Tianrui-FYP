@@ -7,8 +7,6 @@ import asyncio
 from enum import Enum
 from typing import Dict
 
-from src.core.wiki_pipeline import execute_generation_task
-
 
 class TaskStatus(str, Enum):
     PENDING = "pending"
@@ -23,6 +21,9 @@ _running_tasks: Dict[str, asyncio.Task] = {}
 
 def start_generation_task(task_id: str, url_link: str) -> asyncio.Task:
     """创建后台 Wiki 生成任务并登记，任务结束（成功/失败/取消）后自动从登记表移除。"""
+    # 延迟导入以避免与 wiki_pipeline（导入本模块的 TaskStatus）形成循环导入
+    from src.core.wiki_pipeline import execute_generation_task
+
     task = asyncio.create_task(execute_generation_task(task_id, url_link))
     _running_tasks[task_id] = task
     task.add_done_callback(lambda t: _running_tasks.pop(task_id, None))

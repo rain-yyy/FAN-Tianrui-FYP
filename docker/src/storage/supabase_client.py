@@ -1,11 +1,12 @@
 import logging
 import os
+from enum import Enum
 from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 from supabase import create_client, Client
 import dotenv
 
-from src.storage.models import TaskRecord
+from src.storage.models import TaskRecord, coerce_str_list
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,15 @@ dotenv.load_dotenv()
 
 class SupabaseStorageError(Exception):
     """Supabase 网络/查询失败，与「无记录」区分（无记录时 get_task 返回 None）。"""
+
+
+class DeleteTaskResult(Enum):
+    """Outcome of `SupabaseClient.delete_task`, so callers don't need to
+    re-query just to tell "no such task for this user" apart from "delete failed"."""
+
+    DELETED = "deleted"
+    NOT_FOUND = "not_found"
+    ERROR = "error"
 
 class SupabaseClient:
     def __init__(
@@ -145,13 +155,15 @@ class SupabaseClient:
             print(f"[Supabase] Error updating task status: {e}")
             return False
 
-    def delete_task(self, task_id: str, user_id: str) -> bool:
+    def delete_task(self, task_id: str, user_id: str) -> DeleteTaskResult:
         """
-        Delete a task from Supabase.
-        Only deletes if task belongs to the given user.
+        Delete a task from Supabase. Only deletes if task belongs to the given user.
+        Returns NOT_FOUND when no matching task exists for this user (whether absent
+        entirely or owned by someone else), ERROR on a query/delete failure, DELETED
+        on success.
         """
         if not self.client:
-            return False
+            return DeleteTaskResult.ERROR
         try:
             task = (
                 self.client.table("tasks")
@@ -162,13 +174,13 @@ class SupabaseClient:
                 .execute()
             )
             if not task.data or len(task.data) == 0:
-                return False
+                return DeleteTaskResult.NOT_FOUND
 
             self.client.table("tasks").delete().eq("task_id", task_id).eq("user_id", user_id).execute()
-            return True
+            return DeleteTaskResult.DELETED
         except Exception as e:
             print(f"[Supabase] Error deleting task: {e}")
-            return False
+            return DeleteTaskResult.ERROR
 
     def get_task(self, task_id: str) -> Optional[TaskRecord]:
         """
@@ -281,9 +293,7 @@ class SupabaseClient:
             return None
 
         r2_structure_url = repo_info.get("r2_structure_url")
-        r2_content_urls = repo_info.get("r2_content_urls")
-        if isinstance(r2_content_urls, str):
-            r2_content_urls = [r2_content_urls]
+        r2_content_urls = coerce_str_list(repo_info.get("r2_content_urls"))
         if not r2_structure_url or not r2_content_urls:
             return None
 

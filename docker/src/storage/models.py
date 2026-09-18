@@ -8,10 +8,19 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
+
+
+def coerce_str_list(value: Any) -> Optional[List[str]]:
+    """Normalize a Supabase column that may come back as a single string
+    (legacy rows) or already as a list of strings.
+    """
+    if isinstance(value, str):
+        return [value]
+    return value
 
 
 class TaskRecord(BaseModel):

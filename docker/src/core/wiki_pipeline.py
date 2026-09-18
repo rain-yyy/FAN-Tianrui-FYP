@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional, List, Tuple
 # 导入必要的模块
 from scripts.setup_repository import setup_repository
 from src.config import CONFIG_PATH
+from src.core.task_manager import TaskStatus
 from src.ingestion.file_processor import generate_file_tree, get_files_to_process, split_code_and_text_files
 from src.ingestion.docu_splitter import load_and_split_docs
 from src.ingestion.vector_store import upsert_vector_store
@@ -17,16 +18,9 @@ from src.wiki.struct_gen import generate_wiki_structure
 from src.wiki.content_gen import WikiContentGenerator
 from src.storage.r2_client import upload_wiki_to_r2
 from src.storage.supabase_client import update_repo_vector_path, SupabaseClient, SupabaseStorageError
+from src.storage.models import coerce_str_list
 from scripts.setup_repository import get_repo_disk_directory_name
 from src.utils.wiki_cache_policy import wiki_generation_cache_is_stale, WIKI_GENERATION_CACHE_MAX_AGE_DAYS
-
-# 任务状态定义 (保持与 api.py 一致)
-class TaskStatus:
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    CACHED = "cached"
-    FAILED = "failed"
 
 logger = logging.getLogger("api")
 
@@ -475,9 +469,7 @@ async def execute_generation_task(task_id: str, url_link: str):
         repo_info = supabase_client.get_repo_information(url_link)
         if repo_info and not wiki_generation_cache_is_stale(repo_info, WIKI_GENERATION_CACHE_MAX_AGE_DAYS):
             r2_structure_url = repo_info.get("r2_structure_url")
-            r2_content_urls = repo_info.get("r2_content_urls")
-            if isinstance(r2_content_urls, str):
-                r2_content_urls = [r2_content_urls]
+            r2_content_urls = coerce_str_list(repo_info.get("r2_content_urls"))
             if r2_structure_url and r2_content_urls:
                 cached_result = {
                     "r2_structure_url": r2_structure_url,
@@ -542,7 +534,7 @@ async def execute_generation_task(task_id: str, url_link: str):
         
         # 3. 先上传 R2，避免仅因 RAG/embedding 失败导致 Wiki 成果未持久化
         _update_progress(task_id, 86, "Uploading to R2 storage...")
-        r2_structure_url, r2_content_urls, r2_graphrag_url, r2_code_graph_url = await loop.run_in_executor(
+        upload_result = await loop.run_in_executor(
             None,
             lambda gp=graphrag_json_path, cgp=code_graph_path: upload_wiki_to_r2(
                 repo_url=url_link,
@@ -554,6 +546,10 @@ async def execute_generation_task(task_id: str, url_link: str):
                 code_graph_local_path=cgp if cgp.is_file() else None,
             )
         )
+        r2_structure_url = upload_result.structure_url
+        r2_content_urls = upload_result.content_urls
+        r2_graphrag_url = upload_result.graphrag_url
+        r2_code_graph_url = upload_result.code_graph_url
         await asyncio.sleep(0)
         
         # 4. 构建 RAG 向量索引（失败不推翻已完成的上传与任务）

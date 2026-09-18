@@ -2,6 +2,7 @@
 
 import os
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Tuple
@@ -111,6 +112,66 @@ class R2Client:
             return f"{repo_name}/{date}_{task_id}/{filename}"
         return f"{repo_name}/{date}/{filename}"
 
+    def _upload_bytes(
+        self,
+        data: bytes,
+        r2_key: str,
+        content_type: str,
+        max_retries: int,
+        kind: str = "",
+    ) -> bool:
+        """
+        Upload raw bytes to R2 with retry/exponential backoff.
+        Shared by upload_file and upload_json_data, which differ only in byte source.
+
+        Args:
+            data: Raw bytes to upload
+            r2_key: R2 object key (path in bucket)
+            content_type: MIME type of the content
+            max_retries: Maximum number of retry attempts
+            kind: Optional noun describing the content for log messages (e.g. "JSON")
+
+        Returns:
+            True if upload successful, False otherwise
+        """
+        what = f"{kind} " if kind else ""
+        for attempt in range(max_retries):
+            try:
+                self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=r2_key,
+                    Body=data,
+                    ContentType=content_type,
+                )
+                print(f"[INFO] Successfully uploaded {what}{r2_key}")
+                return True
+            except ClientError as e:
+                error_code = e.response.get("Error", {}).get("Code", "Unknown")
+                error_message = e.response.get("Error", {}).get("Message", str(e))
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff
+                    print(f"[WARN] Upload failed (attempt {attempt + 1}/{max_retries}): {error_code} - {error_message}")
+                    print(f"[WARN] Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"[ERROR] Failed to upload {what}{r2_key} after {max_retries} attempts")
+                    print(f"[ERROR] Error Code: {error_code}, Message: {error_message}")
+                    return False
+            except BotoCoreError as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"[WARN] BotoCore error (attempt {attempt + 1}/{max_retries}): {e}")
+                    print(f"[WARN] Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"[ERROR] BotoCore error uploading {what}{r2_key}: {e}")
+                    return False
+            except Exception as e:
+                print(f"[ERROR] Unexpected error uploading {what}{r2_key}: {type(e).__name__}: {e}")
+                return False
+
+        return False
+
     def upload_file(
         self,
         local_path: Path,
@@ -134,43 +195,10 @@ class R2Client:
             print(f"[ERROR] File not found: {local_path}")
             return False
 
-        for attempt in range(max_retries):
-            try:
-                with open(local_path, "rb") as f:
-                    self.s3_client.put_object(
-                        Bucket=self.bucket_name,
-                        Key=r2_key,
-                        Body=f.read(),
-                        ContentType=content_type,
-                    )
-                print(f"[INFO] Successfully uploaded: {r2_key}")
-                return True
-            except ClientError as e:
-                error_code = e.response.get("Error", {}).get("Code", "Unknown")
-                error_message = e.response.get("Error", {}).get("Message", str(e))
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt  # Exponential backoff
-                    print(f"[WARN] Upload failed (attempt {attempt + 1}/{max_retries}): {error_code} - {error_message}")
-                    print(f"[WARN] Retrying in {wait_time}s...")
-                    time.sleep(wait_time)
-                else:
-                    print(f"[ERROR] Failed to upload {r2_key} after {max_retries} attempts")
-                    print(f"[ERROR] Error Code: {error_code}, Message: {error_message}")
-                    return False
-            except BotoCoreError as e:
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    print(f"[WARN] BotoCore error (attempt {attempt + 1}/{max_retries}): {e}")
-                    print(f"[WARN] Retrying in {wait_time}s...")
-                    time.sleep(wait_time)
-                else:
-                    print(f"[ERROR] BotoCore error uploading {r2_key}: {e}")
-                    return False
-            except Exception as e:
-                print(f"[ERROR] Unexpected error uploading {r2_key}: {type(e).__name__}: {e}")
-                return False
+        with open(local_path, "rb") as f:
+            data = f.read()
 
-        return False
+        return self._upload_bytes(data, r2_key, content_type, max_retries)
 
     def upload_json_data(
         self,
@@ -189,45 +217,10 @@ class R2Client:
         Returns:
             True if upload successful, False otherwise
         """
-        json_str = json.dumps(data, indent=2, ensure_ascii=False)
-        json_bytes = json_str.encode("utf-8")
-
-        for attempt in range(max_retries):
-            try:
-                self.s3_client.put_object(
-                    Bucket=self.bucket_name,
-                    Key=r2_key,
-                    Body=json_bytes,
-                    ContentType="application/json; charset=utf-8",
-                )
-                print(f"[INFO] Successfully uploaded JSON: {r2_key}")
-                return True
-            except ClientError as e:
-                error_code = e.response.get("Error", {}).get("Code", "Unknown")
-                error_message = e.response.get("Error", {}).get("Message", str(e))
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    print(f"[WARN] Upload failed (attempt {attempt + 1}/{max_retries}): {error_code} - {error_message}")
-                    print(f"[WARN] Retrying in {wait_time}s...")
-                    time.sleep(wait_time)
-                else:
-                    print(f"[ERROR] Failed to upload JSON to {r2_key} after {max_retries} attempts")
-                    print(f"[ERROR] Error Code: {error_code}, Message: {error_message}")
-                    return False
-            except BotoCoreError as e:
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    print(f"[WARN] BotoCore error (attempt {attempt + 1}/{max_retries}): {e}")
-                    print(f"[WARN] Retrying in {wait_time}s...")
-                    time.sleep(wait_time)
-                else:
-                    print(f"[ERROR] BotoCore error uploading JSON to {r2_key}: {e}")
-                    return False
-            except Exception as e:
-                print(f"[ERROR] Unexpected error uploading JSON to {r2_key}: {type(e).__name__}: {e}")
-                return False
-
-        return False
+        json_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+        return self._upload_bytes(
+            json_bytes, r2_key, "application/json; charset=utf-8", max_retries, kind="JSON"
+        )
 
     def get_public_url(self, r2_key: str) -> str:
         """
@@ -285,6 +278,17 @@ class R2Client:
         return results
 
 
+@dataclass
+class WikiUploadResult:
+    """Result of `upload_wiki_to_r2`. Trailing fields may be None when that
+    artifact wasn't provided, its upload failed, or R2 wasn't configured."""
+
+    structure_url: Optional[str] = None
+    content_urls: Optional[List[str]] = None
+    graphrag_url: Optional[str] = None
+    code_graph_url: Optional[str] = None
+
+
 def upload_wiki_to_r2(
     repo_url: str,
     wiki_structure: dict,
@@ -293,7 +297,7 @@ def upload_wiki_to_r2(
     task_id: Optional[str] = None,
     graphrag_local_path: Optional[Path] = None,
     code_graph_local_path: Optional[Path] = None,
-) -> Tuple[Optional[str], Optional[List[str]], Optional[str], Optional[str]]:
+) -> WikiUploadResult:
     """
     Upload wiki structure and content files to R2.
 
@@ -307,25 +311,17 @@ def upload_wiki_to_r2(
         code_graph_local_path: Optional local code_graph.json (NetworkX node-link format)
 
     Returns:
-        Tuple of (structure_url, content_urls, graphrag_url, code_graph_url) — trailing elements may be None
+        A WikiUploadResult — trailing fields may be None
     """
     try:
         client = R2Client()
     except ValueError as e:
         print(f"[WARN] R2 client initialization failed: {e}")
         print("[INFO] Skipping R2 upload, will return local paths instead.")
-        return None, None, None, None
-
-    # Generate base path with task_id isolation
-    repo_name = client._extract_repo_name(repo_url)
-    date = client._generate_date()
-    if task_id:
-        base_path = f"{repo_name}/{date}_{task_id}"
-    else:
-        base_path = f"{repo_name}/{date}"
+        return WikiUploadResult()
 
     # Upload wiki structure
-    structure_key = f"{base_path}/wiki_structure.json"
+    structure_key = client._get_r2_path(repo_url, "wiki_structure.json", task_id)
     if structure_local_path and structure_local_path.exists():
         structure_success = client.upload_file(structure_local_path, structure_key)
     else:
@@ -333,13 +329,13 @@ def upload_wiki_to_r2(
 
     if not structure_success:
         print("[ERROR] Failed to upload wiki structure to R2")
-        return None, None, None, None
+        return WikiUploadResult()
 
     structure_url = client.get_public_url(structure_key)
 
     graphrag_url: Optional[str] = None
     if graphrag_local_path and graphrag_local_path.is_file():
-        graphrag_key = f"{base_path}/graphrag_communities.json"
+        graphrag_key = client._get_r2_path(repo_url, "graphrag_communities.json", task_id)
         if client.upload_file(graphrag_local_path, graphrag_key):
             graphrag_url = client.get_public_url(graphrag_key)
             print(f"[INFO] Uploaded GraphRAG metadata to R2: {graphrag_key}")
@@ -348,7 +344,7 @@ def upload_wiki_to_r2(
 
     code_graph_url: Optional[str] = None
     if code_graph_local_path and code_graph_local_path.is_file():
-        code_graph_key = f"{base_path}/code_graph.json"
+        code_graph_key = client._get_r2_path(repo_url, "code_graph.json", task_id)
         if client.upload_file(code_graph_local_path, code_graph_key):
             code_graph_url = client.get_public_url(code_graph_key)
             print(f"[INFO] Uploaded code graph to R2: {code_graph_key}")
@@ -358,7 +354,7 @@ def upload_wiki_to_r2(
     # Upload content files if provided
     content_urls = []
     if content_dir and content_dir.exists():
-        sections_path = f"{base_path}/sections"
+        sections_path = client._get_r2_path(repo_url, "sections", task_id)
         results = client.upload_directory(content_dir, sections_path)
         if results:
             # Check if at least one file uploaded successfully
@@ -371,4 +367,9 @@ def upload_wiki_to_r2(
             else:
                 print("[WARN] Failed to upload any content files to R2")
     
-    return structure_url, content_urls if content_urls else None, graphrag_url, code_graph_url
+    return WikiUploadResult(
+        structure_url=structure_url,
+        content_urls=content_urls if content_urls else None,
+        graphrag_url=graphrag_url,
+        code_graph_url=code_graph_url,
+    )

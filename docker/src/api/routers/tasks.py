@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 from typing import List, Optional
 
 from src.core.task_manager import TaskStatus, cancel_running_task, start_generation_task
-from src.storage.supabase_client import SupabaseClient, SupabaseStorageError
+from src.storage.supabase_client import SupabaseClient, SupabaseStorageError, DeleteTaskResult
 from src.utils.logger import setup_logger
 
 from src.storage.models import TaskRecord
@@ -145,15 +145,10 @@ async def delete_task_api(task_id: str, user_id: str) -> dict[str,bool]:
         raise HTTPException(status_code=400, detail="Missing task_id or user_id")
     logger.info(f"Delete task record: {task_id}")
     supabase_client = SupabaseClient()
-    success = supabase_client.delete_task(task_id, user_id)
-    if not success:
-        try:
-            task = supabase_client.get_task(task_id)
-        except SupabaseStorageError as e:
-            raise HTTPException(status_code=503, detail=f"Database error while verifying task: {e}")
-        if not task or str(task.user_id) != user_id:
-            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
-        
+    result = supabase_client.delete_task(task_id, user_id)
+    if result == DeleteTaskResult.NOT_FOUND:
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+    if result == DeleteTaskResult.ERROR:
         raise HTTPException(status_code=500, detail="Failed to delete task")
 
     return {"success": True}
