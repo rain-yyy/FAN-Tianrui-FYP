@@ -9,14 +9,13 @@ import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Sequence, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from src.clients.ai_client_base import BaseAIClient
-from src.clients.ai_client_factory import get_ai_client, get_model_config
-from src.config import CONFIG, get_wiki_content_concurrency
-from src.prompts import get_wiki_section_prompt
+from src.clients import get_llm, StrOutputParser
+from src.config import get_wiki_content_concurrency
+from src.prompts import WIKI_SECTION_PROMPT
 
 # 初始化日志
 logger = logging.getLogger("app.wiki.content_gen")
@@ -42,7 +41,8 @@ import networkx as nx
 class WikiContentGenerator:
     """
     将 wiki 目录树与仓库文件上下文交给 AI 模型，生成每个节点对应的内容与 Mermaid 架构图。
-    支持受控并发（线程池），每个工作线程独立获取 AI 客户端实例。
+    使用 LCEL chain（prompt | llm | StrOutputParser），支持受控并发（线程池）。
+    LangChain chain 是无状态且线程安全的，所有 worker 共享同一个 chain 实例。
     """
 
     def __init__(
@@ -50,9 +50,7 @@ class WikiContentGenerator:
         *,
         repo_root: str | Path,
         json_output_dir: str | Path,
-        output_dir: str | Path | None = None,  # 保留以兼容旧代码，但不再使用
-        client: BaseAIClient | None = None,
-        client_factory: Callable[[], BaseAIClient] | None = None,
+        output_dir: str | Path | None = None,  # 保留以兼容旧调用者，不再使用
         prompt_template: ChatPromptTemplate | None = None,
         max_file_chars: int = 4000,
         max_section_chars: int = 16000,
@@ -64,20 +62,11 @@ class WikiContentGenerator:
         self.json_output_dir = Path(json_output_dir).expanduser().resolve()
         self.json_output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 客户端工厂：并发时每个 worker 独立创建实例
-        if client_factory is not None:
-            self._client_factory = client_factory
-        elif client is not None:
-            # 单线程回退：直接使用传入的 client
-            self._client_factory = lambda: client
-        else:
-            provider, model = get_model_config(CONFIG, "wiki_content")
-            self._client_factory = lambda: get_ai_client(provider, model=model)
+        # 构建 LCEL chain：prompt | llm | StrOutputParser
+        # LangChain chain 无状态，线程安全，所有并发 worker 共享此实例
+        _prompt = prompt_template or WIKI_SECTION_PROMPT.build()
+        self._chain = _prompt | get_llm("wiki_content") | StrOutputParser()
 
-        # 保留 self.client 用于不需要并发的内部方法
-        self.client = client if client is not None else self._client_factory()
-
-        self.prompt_template = prompt_template or get_wiki_section_prompt()
         self.max_file_chars = max_file_chars
         self.max_section_chars = max_section_chars
         self.max_concurrency = max_concurrency or get_wiki_content_concurrency()
@@ -114,9 +103,7 @@ class WikiContentGenerator:
         generated_files: List[Path] = []
 
         def _worker(section: WikiSection) -> Tuple[WikiSection, Optional[Path]]:
-            """单个章节的生成 worker，每个 worker 独立获取 AI 客户端"""
-            worker_client = self._client_factory()
-
+            """单个章节的生成 worker，共享线程安全的 LCEL chain"""
             with lock:
                 counters["active"] += 1
                 active = counters["active"]
@@ -129,7 +116,7 @@ class WikiContentGenerator:
             t0 = time.monotonic()
             try:
                 file_path = self._generate_section(
-                    structure, section, client=worker_client,
+                    structure, section,
                     filename_override=filename_map.get(section.id),
                 )
                 elapsed = time.monotonic() - t0
@@ -182,30 +169,22 @@ class WikiContentGenerator:
         structure: Dict[str, Any],
         section: WikiSection,
         *,
-        client: BaseAIClient | None = None,
         filename_override: str | None = None,
     ) -> Path | None:
         """
-        为单个章节构建上下文、调用 LLM，并将结果写入 JSON。
+        为单个章节构建上下文、调用 LCEL chain，并将结果写入 JSON。
         """
-        used_client = client or self.client
         context = self._collect_file_context(section.files)
         if not context:
             context = "未能找到关联文件，请基于章节标题进行合理推断。"
 
-        doc_title = structure.get("title", "Wiki")
-        doc_description = structure.get("description", "")
-        breadcrumb = section.display_path()
-
-        messages = self._build_messages(
-            doc_title=doc_title,
-            doc_description=doc_description,
-            breadcrumb=breadcrumb,
-            section_id=section.id,
-            context=context,
-        )
-
-        raw_response = used_client.chat(messages, max_tokens=1800)
+        raw_response = self._chain.invoke({
+            "doc_title": structure.get("title", "Wiki"),
+            "doc_description": structure.get("description", ""),
+            "breadcrumb": section.display_path(),
+            "section_id": section.id,
+            "context": context,
+        })
         parsed = self._parse_llm_response(raw_response)
         return self._write_section_json(section, parsed, filename_override=filename_override)
 
@@ -267,35 +246,6 @@ class WikiContentGenerator:
             snippet = snippet[: self.max_file_chars] + "\n...（其余内容已截断）"
 
         return snippet
-
-    def _build_messages(
-        self,
-        *,
-        doc_title: str,
-        doc_description: str,
-        breadcrumb: str,
-        section_id: str,
-        context: str,
-    ) -> List[Dict[str, str]]:
-        """
-        使用 prompts 模块中定义的模板生成标准对话消息。
-        """
-        prompt_messages = self.prompt_template.format_messages(
-            doc_title=doc_title,
-            doc_description=doc_description,
-            breadcrumb=breadcrumb,
-            section_id=section_id,
-            context=context,
-        )
-
-        formatted: List[Dict[str, str]] = []
-        for msg in prompt_messages:
-            role = getattr(msg, "type", getattr(msg, "role", "user"))
-            if role == "human":
-                role = "user"
-            content = getattr(msg, "content", "")
-            formatted.append({"role": role, "content": content})
-        return formatted
 
     def _write_section_json(self, section: WikiSection, data: Dict[str, Any], *, filename_override: str | None = None) -> Path:
         """

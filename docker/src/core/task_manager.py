@@ -1,0 +1,42 @@
+"""
+Wiki 生成任务的进程内生命周期管理：跟踪正在运行的 asyncio.Task，
+支持创建和强制取消。任务的持久状态（pending/processing/completed/...）
+仍然由 Supabase 的 tasks 表保存，这里只管理本进程内的可取消句柄。
+"""
+import asyncio
+from enum import Enum
+from typing import Dict
+
+from src.core.wiki_pipeline import execute_generation_task
+
+
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    CACHED = "cached"
+    FAILED = "failed"
+
+
+_running_tasks: Dict[str, asyncio.Task] = {}
+
+
+def start_generation_task(task_id: str, url_link: str) -> asyncio.Task:
+    """创建后台 Wiki 生成任务并登记，任务结束（成功/失败/取消）后自动从登记表移除。"""
+    task = asyncio.create_task(execute_generation_task(task_id, url_link))
+    _running_tasks[task_id] = task
+    task.add_done_callback(lambda t: _running_tasks.pop(task_id, None))
+    return task
+
+
+def cancel_running_task(task_id: str) -> bool:
+    """
+    If the task is still running within this process, it will be cancelled
+    Return whether the task was found and cancelled
+    """
+    task = _running_tasks.pop(task_id, None)
+    if task is None:
+        return False
+    task.cancel()
+    return True
+

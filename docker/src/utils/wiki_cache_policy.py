@@ -8,8 +8,8 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-# /generate 短路缓存：超过该整天数则不应短路；窗口边界与 SQL RPC 一致（含边界当天仍可命中缓存）。
-WIKI_GENERATION_CACHE_MAX_AGE_DAYS = 2
+# /generate 短路缓存：超过该整天数则触发完整重新生成；窗口边界含边界当天仍可命中缓存。
+WIKI_GENERATION_CACHE_MAX_AGE_DAYS = 3
 
 
 def parse_supabase_timestamp(raw: Any) -> Optional[datetime]:

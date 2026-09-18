@@ -1,3 +1,6 @@
+2. 加入Redis缓存对于数据
+
+
 有空再继续优化wiki structure的生成
 3. 需要仔细检查一下agent的逻辑 
 tree_sitter_language_pack拉取有时候存在问题

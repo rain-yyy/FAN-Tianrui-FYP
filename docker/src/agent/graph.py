@@ -61,7 +61,7 @@ from src.agent.tools import (
     LSPResolveTool,
     WebSearchTool,
 )
-from src.clients.ai_client_factory import get_ai_client, get_model_config
+from src.clients import get_llm, StrOutputParser
 from src.config import CONFIG
 
 logger = logging.getLogger("app.agent.graph")
@@ -147,45 +147,39 @@ class AgentGraphRunner:
         快速模型（flash）: planner, tool_router, evaluator, session_compressor
         强模型（强推理）: synthesizer
         """
-        # Planner: 快速模型，负责意图识别和规划
-        try:
-            provider, model = get_model_config(CONFIG, "agent_planner")
-        except Exception:
-            provider, model = get_model_config(CONFIG, "hyde_generation")
-        self.llm_planner = get_ai_client(provider, model=model)
-        
-        # Tool Router: 快速模型，负责工具选择
-        try:
-            provider, model = get_model_config(CONFIG, "agent_tool_router")
-        except Exception:
-            provider, model = get_model_config(CONFIG, "hyde_generation")
-        self.llm_tool_router = get_ai_client(provider, model=model)
-        
-        # Evaluator: 快速模型，负责证据评估
-        try:
-            provider, model = get_model_config(CONFIG, "agent_evaluator")
-        except Exception:
-            provider, model = get_model_config(CONFIG, "hyde_generation")
-        self.llm_evaluator = get_ai_client(provider, model=model)
-        
-        # Synthesizer: 强模型，负责最终答案合成
-        try:
-            provider, model = get_model_config(CONFIG, "agent_synthesizer")
-        except Exception:
-            provider, model = get_model_config(CONFIG, "rag_answer")
-        self.llm_synthesizer = get_ai_client(provider, model=model)
-        
-        # Session Compressor: 快速模型，负责会话压缩
-        try:
-            provider, model = get_model_config(CONFIG, "agent_session_compressor")
-        except Exception:
-            provider, model = get_model_config(CONFIG, "hyde_generation")
-        self.llm_session_compressor = get_ai_client(provider, model=model)
-        
-        # 兼容旧代码的默认 llm（使用强模型）
-        self.llm = self.llm_synthesizer
-        
-        logger.info("[AgentGraph] Initialized tiered models for agent nodes")
+        _str = StrOutputParser()
+
+        # 每条 LCEL chain = prompt.build() | llm | StrOutputParser()
+        # 快速模型：planner / tool_router / evaluator / session_compressor
+        self._chain_planner = (
+            get_planner_prompt().build()
+            | get_llm("agent_planner", temperature=0.2)
+            | _str
+        )
+        self._chain_tool_router = (
+            get_tool_router_prompt().build()
+            | get_llm("agent_tool_router", temperature=0.1)
+            | _str
+        )
+        self._chain_evaluator = (
+            get_evaluator_prompt().build()
+            | get_llm("agent_evaluator", temperature=0.1)
+            | _str
+        )
+        # 强模型：synthesizer
+        self._chain_synthesizer = (
+            get_synthesizer_prompt().build()
+            | get_llm("agent_synthesizer", temperature=0.3)
+            | _str
+        )
+        # 快速模型：session compressor
+        self._chain_session_compressor = (
+            get_session_compressor_prompt().build()
+            | get_llm("agent_session_compressor", temperature=0.1, max_tokens=500)
+            | _str
+        )
+
+        logger.info("[AgentGraph] Initialized tiered LCEL chains for agent nodes")
 
     def _emit_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """向外部回调发送执行事件（用于流式前端反馈）。"""
@@ -409,15 +403,10 @@ class AgentGraphRunner:
         logger.info("[SessionCompressor] Compressing conversation history")
         
         try:
-            prompt = get_session_compressor_prompt()
-            history_text = self._format_history(state.conversation_history)
-            
-            messages = prompt.format_messages(
-                conversation_history=history_text,
-                question=state.original_question
-            )
-            
-            response = self.llm_session_compressor.chat(messages, temperature=0.1, max_tokens=500)
+            response = self._chain_session_compressor.invoke({
+                "conversation_history": self._format_history(state.conversation_history),
+                "question": state.original_question,
+            })
             result = self._parse_json_response(response)
             
             if result:
@@ -509,18 +498,12 @@ class AgentGraphRunner:
             self._emit_event("planning", {"status": "lexical_shortcut", "intent": lexical_hint.value})
             return state
 
-        prompt = get_planner_prompt()
-        history_text = state.get_compressed_history()
-        repo_facts = json.dumps(state.repo_facts_memory.to_dict(), ensure_ascii=False)
-        
-        messages = prompt.format_messages(
-            question=state.original_question,
-            conversation_history=history_text or "No prior conversation.",
-            repo_facts=repo_facts or "{}"
-        )
-        
         try:
-            response = self.llm_planner.chat(messages, temperature=0.2)
+            response = self._chain_planner.invoke({
+                "question": state.original_question,
+                "conversation_history": state.get_compressed_history() or "No prior conversation.",
+                "repo_facts": json.dumps(state.repo_facts_memory.to_dict(), ensure_ascii=False) or "{}",
+            })
             plan_data = self._parse_json_response(response)
             
             if plan_data:
@@ -596,20 +579,16 @@ class AgentGraphRunner:
         """
         logger.info(f"[ToolExecutor] Iteration {state.iteration_count + 1}, missing: {state.missing_pieces[:2]}")
         
-        prompt = get_tool_router_prompt()
-        
-        messages = prompt.format_messages(
-            question=state.original_question,
-            query_intent=state.query_intent.value if state.query_intent else "implementation",
-            anchors_summary=state.get_anchors_summary(),
-            context_summary=state.get_context_summary(max_length=4000),
-            missing_pieces="\n".join(state.missing_pieces) if state.missing_pieces else "Need to gather initial context.",
-            tool_history=self._format_tool_history(state.tool_calls_history),
-            exploration_plan="\n".join(state.exploration_plan) if state.exploration_plan else "Adaptive exploration"
-        )
-        
         try:
-            response = self.llm_tool_router.chat(messages, temperature=0.1)
+            response = self._chain_tool_router.invoke({
+                "question": state.original_question,
+                "query_intent": state.query_intent.value if state.query_intent else "implementation",
+                "anchors_summary": state.get_anchors_summary(),
+                "context_summary": state.get_context_summary(max_length=4000),
+                "missing_pieces": "\n".join(state.missing_pieces) if state.missing_pieces else "Need to gather initial context.",
+                "tool_history": self._format_tool_history(state.tool_calls_history),
+                "exploration_plan": "\n".join(state.exploration_plan) if state.exploration_plan else "Adaptive exploration",
+            })
             tool_selection = self._parse_json_response(response)
             
             if tool_selection:
@@ -1300,24 +1279,20 @@ class AgentGraphRunner:
         logger.info(f"[Evaluator] Evaluating context sufficiency (iteration {state.iteration_count + 1})")
         self._emit_event("evaluation", {"status": "start", "iteration": state.iteration_count + 1})
         
-        prompt = get_evaluator_prompt()
-        
         # 先做硬门控检查
         hard_gate_result = self._hard_gate_check(state)
-        
-        messages = prompt.format_messages(
-            question=state.original_question,
-            query_intent=state.query_intent.value if state.query_intent else "implementation",
-            stop_conditions="\n".join(state.stop_conditions) if state.stop_conditions else "No explicit stop conditions defined.",
-            anchors_summary=state.get_anchors_summary(),
-            evidence_summary=state.get_evidence_summary(max_length=4000),
-            tool_history=self._format_tool_history(state.tool_calls_history),
-            iteration_count=state.iteration_count + 1,
-            max_iterations=state.max_iterations
-        )
-        
+
         try:
-            response = self.llm_evaluator.chat(messages, temperature=0.1)
+            response = self._chain_evaluator.invoke({
+                "question": state.original_question,
+                "query_intent": state.query_intent.value if state.query_intent else "implementation",
+                "stop_conditions": "\n".join(state.stop_conditions) if state.stop_conditions else "No explicit stop conditions defined.",
+                "anchors_summary": state.get_anchors_summary(),
+                "evidence_summary": state.get_evidence_summary(max_length=4000),
+                "tool_history": self._format_tool_history(state.tool_calls_history),
+                "iteration_count": state.iteration_count + 1,
+                "max_iterations": state.max_iterations,
+            })
             eval_data = self._parse_json_response(response)
             
             if eval_data:
@@ -1475,20 +1450,16 @@ class AgentGraphRunner:
         logger.info("[Synthesizer] Generating final answer...")
         self._emit_event("synthesis", {"status": "start"})
         
-        prompt = get_synthesizer_prompt()
-        
-        messages = prompt.format_messages(
-            question=state.original_question,
-            query_intent=state.query_intent.value if state.query_intent else "implementation",
-            confidence_level=state.confidence_level.value,
-            evidence_summary=state.get_evidence_summary(max_length=6000),
-            anchors_summary=state.get_anchors_summary(),
-            trajectory=self._format_trajectory(state.get_trajectory()),
-            conversation_history=state.get_compressed_history() or "No conversation history",
-        )
-        
         try:
-            response = self.llm_synthesizer.chat(messages, temperature=0.3)
+            response = self._chain_synthesizer.invoke({
+                "question": state.original_question,
+                "query_intent": state.query_intent.value if state.query_intent else "implementation",
+                "confidence_level": state.confidence_level.value,
+                "evidence_summary": state.get_evidence_summary(max_length=6000),
+                "anchors_summary": state.get_anchors_summary(),
+                "trajectory": self._format_trajectory(state.get_trajectory()),
+                "conversation_history": state.get_compressed_history() or "No conversation history",
+            })
             synth_data = self._parse_json_response(response)
             
             if synth_data:

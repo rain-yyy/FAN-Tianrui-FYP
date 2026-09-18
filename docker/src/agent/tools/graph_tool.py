@@ -190,425 +190,509 @@ class CodeGraphTool:
         """查找符号定义位置"""
         if not symbol_name:
             return "Error: symbol_name is required", {"error": "missing_symbol"}
-        
+
         matches = []
         for node_id, data in self.graph.nodes(data=True):
             node_name = data.get("name", "")
             node_type = data.get("type", "")
             node_file = data.get("file", "")
-            
-            if node_name == symbol_name or node_id.endswith(f":{symbol_name}"):
-                if file_path and file_path not in node_file:
-                    continue
-                matches.append({
-                    "node_id": node_id,
-                    "type": node_type,
-                    "file": node_file,
-                    "name": node_name,
-                    "line": data.get("line"),
-                })
-        
+
+            # Match by short name OR by qualified name suffix (e.g. "ClassName.method")
+            name_hit = (
+                node_name == symbol_name
+                or node_id.endswith(f":{symbol_name}")
+                or (data.get("qualified_name") or "") == symbol_name
+            )
+            if not name_hit:
+                continue
+            if file_path and file_path not in node_file:
+                continue
+
+            matches.append({
+                "node_id":        node_id,
+                "type":           node_type,
+                "file":           node_file,
+                "name":           node_name,
+                "qualified_name": data.get("qualified_name", node_name),
+                "start_line":     data.get("start_line"),
+                "end_line":       data.get("end_line"),
+                "signature":      data.get("signature"),
+                "visibility":     data.get("visibility"),
+            })
+
         if not matches:
             return f"No definition found for symbol: {symbol_name}", {"symbols_found": []}
-        
+
         result_lines = [f"Found {len(matches)} definition(s) for '{symbol_name}':"]
         result_lines.append("")
-        
+
         anchor_candidates = []
-        for match in matches:
-            result_lines.append(f"  [{match['type']}] {match['node_id']}")
-            result_lines.append(f"    📁 File: {match['file']}")
-            if match.get('line'):
-                result_lines.append(f"    📍 Line: {match['line']}")
+        for m in matches:
+            result_lines.append(f"  [{m['type']}] {m['qualified_name']}")
+            result_lines.append(f"    📁 File: {m['file']}")
+            if m.get("start_line"):
+                end = m.get("end_line")
+                loc = f"{m['start_line']}–{end}" if end else str(m["start_line"])
+                result_lines.append(f"    📍 Lines: {loc}")
+            if m.get("signature"):
+                result_lines.append(f"    ✏️  Signature: {m['signature']}")
+            if m.get("visibility"):
+                result_lines.append(f"    🔒 Visibility: {m['visibility']}")
             result_lines.append("")
-            
+
             anchor_candidates.append({
-                "anchor_type": "definition",
-                "symbol_name": match['name'],
-                "file_path": match['file'],
-                "line_number": match.get('line'),
+                "anchor_type":  "definition",
+                "symbol_name":  m["name"],
+                "file_path":    m["file"],
+                "line_number":  m.get("start_line"),
             })
-        
+
         metadata = {
-            "relation_type": "definition",
-            "symbols_found": [m['name'] for m in matches],
-            "primary_file": matches[0]['file'] if matches else None,
+            "relation_type":    "definition",
+            "symbols_found":    [m["name"] for m in matches],
+            "primary_file":     matches[0]["file"] if matches else None,
+            "line_range":       (matches[0].get("start_line"), matches[0].get("end_line")) if matches else None,
             "anchor_candidates": anchor_candidates,
         }
-        
+
         return "\n".join(result_lines), metadata
     
     def _find_callers(self, symbol_name: str, file_path: Optional[str] = None) -> Tuple[str, Dict[str, Any]]:
         """查找调用某符号的位置"""
         if not symbol_name:
             return "Error: symbol_name is required", {"error": "missing_symbol"}
-        
+
         target_nodes = [
             node_id for node_id, data in self.graph.nodes(data=True)
-            if data.get("name") == symbol_name or node_id.endswith(f":{symbol_name}")
+            if data.get("name") == symbol_name
+            or node_id.endswith(f":{symbol_name}")
+            or (data.get("qualified_name") or "") == symbol_name
         ]
-        
+
         if not target_nodes:
             return f"Symbol not found in graph: {symbol_name}", {"symbols_found": []}
-        
+
+        seen: set = set()
         callers = []
         for target in target_nodes:
             for pred in self.graph.predecessors(target):
+                if pred in seen:
+                    continue
                 edge_data = self.graph.get_edge_data(pred, target)
-                if edge_data and edge_data.get("type") == "calls":
-                    pred_data = self.graph.nodes[pred]
-                    if file_path and file_path not in pred_data.get("file", ""):
-                        continue
-                    callers.append({
-                        "caller": pred,
-                        "caller_name": pred_data.get("name", pred),
-                        "file": pred_data.get("file", "unknown"),
-                        "type": pred_data.get("type", "unknown"),
-                        "line": pred_data.get("line"),
-                    })
-        
+                if not (edge_data and edge_data.get("type") == "calls"):
+                    continue
+                pred_data = self.graph.nodes[pred]
+                if file_path and file_path not in pred_data.get("file", ""):
+                    continue
+                seen.add(pred)
+                callers.append({
+                    "caller":      pred,
+                    "caller_name": pred_data.get("qualified_name") or pred_data.get("name", pred),
+                    "file":        pred_data.get("file", "unknown"),
+                    "type":        pred_data.get("type", "unknown"),
+                    "start_line":  pred_data.get("start_line"),
+                })
+
         if not callers:
             return f"No callers found for: {symbol_name}", {"relation_type": "calls", "symbols_found": []}
-        
+
         result_lines = [f"Found {len(callers)} caller(s) of '{symbol_name}':"]
         result_lines.append("")
-        
-        for caller in callers:
-            result_lines.append(f"  [{caller['type']}] {caller['caller_name']}")
-            result_lines.append(f"    📁 File: {caller['file']}")
+
+        for c in callers:
+            loc = f" [line {c['start_line']}]" if c.get("start_line") else ""
+            result_lines.append(f"  [{c['type']}] {c['caller_name']}{loc}")
+            result_lines.append(f"    📁 File: {c['file']}")
             result_lines.append(f"    → calls → {symbol_name}")
             result_lines.append("")
-        
+
         metadata = {
             "relation_type": "calls",
-            "symbols_found": [c['caller_name'] for c in callers],
-            "primary_file": callers[0]['file'] if callers else None,
+            "symbols_found": [c["caller_name"] for c in callers],
+            "primary_file":  callers[0]["file"] if callers else None,
             "anchor_candidates": [
                 {
                     "anchor_type": "reference",
-                    "symbol_name": c['caller_name'],
-                    "file_path": c['file'],
-                    "line_number": c.get('line'),
+                    "symbol_name": c["caller_name"],
+                    "file_path":   c["file"],
+                    "line_number": c.get("start_line"),
                 }
                 for c in callers[:5]
             ],
         }
-        
+
         return "\n".join(result_lines), metadata
     
     def _find_callees(self, symbol_name: str, file_path: Optional[str] = None) -> Tuple[str, Dict[str, Any]]:
         """查找某符号调用的其他符号"""
         if not symbol_name:
             return "Error: symbol_name is required", {"error": "missing_symbol"}
-        
+
         source_nodes = [
             node_id for node_id, data in self.graph.nodes(data=True)
-            if data.get("name") == symbol_name or node_id.endswith(f":{symbol_name}")
+            if data.get("name") == symbol_name
+            or node_id.endswith(f":{symbol_name}")
+            or (data.get("qualified_name") or "") == symbol_name
         ]
-        
+
         if not source_nodes:
             return f"Symbol not found in graph: {symbol_name}", {"symbols_found": []}
-        
+
+        seen: set = set()
         callees = []
         for source in source_nodes:
             source_data = self.graph.nodes[source]
+            if file_path and file_path not in source_data.get("file", ""):
+                continue
             for succ in self.graph.successors(source):
+                if succ in seen:
+                    continue
                 edge_data = self.graph.get_edge_data(source, succ)
-                if edge_data and edge_data.get("type") == "calls":
-                    succ_data = self.graph.nodes[succ]
-                    callees.append({
-                        "callee": succ,
-                        "callee_name": succ_data.get("name", succ),
-                        "file": succ_data.get("file", "unknown"),
-                        "type": succ_data.get("type", "unknown"),
-                        "line": succ_data.get("line"),
-                        "source_file": source_data.get("file", "unknown"),
-                    })
-        
+                if not (edge_data and edge_data.get("type") == "calls"):
+                    continue
+                seen.add(succ)
+                succ_data = self.graph.nodes[succ]
+                callees.append({
+                    "callee":       succ,
+                    "callee_name":  succ_data.get("qualified_name") or succ_data.get("name", succ),
+                    "file":         succ_data.get("file", "unknown"),
+                    "type":         succ_data.get("type", "unknown"),
+                    "start_line":   succ_data.get("start_line"),
+                    "source_file":  source_data.get("file", "unknown"),
+                })
+
         if not callees:
             return f"No callees found for: {symbol_name}", {"relation_type": "calls", "symbols_found": []}
-        
+
         result_lines = [f"'{symbol_name}' calls {len(callees)} function(s):"]
         result_lines.append("")
-        
-        for callee in callees:
-            result_lines.append(f"  {symbol_name} → calls → [{callee['type']}] {callee['callee_name']}")
-            result_lines.append(f"    📁 Defined in: {callee['file']}")
+
+        for c in callees:
+            loc = f" [line {c['start_line']}]" if c.get("start_line") else ""
+            result_lines.append(f"  {symbol_name} → [{c['type']}] {c['callee_name']}{loc}")
+            result_lines.append(f"    📁 Defined in: {c['file']}")
             result_lines.append("")
-        
+
         metadata = {
             "relation_type": "calls",
-            "symbols_found": [c['callee_name'] for c in callees],
-            "primary_file": callees[0]['source_file'] if callees else None,
+            "symbols_found": [c["callee_name"] for c in callees],
+            "primary_file":  callees[0]["source_file"] if callees else None,
             "anchor_candidates": [
                 {
                     "anchor_type": "reference",
-                    "symbol_name": c['callee_name'],
-                    "file_path": c['file'],
-                    "line_number": c.get('line'),
+                    "symbol_name": c["callee_name"],
+                    "file_path":   c["file"],
+                    "line_number": c.get("start_line"),
                 }
                 for c in callees[:5]
             ],
         }
-        
+
         return "\n".join(result_lines), metadata
     
     def _get_class_hierarchy(self, class_name: str) -> Tuple[str, Dict[str, Any]]:
         """获取类的继承层次"""
         if not class_name:
             return "Error: class_name is required", {"error": "missing_symbol"}
-        
+
         class_nodes = [
             (node_id, data) for node_id, data in self.graph.nodes(data=True)
-            if data.get("type") == "class" and 
-            (data.get("name") == class_name or node_id.endswith(f":{class_name}"))
+            if data.get("type") == "class"
+            and (data.get("name") == class_name or node_id.endswith(f":{class_name}"))
         ]
-        
+
         if not class_nodes:
             return f"Class not found: {class_name}", {"symbols_found": []}
-        
+
         result_lines = [f"Class hierarchy for '{class_name}':"]
         result_lines.append("")
-        
+
         symbols_found = []
         anchor_candidates = []
-        
+
         for node_id, data in class_nodes:
-            result_lines.append(f"📦 Class: {data.get('name', node_id)}")
-            result_lines.append(f"  📁 File: {data.get('file', 'unknown')}")
-            
-            symbols_found.append(data.get('name', node_id))
+            cls_name = data.get("name", node_id)
+            cls_file = data.get("file", "unknown")
+            sl = data.get("start_line")
+            loc = f" [line {sl}]" if sl else ""
+            result_lines.append(f"📦 Class: {cls_name}{loc}")
+            result_lines.append(f"  📁 File: {cls_file}")
+
+            # base_classes stored directly on the node
+            base_names: List[str] = data.get("base_classes") or []
+            if base_names:
+                result_lines.append(f"  ⬆️ Inherits from (declared): {', '.join(base_names)}")
+
+            symbols_found.append(cls_name)
             anchor_candidates.append({
                 "anchor_type": "definition",
-                "symbol_name": data.get('name', node_id),
-                "file_path": data.get('file', 'unknown'),
+                "symbol_name": cls_name,
+                "file_path":   cls_file,
+                "line_number": sl,
             })
-            
-            # 父类
+
+            # Parents: edges go child → parent (add_edge(child_id, parent_id, type="inherits"))
+            # so successors of this node with "inherits" edges are the actual parent classes
             parents = []
-            for pred in self.graph.predecessors(node_id):
-                edge_data = self.graph.get_edge_data(pred, node_id)
-                if edge_data and edge_data.get("type") == "inherits":
-                    pred_data = self.graph.nodes[pred]
-                    parents.append({
-                        "name": pred_data.get("name", pred),
-                        "file": pred_data.get("file", "unknown"),
-                    })
-            
-            if parents:
-                result_lines.append(f"  ⬆️ Extends:")
-                for p in parents:
-                    result_lines.append(f"    - {p['name']} ({p['file']})")
-            
-            # 子类
-            children = []
             for succ in self.graph.successors(node_id):
                 edge_data = self.graph.get_edge_data(node_id, succ)
                 if edge_data and edge_data.get("type") == "inherits":
                     succ_data = self.graph.nodes[succ]
-                    children.append({
+                    parents.append({
                         "name": succ_data.get("name", succ),
                         "file": succ_data.get("file", "unknown"),
                     })
-            
-            if children:
-                result_lines.append(f"  ⬇️ Subclasses:")
-                for c in children:
+
+            if parents:
+                result_lines.append(f"  ⬆️ Resolved parent classes:")
+                for p in parents:
+                    result_lines.append(f"    - {p['name']} ({p['file']})")
+
+            # Subclasses: predecessors with "inherits" edges pointing to this node are subclasses
+            subclasses = []
+            for pred in self.graph.predecessors(node_id):
+                edge_data = self.graph.get_edge_data(pred, node_id)
+                if edge_data and edge_data.get("type") == "inherits":
+                    pred_data = self.graph.nodes[pred]
+                    subclasses.append({
+                        "name": pred_data.get("name", pred),
+                        "file": pred_data.get("file", "unknown"),
+                    })
+
+            if subclasses:
+                result_lines.append(f"  ⬇️ Known subclasses:")
+                for c in subclasses:
                     result_lines.append(f"    - {c['name']} ({c['file']})")
-            
-            # 方法
+
+            # Methods (contains edges from class to functions)
             methods = []
             for succ in self.graph.successors(node_id):
                 edge_data = self.graph.get_edge_data(node_id, succ)
                 if edge_data and edge_data.get("type") == "contains":
                     succ_data = self.graph.nodes[succ]
                     if succ_data.get("type") == "function":
-                        methods.append(succ_data.get("name", succ))
-            
+                        name = succ_data.get("name", succ)
+                        sl2 = succ_data.get("start_line")
+                        methods.append(f"{name} [line {sl2}]" if sl2 else name)
+
             if methods:
-                result_lines.append(f"  🔧 Methods: {', '.join(methods[:10])}")
-                if len(methods) > 10:
-                    result_lines.append(f"      ... and {len(methods) - 10} more")
-            
+                result_lines.append(f"  🔧 Methods ({len(methods)}): {', '.join(methods[:12])}")
+                if len(methods) > 12:
+                    result_lines.append(f"      ... and {len(methods) - 12} more")
+
             result_lines.append("")
-        
+
         metadata = {
-            "relation_type": "inherits",
-            "symbols_found": symbols_found,
-            "primary_file": class_nodes[0][1].get('file') if class_nodes else None,
+            "relation_type":    "inherits",
+            "symbols_found":    symbols_found,
+            "primary_file":     class_nodes[0][1].get("file") if class_nodes else None,
             "anchor_candidates": anchor_candidates,
         }
-        
+
         return "\n".join(result_lines), metadata
     
     def _get_file_symbols(self, file_path: str) -> Tuple[str, Dict[str, Any]]:
         """获取文件中定义的所有符号"""
         if not file_path:
             return "Error: file_path is required", {"error": "missing_file_path"}
-        
+
         symbols = []
         for node_id, data in self.graph.nodes(data=True):
             node_file = data.get("file", "")
-            if file_path in node_file or node_file.endswith(file_path):
-                symbols.append({
-                    "name": data.get("name", node_id),
-                    "type": data.get("type", "unknown"),
-                    "node_id": node_id,
-                    "line": data.get("line"),
-                })
-        
+            if not (file_path in node_file or node_file.endswith(file_path)):
+                continue
+            node_type = data.get("type", "unknown")
+            if node_type == "file":
+                continue
+            symbols.append({
+                "name":           data.get("name", node_id),
+                "qualified_name": data.get("qualified_name") or data.get("name", node_id),
+                "type":           node_type,
+                "node_id":        node_id,
+                "start_line":     data.get("start_line"),
+                "end_line":       data.get("end_line"),
+                "signature":      data.get("signature"),
+                "visibility":     data.get("visibility"),
+            })
+
         if not symbols:
             return f"No symbols found in file: {file_path}", {"symbols_found": []}
-        
-        classes = [s for s in symbols if s["type"] == "class"]
+
+        # Sort by start_line so output follows source order
+        symbols.sort(key=lambda s: s.get("start_line") or 0)
+
+        classes   = [s for s in symbols if s["type"] == "class"]
         functions = [s for s in symbols if s["type"] == "function"]
-        others = [s for s in symbols if s["type"] not in ("class", "function", "file")]
-        
+        others    = [s for s in symbols if s["type"] not in ("class", "function")]
+
         result_lines = [f"Symbols in '{file_path}':"]
         result_lines.append("")
-        
+
         if classes:
             result_lines.append(f"📦 Classes ({len(classes)}):")
             for c in classes:
-                line_info = f" [line {c['line']}]" if c.get('line') else ""
-                result_lines.append(f"  - {c['name']}{line_info}")
-        
+                loc = f" [line {c['start_line']}]" if c.get("start_line") else ""
+                result_lines.append(f"  - {c['name']}{loc}")
+
         if functions:
             result_lines.append(f"\n🔧 Functions ({len(functions)}):")
-            for f in functions[:20]:
-                line_info = f" [line {f['line']}]" if f.get('line') else ""
-                result_lines.append(f"  - {f['name']}{line_info}")
-            if len(functions) > 20:
-                result_lines.append(f"  ... and {len(functions) - 20} more")
-        
+            for fn in functions[:25]:
+                loc = f" [line {fn['start_line']}]" if fn.get("start_line") else ""
+                vis = f" ({fn['visibility']})" if fn.get("visibility") else ""
+                result_lines.append(f"  - {fn['qualified_name']}{loc}{vis}")
+            if len(functions) > 25:
+                result_lines.append(f"  ... and {len(functions) - 25} more")
+
         if others:
             result_lines.append(f"\n📋 Other ({len(others)}):")
             for o in others[:10]:
                 result_lines.append(f"  - [{o['type']}] {o['name']}")
-        
+
         metadata = {
             "relation_type": "contains",
-            "symbols_found": [s['name'] for s in symbols],
-            "primary_file": file_path,
+            "symbols_found": [s["name"] for s in symbols],
+            "primary_file":  file_path,
             "anchor_candidates": [
                 {
                     "anchor_type": "definition",
-                    "symbol_name": s['name'],
-                    "file_path": file_path,
-                    "line_number": s.get('line'),
+                    "symbol_name": s["name"],
+                    "file_path":   file_path,
+                    "line_number": s.get("start_line"),
                 }
                 for s in (classes + functions)[:10]
             ],
         }
-        
+
         return "\n".join(result_lines), metadata
     
     def _get_all_symbols(self, limit: int = 50) -> Tuple[str, Dict[str, Any]]:
         """获取图谱中所有主要符号的概览"""
-        classes = []
-        functions = []
-        files = []
-        
+        classes: List[Dict] = []
+        functions: List[Dict] = []
+        files: List[str] = []
+
         for node_id, data in self.graph.nodes(data=True):
             node_type = data.get("type", "")
             if node_type == "class":
                 classes.append({
-                    "name": data.get("name", node_id),
-                    "file": data.get("file", "unknown"),
+                    "name":       data.get("name", node_id),
+                    "file":       data.get("file", "unknown"),
+                    "start_line": data.get("start_line"),
                 })
             elif node_type == "function":
+                # Only include top-level and class methods for conciseness
                 functions.append({
-                    "name": data.get("name", node_id),
-                    "file": data.get("file", "unknown"),
+                    "name":           data.get("qualified_name") or data.get("name", node_id),
+                    "file":           data.get("file", "unknown"),
+                    "start_line":     data.get("start_line"),
+                    "function_type":  data.get("function_type", "function"),
                 })
             elif node_type == "file":
                 files.append(node_id)
-        
+
         result_lines = [
             "📊 Code Graph Overview:",
-            f"  Total nodes: {self.graph.number_of_nodes()}",
-            f"  Total edges: {self.graph.number_of_edges()}",
-            f"  Files: {len(files)}",
-            f"  Classes: {len(classes)}",
-            f"  Functions: {len(functions)}",
+            f"  Total nodes : {self.graph.number_of_nodes()}",
+            f"  Total edges : {self.graph.number_of_edges()}",
+            f"  Files       : {len(files)}",
+            f"  Classes     : {len(classes)}",
+            f"  Functions   : {len(functions)}",
             "",
+            "📁 Files:",
         ]
-        
+        for fp in sorted(files)[:30]:
+            result_lines.append(f"  - {fp}")
+        if len(files) > 30:
+            result_lines.append(f"  ... and {len(files) - 30} more")
+
         if classes:
-            result_lines.append("📦 Key Classes:")
-            for c in classes[:15]:
-                result_lines.append(f"  - {c['name']} ({c['file']})")
-            if len(classes) > 15:
-                result_lines.append(f"  ... and {len(classes) - 15} more")
-        
-        if functions:
-            result_lines.append("\n🔧 Key Functions:")
-            for f in functions[:15]:
-                result_lines.append(f"  - {f['name']} ({f['file']})")
-            if len(functions) > 15:
-                result_lines.append(f"  ... and {len(functions) - 15} more")
-        
+            result_lines.append(f"\n📦 Classes ({len(classes)}):")
+            for c in classes[:20]:
+                loc = f" [line {c['start_line']}]" if c.get("start_line") else ""
+                result_lines.append(f"  - {c['name']}{loc}  ({c['file']})")
+            if len(classes) > 20:
+                result_lines.append(f"  ... and {len(classes) - 20} more")
+
+        # Show only top-level functions (not methods) for a cleaner overview
+        top_fns = [f for f in functions if f["function_type"] != "method"]
+        if top_fns:
+            result_lines.append(f"\n🔧 Top-level Functions ({len(top_fns)}):")
+            for fn in top_fns[:20]:
+                loc = f" [line {fn['start_line']}]" if fn.get("start_line") else ""
+                result_lines.append(f"  - {fn['name']}{loc}  ({fn['file']})")
+            if len(top_fns) > 20:
+                result_lines.append(f"  ... and {len(top_fns) - 20} more")
+
         metadata = {
             "relation_type": "overview",
-            "symbols_found": [c['name'] for c in classes[:10]] + [f['name'] for f in functions[:10]],
+            "symbols_found": [c["name"] for c in classes[:10]] + [f["name"] for f in functions[:10]],
             "anchor_candidates": [],
         }
-        
+
         return "\n".join(result_lines), metadata
     
     def _find_imports(self, file_path: str) -> Tuple[str, Dict[str, Any]]:
-        """查找文件的导入关系"""
+        """查找文件的导入关系。
+
+        import 边在图中连接两个 file 节点：
+            importing_file → imported_file  (type="imports")
+        file 节点的 node_id 就是 rel_path 字符串本身（无 ":" 前缀）。
+        """
         if not file_path:
             return "Error: file_path is required", {"error": "missing_file_path"}
-        
-        imports = []
-        imported_by = []
-        
+
+        # Identify the canonical file node ID (may be an exact or suffix match)
+        file_node_id: Optional[str] = None
         for node_id, data in self.graph.nodes(data=True):
-            node_file = data.get("file", "")
-            if file_path in node_file or node_file.endswith(file_path):
-                # 该文件导入的
-                for succ in self.graph.successors(node_id):
-                    edge_data = self.graph.get_edge_data(node_id, succ)
-                    if edge_data and edge_data.get("type") == "imports":
-                        succ_data = self.graph.nodes[succ]
-                        imports.append({
-                            "name": succ_data.get("name", succ),
-                            "file": succ_data.get("file", "unknown"),
-                        })
-                
-                # 被其他文件导入的
-                for pred in self.graph.predecessors(node_id):
-                    edge_data = self.graph.get_edge_data(pred, node_id)
-                    if edge_data and edge_data.get("type") == "imports":
-                        pred_data = self.graph.nodes[pred]
-                        imported_by.append({
-                            "name": pred_data.get("name", pred),
-                            "file": pred_data.get("file", "unknown"),
-                        })
-        
-        result_lines = [f"Import relationships for '{file_path}':"]
+            if data.get("type") == "file" and (
+                node_id == file_path
+                or node_id.endswith(file_path)
+                or file_path in node_id
+            ):
+                file_node_id = node_id
+                break
+
+        if file_node_id is None:
+            return f"File node not found in graph: {file_path}", {"symbols_found": []}
+
+        # Files this file imports (file_node_id → target with "imports" edge)
+        imports: List[str] = []
+        for succ in self.graph.successors(file_node_id):
+            edge_data = self.graph.get_edge_data(file_node_id, succ)
+            if edge_data and edge_data.get("type") == "imports":
+                imports.append(succ)
+
+        # Files that import this file (pred → file_node_id with "imports" edge)
+        imported_by: List[str] = []
+        for pred in self.graph.predecessors(file_node_id):
+            edge_data = self.graph.get_edge_data(pred, file_node_id)
+            if edge_data and edge_data.get("type") == "imports":
+                imported_by.append(pred)
+
+        result_lines = [f"Import relationships for '{file_node_id}':"]
         result_lines.append("")
-        
+
         if imports:
-            result_lines.append("⬇️ Imports:")
+            result_lines.append(f"⬇️ Imports ({len(imports)}):")
             for imp in imports[:20]:
-                result_lines.append(f"  - {imp['name']} from {imp['file']}")
-        
+                result_lines.append(f"  - {imp}")
+            if len(imports) > 20:
+                result_lines.append(f"  ... and {len(imports) - 20} more")
+
         if imported_by:
-            result_lines.append("\n⬆️ Imported by:")
+            result_lines.append(f"\n⬆️ Imported by ({len(imported_by)}):")
             for imp in imported_by[:20]:
-                result_lines.append(f"  - {imp['name']} in {imp['file']}")
-        
+                result_lines.append(f"  - {imp}")
+
         if not imports and not imported_by:
             result_lines.append("No import relationships found.")
-        
+
         metadata = {
             "relation_type": "imports",
-            "symbols_found": [i['name'] for i in imports + imported_by],
-            "primary_file": file_path,
+            "symbols_found": imports + imported_by,
+            "primary_file":  file_node_id,
         }
-        
+
         return "\n".join(result_lines), metadata
     
     def _get_module_dependencies(self, module_path: str) -> Tuple[str, Dict[str, Any]]:

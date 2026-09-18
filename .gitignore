@@ -19,3 +19,5 @@ frontend/.next/
 frontend/tsconfig.tsbuildinfo
 .vercel
 .env*.local
+frontend/.env.local
+

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Any
 import json
 
+from langchain_core.prompts import ChatPromptTemplate
 from src.prompts import OUTPUT_LANGUAGE_EN
 
 
@@ -19,12 +20,12 @@ class AgentPromptDefinition:
     system: str
     human: str
 
-    def format_messages(self, **kwargs) -> List[Dict[str, str]]:
-        """Build OpenAI-style messages with `.format(**kwargs)` on both parts."""
-        return [
-            {"role": "system", "content": self.system.strip().format(**kwargs)},
-            {"role": "user", "content": self.human.strip().format(**kwargs)},
-        ]
+    def build(self) -> ChatPromptTemplate:
+        """Return a LangChain ChatPromptTemplate for use in LCEL chains."""
+        return ChatPromptTemplate.from_messages([
+            ("system", self.system.strip()),
+            ("human", self.human.strip()),
+        ])
 
 
 # ============================================================
@@ -204,7 +205,7 @@ Based on the query intent and current state, use this decision matrix:
 | Need exact string match | Config values, error msgs | grep_search | pattern="search string", is_regex=false |
 | Need pattern match | Multi-file pattern locate | grep_search | pattern="regex_pattern", is_regex=true |
 | Need file symbols | Module structure | code_graph | operation="get_file_symbols", file_path="X" |
-| External version/CVE/API question | External knowledge | web_search | query="...", search_type="version\|cve\|code_docs" |
+| External version/CVE/API question | External knowledge | web_search | query="...", search_type="version|cve|code_docs" |
 
 ## Intent-Based Tool Preferences
 

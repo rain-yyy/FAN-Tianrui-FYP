@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { ArrowRight, Plus, Star, Loader2 } from 'lucide-react';
-import { api, RepoGithubMetadataEntry, normalizeRepoUrl } from '@/lib/api';
+import { api } from '@/lib/api';
 import { useNavigate } from 'react-router-dom';
 
 interface RepoData {
@@ -10,25 +10,12 @@ interface RepoData {
   name: string;
   url: string;
   taskId: string;
-  /** 来自 `repositories` 表（GitHub 简介优先，否则 LLM description） */
-  dbDescription?: string | null;
-  dbStars?: number | null;
+  description: string | null;
+  stars: number | null;
 }
 
-const RepoCard = ({
-  repo,
-  githubMeta,
-  metaLoading,
-}: {
-  repo: RepoData;
-  githubMeta: RepoGithubMetadataEntry | undefined;
-  metaLoading: boolean;
-}) => {
+const RepoCard = ({ repo }: { repo: RepoData }) => {
   const navigate = useNavigate();
-  const stars = githubMeta?.stars ?? repo.dbStars ?? null;
-  const description =
-    githubMeta?.description ??
-    (typeof repo.dbDescription === 'string' && repo.dbDescription.trim() ? repo.dbDescription : null);
 
   const handleCardClick = () => {
     navigate(`/app/wiki/${repo.taskId}?repo=${encodeURIComponent(repo.url)}`);
@@ -50,26 +37,24 @@ const RepoCard = ({
         </div>
 
         <div className="mt-2 text-sm text-stone-600 line-clamp-3 h-[60px]">
-          {description ||
-            (metaLoading ? (
-              <div className="animate-pulse h-4 bg-stone-100 rounded w-3/4" />
-            ) : (
-              'No description available'
-            ))}
+          {repo.description || 'No description available'}
         </div>
       </div>
 
       <div className="mt-auto flex items-center gap-4 text-xs text-stone-500">
-        {metaLoading ? (
-          <div className="animate-pulse h-3 bg-stone-100 rounded w-12" />
-        ) : (
-          <div className="flex items-center gap-1" aria-label={stars !== null ? `Stars ${stars}` : 'Stars unknown'}>
-            <Star className="w-3 h-3 text-stone-500" />
-            <span>
-              {stars !== null ? (stars >= 1000 ? `${(stars / 1000).toFixed(1)}k` : stars) : '—'}
-            </span>
-          </div>
-        )}
+        <div
+          className="flex items-center gap-1"
+          aria-label={repo.stars !== null ? `Stars ${repo.stars}` : 'Stars unknown'}
+        >
+          <Star className="w-3 h-3 text-stone-500" />
+          <span>
+            {repo.stars !== null
+              ? repo.stars >= 1000
+                ? `${(repo.stars / 1000).toFixed(1)}k`
+                : repo.stars
+              : '—'}
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -78,8 +63,6 @@ const RepoCard = ({
 export default function RepoGrid({ userId, onAddRepo }: { userId: string; onAddRepo: () => void }) {
   const [repos, setRepos] = useState<RepoData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [githubMetaByUrl, setGithubMetaByUrl] = useState<Record<string, RepoGithubMetadataEntry>>({});
-  const [metaLoading, setMetaLoading] = useState(true);
 
   useEffect(() => {
     const loadDashboardRepos = async () => {
@@ -93,25 +76,27 @@ export default function RepoGrid({ userId, onAddRepo }: { userId: string; onAddR
             const urlObj = new URL(entry.repo_url);
             const parts = urlObj.pathname.split('/').filter(Boolean);
             if (parts.length < 2) continue;
-            const owner = parts[0];
-            const name = parts[1];
+
             const g = entry.github_short_description;
             const d = entry.description;
-            const dbDescription =
+            const description =
               typeof g === 'string' && g.trim()
                 ? g.trim()
                 : typeof d === 'string' && d.trim()
                   ? d.trim()
                   : null;
+
             const rawStars = entry.stargazers_count;
-            const dbStars = typeof rawStars === 'number' && !Number.isNaN(rawStars) ? rawStars : null;
+            const stars =
+              typeof rawStars === 'number' && !Number.isNaN(rawStars) ? rawStars : null;
+
             list.push({
-              owner,
-              name,
+              owner: parts[0],
+              name: parts[1],
               url: entry.repo_url,
               taskId: entry.task_id,
-              dbDescription,
-              dbStars,
+              description,
+              stars,
             });
           } catch {
             // ignore invalid urls
@@ -119,23 +104,6 @@ export default function RepoGrid({ userId, onAddRepo }: { userId: string; onAddR
         }
 
         setRepos(list);
-
-        setMetaLoading(true);
-        const urls = [...new Set(list.map((r) => normalizeRepoUrl(r.url)).filter(Boolean))];
-        if (urls.length === 0) {
-          setGithubMetaByUrl({});
-          setMetaLoading(false);
-        } else {
-          try {
-            const meta = await api.getRepoGithubMetadata(urls);
-            setGithubMetaByUrl(meta);
-          } catch (e) {
-            console.error('Failed to load repo metadata:', e);
-            setGithubMetaByUrl({});
-          } finally {
-            setMetaLoading(false);
-          }
-        }
       } catch (error) {
         console.error('Failed to load dashboard repositories:', error);
       } finally {
@@ -174,12 +142,7 @@ export default function RepoGrid({ userId, onAddRepo }: { userId: string; onAddR
       </div>
 
       {repos.map((repo) => (
-        <RepoCard
-          key={`${repo.owner}/${repo.name}`}
-          repo={repo}
-          githubMeta={githubMetaByUrl[normalizeRepoUrl(repo.url)]}
-          metaLoading={metaLoading}
-        />
+        <RepoCard key={`${repo.owner}/${repo.name}`} repo={repo} />
       ))}
     </div>
   );

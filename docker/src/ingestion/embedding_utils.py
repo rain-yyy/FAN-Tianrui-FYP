@@ -1,5 +1,5 @@
 """
-OpenRouter 嵌入模型工具，供 kb_loader 和 vector_store 共用。
+OpenRouter 嵌入模型工具，供 vector_store（写入）和 retrieval（查询）共用。
 
 
 OpenAI-compatible APIs（非官方 api.openai.com 的网关，如 OpenRouter、自建 v1 代理）

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Any
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from langchain_core.documents import Document
+
+logger = logging.getLogger("app.core.retrieval")
 
 Tokenizer = Callable[[str], List[str]]
 
@@ -521,6 +524,69 @@ class CommunityFirstRetriever:
         )
 
         return sorted_candidates[:top_k]
+
+
+def qdrant_search_category(
+    client,
+    category: str,
+    repo_id: str,
+    query: str,
+    *,
+    dense_k: int,
+    sparse_k: int,
+    dense_weight: float = 0.6,
+    sparse_weight: float = 0.4,
+    dense_query: Optional[str] = None,
+) -> List["RankedCandidate"]:
+    """
+    对指定 category 的 Qdrant collection 做一次 dense + sparse 召回并加权融合。
+
+    dense/sparse 两次独立请求（均按 repo_id 过滤）并行发起，避免依次等待两次网络往返；
+    命中结果做客户端归一化加权，保留现有 dense/sparse 权重语义，替代旧的
+    FAISS.similarity_search_with_relevance_scores + SparseBM25Index.search 组合。
+    返回形状与旧的 `_collect_candidates_for_category` 完全一致（List[RankedCandidate]）。
+
+    dense_query: 仅用于 dense 检索的查询文本（如 HyDE 增强后的文本），默认与 query 相同；
+    sparse 检索始终使用 query，保留 rag_tool.py 中"HyDE 只增强 dense、不影响稀疏检索"的行为。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from src.ingestion.vector_store import payload_to_document, query_dense, query_sparse
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        dense_future = pool.submit(query_dense, client, category, repo_id, dense_query or query, dense_k)
+        sparse_future = pool.submit(query_sparse, client, category, repo_id, query, sparse_k)
+        dense_hits = dense_future.result()
+        sparse_hits = sparse_future.result()
+
+    candidates: Dict[str, RankedCandidate] = {}
+
+    def _get_or_create(payload: dict) -> RankedCandidate:
+        doc = payload_to_document(payload, category)
+        key = f"{category}|{compute_doc_key(doc)}"
+        current = candidates.get(key)
+        if current is None:
+            current = RankedCandidate(key=key, category=category, doc=doc)
+            candidates[key] = current
+        return current
+
+    dense_scores = normalize_scores([score for _, score in dense_hits])
+    for idx, (payload, _) in enumerate(dense_hits):
+        norm_score = dense_scores[idx] if idx < len(dense_scores) else 0.0
+        candidate = _get_or_create(payload)
+        candidate.dense_score = max(candidate.dense_score, norm_score)
+
+    sparse_scores = normalize_scores([score for _, score in sparse_hits])
+    for idx, (payload, _) in enumerate(sparse_hits):
+        norm_score = sparse_scores[idx] if idx < len(sparse_scores) else 0.0
+        candidate = _get_or_create(payload)
+        candidate.sparse_score = max(candidate.sparse_score, norm_score)
+
+    for candidate in candidates.values():
+        candidate.final_score = (
+            dense_weight * candidate.dense_score + sparse_weight * candidate.sparse_score
+        )
+
+    return list(candidates.values())
 
 
 def create_community_retriever(

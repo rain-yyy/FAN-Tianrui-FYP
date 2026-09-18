@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -8,11 +9,10 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
-
 import dotenv
 from src.config import PROJECT_ROOT, CONFIG
-from src.clients.ai_client_factory import get_ai_client, get_model_config
-from src.prompts import get_structure_prompt, STRUCTURE_PROMPT
+from src.clients import get_llm, StrOutputParser
+from src.prompts import STRUCTURE_PROMPT
 from src.ingestion.code_graph import CodeGraphBuilder
 from src.ingestion.community_engine import CommunityEngine
 from src.ingestion.file_processor import get_files_to_process
@@ -84,12 +84,13 @@ def _build_repo_map_context(repo_path: str, target_subdir: str = "src") -> str:
 
 
 def generate_wiki_structure(
-    repo_path: str, file_tree: str, repo_map: Optional[str] = None, communities_info: Optional[str] = None,
+    repo_path: str, file_tree: str, communities_info: Optional[str] = None,
     valid_file_list: Optional[str] = None,
     communities_persist_path: Optional[str] = None,
+    code_graph_persist_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    调用 gpt 4o mini 生成分层 Wiki 目录并解析 JSON 响应。
+    生成分层 Wiki 目录并解析 JSON 响应。
     """
     logger.info("Generating wiki structure with AI...")
 
@@ -102,48 +103,33 @@ def generate_wiki_structure(
     else:
         logger.warning("README.md not found. Context will be limited.")
 
-    # 2. 初始化模型
-    provider, model = get_model_config(CONFIG, "wiki_structure")
-    llm = get_ai_client(provider, model=model)
+    # 2. 初始化 LCEL chain
+    chain = STRUCTURE_PROMPT.build() | get_llm("wiki_structure", temperature=0.1) | StrOutputParser()
     current_date = datetime.utcnow().date().isoformat()
 
     # 2.1 准备 RepoMap 语境
-    if repo_map is None:
-        logger.info("Building repo map context...")
-        repo_map = _build_repo_map_context(repo_path)
-        logger.info(f"Repo map context built: {len(repo_map)} characters")
+    logger.info("Building repo map context...")
+    repo_map = _build_repo_map_context(repo_path)
+    logger.info(f"Repo map context built: {len(repo_map)} characters")
 
     # 2.2 准备有效文件列表（用于约束 LLM 输出）
-    config_path = PROJECT_ROOT / "config" / "repo_config.json"
-    file_paths = get_files_to_process(repo_path, str(config_path))
-
-    # 暂时保存在本地，用于调试（可选）
-    # with open("file_paths.json", "w", encoding="utf-8") as f:
-    #     json.dump(file_paths, f, indent=2, ensure_ascii=False)
-    
-    if valid_file_list is None:
-        logger.info("Building valid file list...")
-        repo_abs_path = os.path.abspath(repo_path)
-        relative_paths = []
-        for fp in file_paths:
-            try:
-                rel = os.path.relpath(fp, repo_abs_path).replace("\\", "/")
-                if not rel.startswith(".."):
-                    relative_paths.append(rel)
-            except (ValueError, TypeError):
-                continue
+    filtered_file_paths = get_files_to_process(repo_path)
         
-        valid_file_list = "\n".join(sorted(relative_paths))
-        logger.info(f"Valid file list built: {len(relative_paths)} files")
-        
-    # 2.3 准备社区信息 (GraphRAG)
+    # 2.3 准备社区信息
     if communities_info is None:
         try:
             logger.info("Building code graph and communities...")
             
             builder = CodeGraphBuilder()
-            graph = builder.build_graph(repo_path, file_paths)
-            
+            graph = builder.build_graph(repo_path, filtered_file_paths)
+
+            if code_graph_persist_path:
+                try:
+                    builder.save_graph(code_graph_persist_path)
+                    logger.info("Code graph saved to %s", code_graph_persist_path)
+                except OSError as cg_exc:
+                    logger.warning("Failed to persist code graph: %s", cg_exc)
+
             engine = CommunityEngine(graph)
             communities = engine.run_leiden()
             summaries = engine.generate_summaries()
@@ -170,30 +156,22 @@ def generate_wiki_structure(
 
     # 4. 调用 AI
     logger.info("Invoking AI model...")
-    messages = STRUCTURE_PROMPT.format_messages(
-        file_tree=file_tree,
-        readme_content=readme_content,
-        current_date=current_date,
-        repo_map=repo_map or "",
-        communities=communities_info or "",
-        valid_file_list=valid_file_list or ""
-    )
-    ai_message_content = llm.chat(messages, temperature=0.1)
-    
-    if isinstance(ai_message_content, list):
-        ai_message_content = "".join(
-            part for part in ai_message_content if isinstance(part, str)
-        )
-    if not isinstance(ai_message_content, str):
-        raise ValueError("Unexpected AI response type; expected string content.")
+    ai_message_content = chain.invoke({
+        "file_tree": file_tree,
+        "readme_content": readme_content,
+        "current_date": current_date,
+        "repo_map": repo_map or "",
+        "communities": communities_info or "",
+        "valid_file_list": valid_file_list or "",
+    })
 
     logger.info("AI response received.")
 
-    # 4.1 将原始响应保存到文件，方便调试
+    # 4.1 保存原始响应到文件（辅助调试）
     debug_dir = os.path.join(os.getcwd(), "wiki_structure_raw")
     os.makedirs(debug_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    debug_path = os.path.join(debug_dir, f"{timestamp}.json")
+    debug_path = os.path.join(debug_dir, f"{timestamp}.txt")
     try:
         with open(debug_path, "w", encoding="utf-8") as f:
             f.write(ai_message_content)
@@ -206,16 +184,142 @@ def generate_wiki_structure(
     return parse_wiki_structure_json(ai_message_content, fallback_date=current_date)
 
 
+def _extract_balanced_braces(s: str) -> str:
+    """
+    从字符串中提取第一个大括号平衡的子串（{...}），
+    忽略字符串内部的括号，用于将 Python 风格 dict 传给 ast.literal_eval。
+    """
+    depth = 0
+    in_str = False
+    str_char = ''
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if in_str:
+            if c == '\\':
+                i += 2
+                continue
+            if c == str_char:
+                in_str = False
+        else:
+            if c in ('"', "'"):
+                in_str = True
+                str_char = c
+            elif c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    return s[:i + 1]
+        i += 1
+    return s
+
+
+def _parse_llm_json(candidate: str) -> Any:
+    """
+    多策略解析 LLM 输出的 JSON / 类 JSON 字符串：
+
+    1. json.JSONDecoder().raw_decode —— 标准 JSON，忽略尾随文字
+    2. ast.literal_eval —— 处理 Python 风格单引号 dict
+    3. 单引号 → 双引号替换后再 raw_decode —— 兜底
+    """
+    # 策略 1：标准 JSON，允许尾随内容
+    try:
+        data, _ = json.JSONDecoder().raw_decode(candidate)
+        return data
+    except json.JSONDecodeError:
+        pass
+
+    # 策略 2：Python 字面量（单引号 dict 等）
+    try:
+        balanced = _extract_balanced_braces(candidate)
+        data = ast.literal_eval(balanced)
+        if isinstance(data, dict):
+            # 将 Python 对象序列化再反序列化，确保可以被后续校验代码处理
+            return json.loads(json.dumps(data, ensure_ascii=False))
+    except (ValueError, SyntaxError):
+        pass
+
+    # 策略 3：单引号统一替换为双引号后再解析
+    try:
+        fixed = re.sub(
+            r"'([^'\\]*(?:\\.[^'\\]*)*)'",
+            lambda m: '"' + m.group(1).replace('"', '\\"') + '"',
+            candidate,
+        )
+        data, _ = json.JSONDecoder().raw_decode(fixed)
+        return data
+    except (json.JSONDecodeError, re.error):
+        pass
+
+    raise json.JSONDecodeError("All JSON parsing strategies failed", candidate, 0)
+
+
 def parse_wiki_structure_json(raw_json: str, *, fallback_date: str) -> Dict[str, Any]:
     """
     解析 LLM 返回的 JSON 字符串，并规范化 toc 节点结构。
+
+    LLM 可能返回多种格式（按优先级依次尝试）：
+    0. 整体是合法 JSON（直接解析）或双重编码字符串（解一层再解一层）
+    1. 有效 JSON + 尾随文字 → raw_decode 忽略尾随
+    2. Python 风格单引号 dict → ast.literal_eval
+    3. 单引号替换为双引号后再解析
     """
     cleaned_json = _strip_code_fence(raw_json)
+    data: Any = None
 
+    # ── 策略 0：整体 raw_decode / ast.literal_eval ──────────────────────────────────
+    # 覆盖以下情况：
+    # (a) 模型直接返回合法 JSON 对象（可能带尾随内容）
+    # (b) 模型将 JSON 双重编码为字符串字面量（如 `"{\\"title\\"...}"}`）
+    #     → 解外层字符串 → 再 raw_decode 解内层 JSON 对象
     try:
-        data = json.loads(cleaned_json)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON response: {exc}") from exc
+        outer = None
+        try:
+            outer, _ = json.JSONDecoder().raw_decode(cleaned_json.lstrip())
+        except (json.JSONDecodeError, ValueError):
+            # 兼容带有非法转义字符（如 \'）的双引号包裹字符串
+            if cleaned_json.lstrip().startswith('"') or cleaned_json.lstrip().startswith("'"):
+                try:
+                    import ast
+                    outer = ast.literal_eval(cleaned_json.lstrip())
+                except (SyntaxError, ValueError):
+                    pass
+
+        if isinstance(outer, dict):
+            data = outer
+        elif isinstance(outer, str):
+            inner = None
+            try:
+                inner, _ = json.JSONDecoder().raw_decode(outer.lstrip())
+            except (json.JSONDecodeError, ValueError):
+                # 兼容内层也是用 ast 解析的情况
+                try:
+                    import ast
+                    inner = ast.literal_eval(outer.lstrip())
+                except (SyntaxError, ValueError):
+                    pass
+            
+            if isinstance(inner, dict):
+                data = inner
+    except Exception:
+        pass
+
+    # ── 策略 1–3：定位第一个 '{' 后多策略解析 ──────────────────────────────
+    if data is None:
+        brace_idx = cleaned_json.find('{')
+        if brace_idx == -1:
+            raise ValueError("Invalid JSON response: 未找到 JSON 对象起始符 '{'。")
+        candidate = cleaned_json[brace_idx:]
+        try:
+            data = _parse_llm_json(candidate)
+        except json.JSONDecodeError as exc:
+            logger.error(
+                "parse_wiki_structure_json: 所有解析策略均失败。"
+                "原始文本前 500 字符: %r",
+                cleaned_json[:500],
+            )
+            raise ValueError(f"Invalid JSON response: {exc}") from exc
 
     if not isinstance(data, dict):
         raise ValueError("Invalid JSON response: 根元素必须是对象。")
@@ -302,3 +406,15 @@ def _require_str(obj: Dict[str, Any], key: str) -> str:
         raise ValueError(f"Invalid JSON response: '{key}' 必须是非空字符串。")
     return value
 
+
+
+if __name__ == "__main__":
+    _level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=getattr(logging, _level_name, logging.INFO),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    repo_path = "/Users/rainyfan/Documents/GitHub/FAN-Tianrui-FYP/docker/src"
+    repo_map = _build_repo_map_context(repo_path)
+    logger.info("repo_map 长度=%d 字符", len(repo_map))
+    print(repo_map)

@@ -21,6 +21,30 @@ import { LiveStepFlow, LiveStep } from './LiveStepFlow';
 import { t } from '@/lib/i18n';
 import { useAuth } from '@/providers/AuthProvider';
 
+/**
+ * Replicates backend _generate_chat_preview_sync to create a session title
+ * locally, avoiding an extra getChatHistory() API call after every message.
+ */
+const generateChatPreview = (question: string): string => {
+  let q = question.trim();
+  for (const prefix of ['[Current page context:', 'User question:', 'Question:']) {
+    if (q.startsWith(prefix)) {
+      q = q.slice(prefix.length).trim();
+      break;
+    }
+  }
+  for (const delimiter of ['？', '?', '。', '\n', '，', ',']) {
+    if (q.includes(delimiter)) {
+      q = q.split(delimiter)[0].trim();
+      break;
+    }
+  }
+  if (q.length <= 40) return q || 'New chat';
+  const truncated = q.slice(0, 40);
+  const lastSpace = truncated.lastIndexOf(' ');
+  return ((lastSpace > 20 ? truncated.slice(0, lastSpace) : truncated).trim()) + '...';
+};
+
 interface ChatInterfaceProps {
   userId: string;
   repoUrl: string;
@@ -446,8 +470,24 @@ export default function ChatInterface({
           throw new Error(t('agentNoResult'));
         }
 
-        setChatId(finalResponse.chat_id);
-        loadChatHistory();
+        const newChatId = finalResponse.chat_id;
+        const isNewSession = !chatId;
+        setChatId(newChatId);
+
+        // Optimistically add the new session to the history sidebar without
+        // refetching the full list — the server already persisted it.
+        if (isNewSession) {
+          const title = generateChatPreview(question);
+          setChatHistory(prev => [{
+            id: newChatId,
+            chat_id: newChatId,
+            user_id: userId,
+            repo_url: repoUrl,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            title,
+          } as ChatHistoryItem, ...prev]);
+        }
 
         const assistantMessage: DisplayMessage = {
           id: generateId(),

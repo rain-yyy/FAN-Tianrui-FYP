@@ -351,9 +351,13 @@ def _normalize_code_chunks(raw_docs: list[Document]) -> list[Document]:
                 # 将 pending 追加到当前正常块前面（pending 太短，合并进来）
                 combined = pending_content + "\n\n" + content
                 if len(combined) <= MAX_CODE_CHUNK:
+                    # 合并后的行范围：start_line 来自更早的 pending 块，end_line 来自当前块
+                    merged_meta = {**meta}
+                    if "start_line" in pending_meta:
+                        merged_meta["start_line"] = pending_meta["start_line"]
                     pending_content = ""
                     pending_meta = None
-                    result.append(Document(page_content=combined.strip(), metadata=meta))
+                    result.append(Document(page_content=combined.strip(), metadata=merged_meta))
                     continue
             flush_pending()
 

@@ -161,22 +161,43 @@ export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
   // Patch common Mermaid label issues from streamed output.
   const fixMermaidSyntax = (mermaidCode: string): string => {
     let fixed = mermaidCode;
-    
-    // Quote labels that contain @.
-    fixed = fixed.replace(/(\w+)\[([^\]]*@[^\]]*)\]/g, (match, nodeId, label) => {
-      const cleanLabel = label.replace(/^["']|["']$/g, '');
-      return `${nodeId}["${cleanLabel}"]`;
-    });
-    
-    // Escape HTML-like chars inside labels.
-    fixed = fixed.replace(/(\w+)\[([^\]]*[<>&][^\]]*)\]/g, (match, nodeId, label) => {
-      const cleanLabel = label
-        .replace(/^["']|["']$/g, '')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-      return `${nodeId}["${cleanLabel}"]`;
-    });
-    
+
+    // Characters that are syntactically special in Mermaid and must be quoted
+    // when they appear inside [] node labels:
+    //   ( )  – rounded-node syntax
+    //   < >  – HTML/subgraph syntax
+    //   @    – email / special use
+    //   # ;  – comment / statement separators
+    //   & ,  – logical operators / list separators
+    //   : .  – subgraph / namespace separators
+    //   '    – string delimiter
+    const SPECIAL = /[()@<>#;&,:.`']/;
+
+    // Step 1: wrap any UNQUOTED [] label that contains special chars in double quotes.
+    // The negative character class [^\]"] ensures we don't re-process already-quoted labels.
+    fixed = fixed.replace(
+      /(\w+)\[([^\]"]*)\]/g,
+      (match, nodeId: string, label: string) => {
+        if (SPECIAL.test(label)) {
+          // Escape any stray double-quotes in the label itself
+          const safeLabel = label.replace(/"/g, "'");
+          return `${nodeId}["${safeLabel}"]`;
+        }
+        return match;
+      }
+    );
+
+    // Step 2: for labels already wrapped in double-quotes, escape HTML angle brackets.
+    fixed = fixed.replace(
+      /(\w+)\["([^"]*)"\]/g,
+      (match, nodeId: string, label: string) => {
+        if (label.includes('<') || label.includes('>')) {
+          return `${nodeId}["${label.replace(/</g, '&lt;').replace(/>/g, '&gt;')}"]`;
+        }
+        return match;
+      }
+    );
+
     return fixed;
   };
 
@@ -234,15 +255,15 @@ export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
           const mermaid = mermaidModule!.default;
           const id = `mermaid-retry-${Math.random().toString(36).substring(2, 11)}`;
           
-          // More aggressive fixes
+          // More aggressive fixes: quote ALL unquoted labels that have special chars
+          const AGGRESSIVE_SPECIAL = /[()@<>#;&,:.`'"]/;
           let aggressiveFix = cleanedChart
-            // Replace @ in labels
-            .replace(/(\w+)\[([^\]]+)\]/g, (match, nodeId, label) => {
-              if (label.includes('@') || label.includes('<') || label.includes('>')) {
+            .replace(/(\w+)\[([^\]"]*)\]/g, (match, nodeId: string, label: string) => {
+              if (AGGRESSIVE_SPECIAL.test(label)) {
                 const cleanLabel = label
-                  .replace(/@/g, '(at)')
-                  .replace(/</g, '(lt)')
-                  .replace(/>/g, '(gt)');
+                  .replace(/"/g, "'")
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;');
                 return `${nodeId}["${cleanLabel}"]`;
               }
               return match;

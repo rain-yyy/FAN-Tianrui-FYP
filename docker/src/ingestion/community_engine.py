@@ -7,11 +7,30 @@ from typing import Any, DefaultDict, Dict, List, Optional, Set, Tuple
 import igraph as ig
 import leidenalg
 import networkx as nx
+from langchain_core.prompts import ChatPromptTemplate
 
-from src.clients.ai_client_factory import get_ai_client, get_model_config
+from src.clients import get_llm, StrOutputParser
 from src.config import CONFIG
 
 logger = logging.getLogger("app.ingestion.community_engine")
+
+# LCEL chain for community business-summary generation
+_COMMUNITY_SUMMARY_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", "You are a senior software architect."),
+    ("human", (
+        "The following list groups code entities belonging to one logical business community "
+        "in the repository.\n\n"
+        "Write a brief summary (at most ~100 words) of what this community is responsible for "
+        "and how it fits into the overall project.\n\n"
+        "Entity list:\n{entity_list}\n\n"
+        "Return only the summary text, in English."
+    )),
+])
+_community_summary_chain = (
+    _COMMUNITY_SUMMARY_PROMPT
+    | get_llm("community_summary")
+    | StrOutputParser()
+)
 
 
 class CommunityEngine:
@@ -360,9 +379,6 @@ class CommunityEngine:
         """
         为每个社区生成业务摘要。
         """
-        provider, model = get_model_config(CONFIG, "community_summary")
-        client = get_ai_client(provider, model=model)
-
         for comm_id, nodes in self.communities.items():
             node_details = []
             for node in nodes:
@@ -378,19 +394,10 @@ class CommunityEngine:
             if not node_details:
                 continue
 
-            context = "\n".join(node_details[:40])
-
-            prompt = f"""You are a senior software architect. The following list groups code entities that belong to one logical business community in the repository.
-
-Write a brief summary (at most ~100 words) of what this community is responsible for and how it fits into the overall project.
-
-Entity list:
-{context}
-
-Return only the summary text, in English."""
-
             try:
-                summary = client.chat([{"role": "user", "content": prompt}])
+                summary = _community_summary_chain.invoke({
+                    "entity_list": "\n".join(node_details[:40])
+                })
                 self.community_summaries[comm_id] = summary
             except Exception as e:
                 logger.error(f"Error generating summary for community {comm_id}: {e}")

@@ -292,7 +292,8 @@ def upload_wiki_to_r2(
     content_dir: Optional[Path] = None,
     task_id: Optional[str] = None,
     graphrag_local_path: Optional[Path] = None,
-) -> Tuple[Optional[str], Optional[List[str]], Optional[str]]:
+    code_graph_local_path: Optional[Path] = None,
+) -> Tuple[Optional[str], Optional[List[str]], Optional[str], Optional[str]]:
     """
     Upload wiki structure and content files to R2.
 
@@ -303,16 +304,17 @@ def upload_wiki_to_r2(
         content_dir: Local directory containing content JSON files (optional)
         task_id: Optional task ID for path isolation
         graphrag_local_path: Optional local graphrag_communities.json (same bucket prefix as wiki)
+        code_graph_local_path: Optional local code_graph.json (NetworkX node-link format)
 
     Returns:
-        Tuple of (structure_url, content_urls, graphrag_url) — graphrag_url may be None if skipped
+        Tuple of (structure_url, content_urls, graphrag_url, code_graph_url) — trailing elements may be None
     """
     try:
         client = R2Client()
     except ValueError as e:
         print(f"[WARN] R2 client initialization failed: {e}")
         print("[INFO] Skipping R2 upload, will return local paths instead.")
-        return None, None, None
+        return None, None, None, None
 
     # Generate base path with task_id isolation
     repo_name = client._extract_repo_name(repo_url)
@@ -331,7 +333,7 @@ def upload_wiki_to_r2(
 
     if not structure_success:
         print("[ERROR] Failed to upload wiki structure to R2")
-        return None, None, None
+        return None, None, None, None
 
     structure_url = client.get_public_url(structure_key)
 
@@ -343,6 +345,15 @@ def upload_wiki_to_r2(
             print(f"[INFO] Uploaded GraphRAG metadata to R2: {graphrag_key}")
         else:
             print("[WARN] Failed to upload graphrag_communities.json to R2")
+
+    code_graph_url: Optional[str] = None
+    if code_graph_local_path and code_graph_local_path.is_file():
+        code_graph_key = f"{base_path}/code_graph.json"
+        if client.upload_file(code_graph_local_path, code_graph_key):
+            code_graph_url = client.get_public_url(code_graph_key)
+            print(f"[INFO] Uploaded code graph to R2: {code_graph_key}")
+        else:
+            print("[WARN] Failed to upload code_graph.json to R2")
 
     # Upload content files if provided
     content_urls = []
@@ -360,4 +371,4 @@ def upload_wiki_to_r2(
             else:
                 print("[WARN] Failed to upload any content files to R2")
     
-    return structure_url, content_urls if content_urls else None, graphrag_url
+    return structure_url, content_urls if content_urls else None, graphrag_url, code_graph_url

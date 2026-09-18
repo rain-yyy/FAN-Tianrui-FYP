@@ -7,7 +7,7 @@ from src.ingestion.code_graph import CodeGraphBuilder
 from src.ingestion.community_engine import CommunityEngine
 from src.ingestion.docu_splitter import load_and_split_docs
 from src.ingestion.file_processor import generate_file_tree, get_files_to_process
-from src.ingestion.vector_store import create_and_save_vector_store
+from src.ingestion.vector_store import upsert_vector_store
 
 __all__ = [
     "TreeSitterParser",
@@ -17,5 +17,5 @@ __all__ = [
     "load_and_split_docs",
     "generate_file_tree",
     "get_files_to_process",
-    "create_and_save_vector_store",
+    "upsert_vector_store",
 ]

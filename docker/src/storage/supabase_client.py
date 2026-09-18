@@ -1,20 +1,19 @@
+import logging
 import os
 from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 from supabase import create_client, Client
 import dotenv
 
-from src.utils.wiki_cache_policy import (
-    WIKI_GENERATION_CACHE_MAX_AGE_DAYS,
-    wiki_generation_cache_is_stale,
-)
+from src.storage.models import TaskRecord
+
+logger = logging.getLogger(__name__)
 
 dotenv.load_dotenv()
 
 
 class SupabaseStorageError(Exception):
     """Supabase 网络/查询失败，与「无记录」区分（无记录时 get_task 返回 None）。"""
-
 
 class SupabaseClient:
     def __init__(
@@ -32,58 +31,20 @@ class SupabaseClient:
             self.client = create_client(self.url, self.key)
 
     def _normalize_repo_url(self, repo_url: str) -> str:
-        """
-        Normalize repository URL to stable canonical format.
-        """
-        if not repo_url:
-            return ""
-        raw = repo_url.strip()
-        if not raw:
+        """Normalize a GitHub repo URL to https://host/owner/repo (lowercase)."""
+        if not repo_url or not repo_url.strip():
             return ""
 
-        # Support ssh format: git@github.com:owner/repo(.git)
-        if raw.startswith("git@") and ":" in raw:
-            host_and_path = raw.split("@", 1)[1]
-            host, path = host_and_path.split(":", 1)
-            path = path.strip().rstrip("/")
-            if path.endswith(".git"):
-                path = path[:-4]
-            parts = [p for p in path.split("/") if p]
-            if len(parts) >= 2:
-                return f"https://{host.lower()}/{parts[0].lower()}/{parts[1].lower()}"
+        parsed = urlsplit(repo_url.strip())
+        path = parsed.path.rstrip("/").removesuffix(".git")
+        owner, repo, *_ = [p.lower() for p in path.split("/") if p] + ["", ""]
 
-        parsed = urlsplit(raw)
-        if parsed.netloc:
-            host = parsed.netloc.lower()
-            path = parsed.path.strip().rstrip("/")
-            if path.endswith(".git"):
-                path = path[:-4]
-            parts = [p for p in path.split("/") if p]
-            if len(parts) >= 2:
-                scheme = parsed.scheme.lower() if parsed.scheme else "https"
-                return f"{scheme}://{host}/{parts[0].lower()}/{parts[1].lower()}"
+        return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}/{owner}/{repo}"
 
-            # No owner/repo shape, fallback to cleaned URL
-            scheme = parsed.scheme.lower() if parsed.scheme else "https"
-            return f"{scheme}://{host}{path}".rstrip("/")
-
-        # Fallback for plain strings
-        normalized = raw.rstrip("/")
-        if normalized.endswith(".git"):
-            normalized = normalized[:-4]
-        return normalized.lower()
-
-    def _extract_repo_key(self, normalized_repo_url: str) -> str:
-        """
-        Extract 'owner/repo' key from normalized URL.
-        """
-        parsed = urlsplit(normalized_repo_url)
-        parts = [p for p in parsed.path.split("/") if p]
-        if len(parts) >= 2:
-            return f"{parts[0].lower()}/{parts[1].lower()}"
-        return ""
-
-    def update_repository_vector_path(self, repo_url: str, vector_store_path: str):
+    def _get_repo_name(self,repo_url: str) -> str:
+        return ("/").join(repo_url.split("/")[-2:])
+    
+    def update_repository_vector_path(self, repo_name: str, vector_store_path: str):
         """
         Update or insert the vector_store_path for a repository in Supabase using upsert.
         """
@@ -91,17 +52,16 @@ class SupabaseClient:
             print("[Supabase] Client not initialized. Skipping update.")
             return False
 
-        repo_url = self._normalize_repo_url(repo_url)
         try:
             # Use upsert to either update an existing record or insert a new one
             # The 'repo_url' is the primary key, so upsert will use it to match
             self.client.table("repositories").upsert({
-                "repo_url": repo_url,
+                "repo_name": repo_name,
                 "vector_store_path": vector_store_path,
                 "last_updated": "now()"
             }).execute()
             
-            print(f"[Supabase] Upserted repository record (vector path) for {repo_url}")
+            print(f"[Supabase] Upserted repository record (vector path) for {repo_name}")
             return True
         except Exception as e:
             print(f"[Supabase] Error updating repository (upsert): {e}")
@@ -116,10 +76,12 @@ class SupabaseClient:
             return False
 
         repo_url = self._normalize_repo_url(repo_url)
+        repo_name = self._get_repo_name(repo_url)
         try:
             self.client.table("tasks").insert({
                 "user_id": user_id,
                 "task_id": task_id,
+                "repo_name": repo_name,
                 "repo_url": repo_url,
                 "status": "pending",
                 "progress": 0.0,
@@ -133,7 +95,7 @@ class SupabaseClient:
             print(f"[Supabase] Error creating task: {e}")
             return False
 
-    def update_task_progress(self, task_id: str, progress: float, current_step: str):
+    def update_task_progress(self, task_id: str, progress: float, current_step: str) -> bool:
         """
         Update task progress in Supabase.
         """
@@ -155,7 +117,7 @@ class SupabaseClient:
             print(f"[Supabase] Error updating task progress: {e}")
             return False
 
-    def update_task_status(self, task_id: str, status: str, result: Optional[dict] = None, error: Optional[str] = None):
+    def update_task_status(self, task_id: str, status: str, result: Optional[dict] = None, error: Optional[str] = None) -> bool:
         """
         Update task status and result/error in Supabase.
         """
@@ -183,7 +145,7 @@ class SupabaseClient:
             print(f"[Supabase] Error updating task status: {e}")
             return False
 
-    def delete_task(self, task_id: str, user_id: str):
+    def delete_task(self, task_id: str, user_id: str) -> bool:
         """
         Delete a task from Supabase.
         Only deletes if task belongs to the given user.
@@ -208,10 +170,10 @@ class SupabaseClient:
             print(f"[Supabase] Error deleting task: {e}")
             return False
 
-    def get_task(self, task_id: str):
+    def get_task(self, task_id: str) -> Optional[TaskRecord]:
         """
         Get a task from Supabase.
-        成功且无行时返回 None；客户端未配置或查询异常时抛出 SupabaseStorageError。
+        成功且无行时返回 None；客户端未配置、查询异常或行数据不符合 TaskRecord 时抛出 SupabaseStorageError。
         """
         if not self.client:
             raise SupabaseStorageError("Supabase client is not configured")
@@ -219,14 +181,14 @@ class SupabaseClient:
         try:
             response = self.client.table("tasks").select("*").eq("task_id", task_id).execute()
             if response.data:
-                return response.data[0]
+                return TaskRecord.model_validate(response.data[0])
             return None
         except Exception as e:
             raise SupabaseStorageError(f"Failed to fetch task: {e}") from e
 
-    def get_all_tasks(self, user_id: str):
+    def get_all_tasks(self, user_id: str) -> Optional[List[TaskRecord]]:
         """
-        Get all tasks from Supabase.
+        Get all users' tasks from Supabase.
         """
         if not self.client:
             print("[Supabase] Client not initialized. Skipping get all tasks.")
@@ -234,25 +196,28 @@ class SupabaseClient:
 
         try:
             response = self.client.table("tasks").select("*").eq("user_id", user_id).execute()
-            return response.data
+            return [TaskRecord.model_validate(row) for row in (response.data or [])]
         except Exception as e:
             print(f"[Supabase] Error getting all tasks: {e}")
             return None
 
-    def get_all_available_repos(self) -> List[dict]:
+    def get_all_indexed_repos(self) -> List[dict]:
         """
-        Get all available repos from Supabase.
-        成功时始终返回 list（可为空）；未配置或查询失败时抛出 SupabaseStorageError。
+        Return all repositories that have been indexed (full rows from repositories table).
+        Always returns a list (empty on no data); raises SupabaseStorageError on failure.
         """
         if not self.client:
             raise SupabaseStorageError("Supabase client is not configured")
 
         try:
             response = self.client.table("repositories").select("*").execute()
-            return list(response.data or [])
+            data = getattr(response, "data", None)
+            return data if isinstance(data, list) else []
+        
         except Exception as e:
             raise SupabaseStorageError(f"Failed to fetch repositories: {e}") from e
 
+    # TODO: what is the purpose of this function
     def get_repositories_for_urls(self, repo_urls: List[str]) -> Dict[str, Optional[dict]]:
         """
         批量拉取 repositories 行，key 为调用方传入 URL 经 normalize 后的字符串。
@@ -293,7 +258,26 @@ class SupabaseClient:
                 by_key[k] = row
 
         return {k: by_key.get(k) for k in ordered_unique}
+    
+    ## TODO: What is the purpose of this function
+    def get_all_repositories_metadata(self) -> List[dict]:
+        """
+        返回 repositories 表中所有行的 repo_url / stargazers_count / github_short_description。
+        """
+        if not self.client:
+            return []
+        try:
+            resp = (
+                self.client.table("repositories")
+                .select("repo_url, stargazers_count, github_short_description")
+                .execute()
+            )
+            return resp.data or []
+        except Exception as e:
+            print(f"[Supabase] Error fetching all repositories metadata: {e}")
+            return []
 
+    ## TODO: change the search key from repo_url to repo_name
     def get_repo_information(self, repo_url: str):
         """
         Get a repo information from Supabase.
@@ -309,13 +293,13 @@ class SupabaseClient:
                 return response.data[0]
 
             # Fallback: match by owner/repo suffix in case historical data used non-canonical URL format
-            repo_key = self._extract_repo_key(repo_url)
-            if repo_key:
+            repo_name = self._get_repo_name(repo_url)
+            if repo_name:
                 fuzzy_response = (
                     self.client
                     .table("repositories")
                     .select("*")
-                    .ilike("repo_url", f"%{repo_key}%")
+                    .ilike("repo_url", f"%{repo_name}%")
                     .limit(1)
                     .execute()
                 )
@@ -326,52 +310,13 @@ class SupabaseClient:
         except Exception as e:
             print(f"[Supabase] Error getting repo information: {e}")
             return None
-
-    def _repository_wiki_cache_ttl_fresh_db(
-        self, db_repo_url: str, max_age_days: int, repo_info: dict
-    ) -> bool:
+        
+    ## TODO: What is the purpose of this functoin, if we always check the statue of repo, maybe we don't need this function. 
+    def get_repo_wiki_artifacts(self, repo_url: str):
         """
-        True = 仍可短路 /generate。优先 rpc：用 Postgres `timezone('utc', now())` 与行内 `last_updated` 比较。
-        RPC 未部署或失败时，仅用行内 `last_updated` + 应用 UTC 回退（日志会提示）。
-        """
-        if max_age_days < 0:
-            return True
-        if not self.client:
-            return not wiki_generation_cache_is_stale(repo_info, max_age_days)
-
-        try:
-            resp = (
-                self.client.rpc(
-                    "repository_wiki_cache_ttl_fresh",
-                    {"p_repo_url": db_repo_url, "p_max_age_days": max_age_days},
-                ).execute()
-            )
-            data = resp.data
-            if isinstance(data, bool):
-                return data
-            if isinstance(data, list):
-                if not data:
-                    return False
-                row0 = data[0]
-                if isinstance(row0, bool):
-                    return row0
-                return bool(row0)
-            return bool(data)
-        except Exception as e:
-            print(
-                "[Supabase] repository_wiki_cache_ttl_fresh RPC 不可用或未执行 "
-                f"supabase_migrations 中的 SQL，回退为仅基于表字段 last_updated + 应用 UTC：{e}"
-            )
-            return not wiki_generation_cache_is_stale(repo_info, max_age_days)
-
-    def build_cached_task_result(self, repo_url: str, max_cache_age_days: Optional[int] = None):
-        """
-        Build task result payload from repositories table for cache hit.
-        Returns None when required wiki artifacts are missing.
-
-        max_cache_age_days: 传入时（如 WIKI_GENERATION_CACHE_MAX_AGE_DAYS），按 `repositories.last_updated`
-        判断；优先在数据库内与 `now() UTC` 比较（rpc），未部署则回退应用时钟。
-        None 表示不校验时效（如工作台列表仍展示「有产物但偏旧」的仓库）。
+        Check whether a repository has complete wiki artifacts (r2_structure_url + r2_content_urls).
+        Returns the artifact payload dict if complete, or None if any artifact is missing.
+        TTL/staleness check is handled separately in wiki_pipeline.execute_generation_task.
         """
         repo_info = self.get_repo_information(repo_url)
         if not repo_info:
@@ -384,26 +329,14 @@ class SupabaseClient:
         if not r2_structure_url or not r2_content_urls:
             return None
 
-        db_key = (repo_info.get("repo_url") or "").strip() or self._normalize_repo_url(repo_url)
-        if max_cache_age_days is not None and not self._repository_wiki_cache_ttl_fresh_db(
-            db_key, max_cache_age_days, repo_info
-        ):
-            print(
-                f"[Supabase] Wiki cache stale for {repo_url!r} "
-                f"(repositories.last_updated vs DB now, TTL {max_cache_age_days}d), "
-                "skip short-circuit — full regeneration."
-            )
-            return None
-
         return {
             "r2_structure_url": r2_structure_url,
             "r2_content_urls": r2_content_urls,
-            "json_wiki": None,
-            "json_content": None,
             "vector_store_path": repo_info.get("vector_store_path"),
             "repo_url": self._normalize_repo_url(repo_url),
         }
 
+    # TODO: 这个和get_all_indexed_repos不冲突吗，两个应该可以合并吧，输入就是user_id
     def get_user_dashboard_repositories(self, user_id: str) -> List[dict]:
         """
         工作台展示用：仅包含 `repositories` 表中已具备完整 wiki 产物的仓库（与缓存命中条件一致），
@@ -418,23 +351,22 @@ class SupabaseClient:
 
         per_repo: Dict[str, dict] = {}
         for t in tasks:
-            if t.get("status") not in ("completed", "cached"):
+            if t.status not in ("completed", "cached"):
                 continue
-            ru = t.get("repo_url")
-            if not ru:
+            if not t.repo_url:
                 continue
-            norm = self._normalize_repo_url(ru)
+            norm = self._normalize_repo_url(t.repo_url)
             if not norm:
                 continue
-            created = t.get("created_at") or ""
-            task_id = t.get("task_id")
+            created = t.created_at.isoformat() if t.created_at else ""
+            task_id = t.task_id
             prev = per_repo.get(norm)
             if not prev or (created and created > (prev.get("created_at") or "")):
                 per_repo[norm] = {"task_id": task_id, "created_at": created}
 
         result: List[dict] = []
         for norm, meta in per_repo.items():
-            if not self.build_cached_task_result(norm):
+            if not self.get_repo_wiki_artifacts(norm):
                 continue
             row = self.get_repo_information(norm) or {}
             result.append({
@@ -452,9 +384,9 @@ class SupabaseClient:
 
     # ============ Chat Related Methods ============
 
-    def create_chat_history(self, user_id: str, repo_url: str, title: Optional[str] = None, preview_text: Optional[str] = None):
+    def create_chat_session(self, user_id: str, repo_url: str, title: Optional[str] = None, preview_text: Optional[str] = None):
         """
-        Create a new chat history session.
+        Create a new chat session record in chat_history table.
         """
         if not self.client:
             return None
@@ -475,10 +407,10 @@ class SupabaseClient:
             print(f"[Supabase] Error creating chat history: {e}")
             return None
 
-    def get_user_chat_history(self, user_id: str):
+    def get_user_chat_sessions(self, user_id: str):
         """
-        Get all chat history sessions for a user.
-        Returns list with chat_id alias (chat_history.id is the chat identifier).
+        Return all chat sessions for a user, ordered by most recently updated.
+        Each row includes a chat_id alias (chat_history.id) for frontend compatibility.
         """
         if not self.client:
             return []
@@ -542,11 +474,11 @@ class SupabaseClient:
             print(f"[Supabase] Error adding chat message: {e}")
             return None
 
-    def delete_chat_history(self, chat_id: str, user_id: str) -> bool:
+    def delete_chat_session(self, chat_id: str, user_id: str) -> bool:
         """
-        Delete a chat history session and its messages.
-        Only deletes if the chat belongs to the given user.
-        Must delete chat_messages first (child) then chat_history (parent).
+        Delete a chat session and all its messages.
+        Only deletes if the session belongs to the given user.
+        Deletes chat_messages (child) before chat_history (parent) to respect FK constraints.
         """
         if not self.client:
             return False
@@ -571,16 +503,21 @@ class SupabaseClient:
             print(f"[Supabase] Error deleting chat history: {e}")
             return False
 
-    def update_repository_information(
+    def upsert_repo_wiki_data(
         self,
         repo_url: str,
         r2_structure_url: Optional[str],
         r2_content_urls: Optional[List[str]],
         vector_store_path: Optional[str],
         description: Optional[str] = None,
+        graph_path: Optional[str] = None,
     ):
         """
-        Update repository information in Supabase using upsert.
+        Upsert wiki artifact data for a repository (r2 URLs, vector store path, description).
+        Only non-None fields are written; repo_url and last_updated are always set.
+
+        Note: graph_path is accepted for API compatibility but NOT written to the DB —
+        it is derived dynamically at runtime from vector_store_pgraph_path is intentionally NOTath/code_graph.json.
         """
         if not self.client:
             return False
@@ -601,43 +538,16 @@ class SupabaseClient:
                 data["vector_store_path"] = vector_store_path
             if description is not None:
                 data["description"] = description
+            if graph_path is not None:
+                data["graph_path"] = graph_path
+            # graph_path is intentionally NOT persisted — it is always computed
+            # at runtime as vector_store_path/code_graph.json by _resolve_agent_paths()
 
             self.client.table("repositories").upsert(data).execute()
             print(f"[Supabase] Upserted repository information for {repo_url}")
             return True
         except Exception as e:
             print(f"[Supabase] Error updating repository information (upsert): {e}")
-            return False
-
-    def update_github_public_metadata(
-        self,
-        repo_url: str,
-        *,
-        github_short_description: Optional[str] = None,
-        stargazers_count: Optional[int] = None,
-    ) -> bool:
-        """
-        写入 GitHub 公开元数据（stars、GitHub 简介）与刷新时间；不触碰 LLM description。
-        使用 upsert：在 ON CONFLICT 时只更新本 payload 中的列，避免纯 update 匹配 0 行时无写入；
-        新行仅含元数据列时其余字段为 NULL，后续 Wiki upsert 会补全。
-        """
-        if not self.client:
-            return False
-        repo_url = self._normalize_repo_url(repo_url)
-        try:
-            data: dict = {
-                "repo_url": repo_url,
-                "github_metadata_updated_at": "now()",
-                "last_updated": "now()",
-            }
-            if github_short_description is not None:
-                data["github_short_description"] = github_short_description
-            if stargazers_count is not None:
-                data["stargazers_count"] = stargazers_count
-            self.client.table("repositories").upsert(data).execute()
-            return True
-        except Exception as e:
-            print(f"[Supabase] Error updating GitHub public metadata: {e}")
             return False
 
     # ============ Profile Related Methods ============

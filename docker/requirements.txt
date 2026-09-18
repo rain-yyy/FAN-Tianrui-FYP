@@ -30,6 +30,8 @@ langchain-core>=0.1.0
 langchain-community>=0.0.20
 langchain-text-splitters>=0.0.1
 langchain-openai>=0.0.5
+langchain-openrouter>=0.0.1
 
-faiss-cpu>=1.7.4
+qdrant-client>=1.10.0
+fastembed>=0.3.0
 supabase>=2.3.0

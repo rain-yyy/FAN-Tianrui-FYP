@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List, Any
-import json
+
+from langchain_core.prompts import ChatPromptTemplate
 
 # All LLM-facing product outputs (RAG, wiki, HyDE, structure) are fixed to English.
 OUTPUT_LANGUAGE_EN = """
@@ -18,28 +19,12 @@ class PromptDefinition:
     system: str
     human: str
 
-    def build(self):
-        from langchain_core.prompts import ChatPromptTemplate
-        return ChatPromptTemplate.from_messages(
-            [
-                ("system", self.system.strip()),
-                ("human", self.human.strip()),
-            ]
-        )
-
-    def format_messages(self, **kwargs) -> List[Dict[str, str]]:
-        """
-        格式化提示词为模型调用的消息列表。
-        """
-
-        # TODO 保存在本地，用于测试文件路径错误的问题（已修复）
-        with open("structure_prompt.json", "w", encoding="utf-8") as f:
-            json.dump(kwargs, f, indent=2, ensure_ascii=False)
-
-        return [
-            {"role": "system", "content": self.system.strip().format(**kwargs)},
-            {"role": "user", "content": self.human.strip().format(**kwargs)},
-        ]
+    def build(self) -> ChatPromptTemplate:
+        """Return a LangChain ChatPromptTemplate for use in LCEL chains."""
+        return ChatPromptTemplate.from_messages([
+            ("system", self.system.strip()),
+            ("human", self.human.strip()),
+        ])
 
 
 STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
