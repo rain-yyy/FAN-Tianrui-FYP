@@ -19,13 +19,10 @@ from src.wiki.content_gen import WikiContentGenerator
 from src.storage.r2_client import upload_wiki_to_r2
 from src.storage.supabase_client import update_repo_vector_path, SupabaseClient, SupabaseStorageError
 from src.storage.models import coerce_str_list
-from scripts.setup_repository import get_repo_disk_directory_name
+from src.paths import PROJECT_ROOT, VECTOR_STORE_ROOT, REPO_STORE_ROOT, repo_disk_dirname
 from src.utils.wiki_cache_policy import wiki_generation_cache_is_stale, WIKI_GENERATION_CACHE_MAX_AGE_DAYS
 
 logger = logging.getLogger("api")
-
-# 项目根目录获取
-PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
 
 # 任务级工作目录根路径
 TASK_WORK_ROOT: Path = Path(os.getenv("TASK_WORK_PATH", str(PROJECT_ROOT / "task_workdirs")))
@@ -48,7 +45,7 @@ def _persist_graphrag_communities_to_vector_store(repo_url: str, source_json: Pa
     if not source_json.is_file():
         return
     # TODO repo name 应该在pipeline中一直传递的，和url一起，而不是每次都要处理一遍
-    repo_dir = get_repo_disk_directory_name(repo_url)
+    repo_dir = repo_disk_dirname(repo_url)
     dest_root = VECTOR_STORE_ROOT / repo_dir
     try:
         dest_root.mkdir(parents=True, exist_ok=True)
@@ -71,7 +68,7 @@ def _persist_code_graph_to_vector_store(repo_url: str, source_json: Path) -> Opt
     """
     if not source_json.is_file():
         return None
-    repo_dir = get_repo_disk_directory_name(repo_url)
+    repo_dir = repo_disk_dirname(repo_url)
     dest_root = VECTOR_STORE_ROOT / repo_dir
     try:
         dest_root.mkdir(parents=True, exist_ok=True)
@@ -83,15 +80,6 @@ def _persist_code_graph_to_vector_store(repo_url: str, source_json: Path) -> Opt
     except OSError as exc:
         logger.warning("[CodeGraph] 结构阶段写入向量库失败: %s", exc)
         return None
-
-# 持久化数据默认在仓库根下 data/（与 docker/ 同级）；Fly/Compose 挂载 /data 时由环境变量覆盖
-_DATA_ROOT_DEFAULT = PROJECT_ROOT.parent / "data"
-VECTOR_STORE_ROOT: Path = Path(
-    os.getenv("VECTOR_STORE_PATH", str(_DATA_ROOT_DEFAULT / "vector_stores"))
-)
-REPO_STORE_ROOT: Path = Path(
-    os.getenv("REPO_STORE_PATH", str(_DATA_ROOT_DEFAULT / "repos"))
-).expanduser()
 
 
 def _task_marked_cancelled_by_user(supabase_client: SupabaseClient, task_id: str) -> bool:
@@ -205,7 +193,7 @@ def run_rag_indexing(
     """
     _update_progress(task_id, 88, "Building RAG vector index...")
     
-    repo_dir = get_repo_disk_directory_name(repo_url)
+    repo_dir = repo_disk_dirname(repo_url)
     vector_store_path = VECTOR_STORE_ROOT / repo_dir
     
     # 确保目录存在
@@ -370,7 +358,7 @@ async def _background_retry_rag_indexing(task_id: str, url_link: str, config_pat
 
             def _clone_and_index() -> str:
                 rp = setup_repository(url_link)
-                repo_dir = get_repo_disk_directory_name(url_link)
+                repo_dir = repo_disk_dirname(url_link)
                 vs_dir = VECTOR_STORE_ROOT / repo_dir
                 comm = (vs_dir / "graphrag_communities.json").resolve()
                 cg = (vs_dir / "code_graph.json").resolve()

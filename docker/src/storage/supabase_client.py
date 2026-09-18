@@ -51,7 +51,7 @@ class SupabaseClient:
 
         return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}/{owner}/{repo}"
 
-    def _get_repo_name(self,repo_url: str) -> str:
+    def _repo_owner_slug(self,repo_url: str) -> str:
         return ("/").join(repo_url.split("/")[-2:])
     
     def update_repository_vector_path(self, repo_name: str, vector_store_path: str):
@@ -86,7 +86,7 @@ class SupabaseClient:
             return False
 
         repo_url = self._normalize_repo_url(repo_url)
-        repo_name = self._get_repo_name(repo_url)
+        repo_name = self._repo_owner_slug(repo_url)
         try:
             self.client.table("tasks").insert({
                 "user_id": user_id,
@@ -263,7 +263,7 @@ class SupabaseClient:
                 return response.data[0]
 
             # Fallback: match by owner/repo suffix in case historical data used non-canonical URL format
-            repo_name = self._get_repo_name(repo_url)
+            repo_name = self._repo_owner_slug(repo_url)
             if repo_name:
                 fuzzy_response = (
                     self.client

@@ -4,11 +4,10 @@ import logging
 from pathlib import Path
 from typing import Union, Dict, Any
 
+from src.paths import PROJECT_ROOT
+
 # 使用通用日志记录器
 logger = logging.getLogger("app.config")
-
-# 获取项目根目录 (src 的上一级)
-PROJECT_ROOT = Path(__file__).parent.parent.absolute()
 
 # 默认配置文件路径 (环境变量优先)
 CONFIG_PATH = Path(os.getenv("CONFIG_PATH", str(PROJECT_ROOT / "config" / "repo_config.json")))

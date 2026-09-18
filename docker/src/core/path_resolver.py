@@ -7,8 +7,7 @@
 from pathlib import Path
 from typing import Optional, Tuple
 
-from scripts.setup_repository import get_repo_disk_directory_name
-from src.core.wiki_pipeline import VECTOR_STORE_ROOT, REPO_STORE_ROOT
+from src.paths import VECTOR_STORE_ROOT, REPO_STORE_ROOT, repo_disk_dirname
 
 
 def normalize_vector_store_path(raw_path: Optional[str], repo_url: str) -> str:
@@ -20,7 +19,7 @@ def normalize_vector_store_path(raw_path: Optional[str], repo_url: str) -> str:
     if not raw_path or not raw_path.strip():
         raise ValueError("vector_store_path is empty")
 
-    return str(VECTOR_STORE_ROOT / get_repo_disk_directory_name(repo_url))
+    return str(VECTOR_STORE_ROOT / repo_disk_dirname(repo_url))
 
 
 def resolve_agent_paths(
@@ -40,8 +39,7 @@ def resolve_agent_paths(
         if code_graph_file.is_file():
             graph_path = str(code_graph_file)
 
-    repo_name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
-    repo_dir = REPO_STORE_ROOT / repo_name
+    repo_dir = REPO_STORE_ROOT / repo_disk_dirname(repo_url)
     if repo_dir.is_dir():
         repo_root = str(repo_dir)
 
