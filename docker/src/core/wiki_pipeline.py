@@ -277,44 +277,49 @@ def run_rag_indexing(
     return str(vector_store_path)
 
 
-def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output_dir: Path):
-    """
-    清理本地生成的临时文件，释放存储空间。
-    如果 output_path 和 json_output_dir 位于同一个 task 工作目录，则直接清理整个工作目录。
-    """
-    if repo_path and Path(repo_path).exists():
+def _cleanup_repo_checkout(repo_path: Optional[str]) -> None:
+    """删除克隆的仓库工作目录；若该路径实际位于持久化仓库存储根（REPO_STORE_ROOT）之下则跳过。"""
+    if not repo_path or not Path(repo_path).exists():
+        return
+    try:
+        repo_path_obj = Path(repo_path).expanduser().resolve()
+        repo_store_root = REPO_STORE_ROOT.resolve()
+        is_persistent_repo = False
         try:
-            repo_path_obj = Path(repo_path).expanduser().resolve()
-            repo_store_root = REPO_STORE_ROOT.resolve()
+            repo_path_obj.relative_to(repo_store_root)
+            is_persistent_repo = True
+        except ValueError:
             is_persistent_repo = False
-            try:
-                repo_path_obj.relative_to(repo_store_root)
-                is_persistent_repo = True
-            except ValueError:
-                is_persistent_repo = False
 
-            if is_persistent_repo:
-                logger.info(f"[清理] 跳过删除持久化仓库目录: {repo_path_obj}")
-            else:
-                shutil.rmtree(repo_path_obj)
-                logger.info(f"[清理] 已删除克隆的仓库目录: {repo_path_obj}")
-        except Exception as e:
-            logger.warning(f"[清理警告] 删除仓库目录失败: {repo_path}, 错误: {e}")
+        if is_persistent_repo:
+            logger.info(f"[清理] 跳过删除持久化仓库目录: {repo_path_obj}")
+        else:
+            shutil.rmtree(repo_path_obj)
+            logger.info(f"[清理] 已删除克隆的仓库目录: {repo_path_obj}")
+    except Exception as e:
+        logger.warning(f"[清理警告] 删除仓库目录失败: {repo_path}, 错误: {e}")
 
-    # 尝试整体清理 task 工作目录（如果两者同属一个 task_dir）
+
+def _cleanup_task_workdir(output_path: Path) -> bool:
+    """
+    若 output_path 位于 TASK_WORK_ROOT 下的任务工作目录内，直接整体删除该目录。
+    返回 True 表示已处理（调用方无需再走逐文件回退清理）。
+    """
     task_work_root = TASK_WORK_ROOT.resolve()
     try:
         task_dir = output_path.resolve().parent
         task_dir.relative_to(task_work_root)
-        # output_path 位于 task 工作目录内，直接清理整个目录
-        if task_dir.exists():
-            shutil.rmtree(task_dir)
-            logger.info(f"[清理] 已删除任务工作目录: {task_dir}")
-        return
     except ValueError:
-        pass
+        return False
 
-    # 回退：分别清理单个文件和目录
+    if task_dir.exists():
+        shutil.rmtree(task_dir)
+        logger.info(f"[清理] 已删除任务工作目录: {task_dir}")
+    return True
+
+
+def _cleanup_output_files_individually(output_path: Path, json_output_dir: Path) -> None:
+    """回退路径：output_path 不在 TASK_WORK_ROOT 下时，分别清理 wiki_structure.json 与内容目录。"""
     if output_path.exists():
         try:
             output_path.unlink()
@@ -328,6 +333,19 @@ def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output
             logger.info(f"[清理] 已删除 wiki_section_json 目录: {json_output_dir}")
         except Exception as e:
             logger.warning(f"[清理警告] 删除 wiki_section_json 目录失败: {json_output_dir}, 错误: {e}")
+
+
+def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output_dir: Path):
+    """
+    清理本地生成的临时文件，释放存储空间。
+    如果 output_path 和 json_output_dir 位于同一个 task 工作目录，则直接清理整个工作目录。
+    """
+    _cleanup_repo_checkout(repo_path)
+
+    if _cleanup_task_workdir(output_path):
+        return
+
+    _cleanup_output_files_individually(output_path, json_output_dir)
 
 
 async def _background_retry_rag_indexing(task_id: str, url_link: str, config_path: Path) -> None:
