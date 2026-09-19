@@ -1091,8 +1091,8 @@ class CodeGraphBuilder:
                         for arg in child.children:
                             if arg.type in ("identifier", "attribute"):
                                 base = _bslice(cb, arg.start_byte, arg.end_byte).split(".")[-1]
-                                for cid, cd in self.graph.nodes(data=True):
-                                    if cd.get("name") == base and cd.get("type") == "class":
+                                for cid in self._name_to_nodes.get(base, []):
+                                    if self.graph.nodes[cid].get("type") == "class":
                                         if self.graph.has_node(src_id):
                                             self.graph.add_edge(
                                                 src_id, cid,
@@ -1128,8 +1128,8 @@ class CodeGraphBuilder:
                         for ec in child.children:
                             if ec.type in ("identifier", "member_expression"):
                                 base = _bslice(cb, ec.start_byte, ec.end_byte).split(".")[-1]
-                                for cid, cd in self.graph.nodes(data=True):
-                                    if cd.get("name") == base and cd.get("type") == "class":
+                                for cid in self._name_to_nodes.get(base, []):
+                                    if self.graph.nodes[cid].get("type") == "class":
                                         if self.graph.has_node(src_id):
                                             self.graph.add_edge(
                                                 src_id, cid,
@@ -1141,8 +1141,8 @@ class CodeGraphBuilder:
                         for ic in child.children:
                             if ic.type in ("identifier", "type_identifier"):
                                 iface = _bslice(cb, ic.start_byte, ic.end_byte)
-                                for cid, cd in self.graph.nodes(data=True):
-                                    if cd.get("name") == iface and cd.get("type") == "class":
+                                for cid in self._name_to_nodes.get(iface, []):
+                                    if self.graph.nodes[cid].get("type") == "class":
                                         if self.graph.has_node(src_id):
                                             self.graph.add_edge(
                                                 src_id, cid,
