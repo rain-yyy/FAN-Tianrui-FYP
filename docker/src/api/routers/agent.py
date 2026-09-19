@@ -5,8 +5,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from src.agent import AgentRunner, run_agent
-from src.core.chat_titles import generate_chat_preview_sync
-from src.core.path_resolver import normalize_vector_store_path, resolve_agent_paths
+from src.core.chat_session import prepare_chat_turn
+from src.core.path_resolver import resolve_agent_paths
 from src.storage.supabase_client import SupabaseClient
 from src.utils.json_utils import to_jsonable
 from src.utils.logger import setup_logger
@@ -53,38 +53,17 @@ async def agent_chat_api(request: Request):
         conversation_history = data.get("conversation_history")
         current_page_context = data.get("current_page_context")
 
-        if not question or not repo_url or not user_id:
-            raise HTTPException(status_code=400, detail="Missing question, repo_url or user_id")
-
         supabase_client = SupabaseClient()
-
-        if not chat_id:
-            # Use fast sync title generation (no LLM call)
-            preview_text = generate_chat_preview_sync(question)
-
-            chat_session = supabase_client.create_chat_session(user_id, repo_url, title=preview_text, preview_text=preview_text)
-            if not chat_session:
-                raise HTTPException(status_code=500, detail="Failed to create chat session")
-            chat_id = chat_session["id"]
-
-        if supabase_client.add_chat_message(chat_id, "user", question) is None:
-            raise HTTPException(status_code=500, detail="Failed to save user message")
-
-        repo_info = supabase_client.get_repo_information(repo_url)
-        if not repo_info or not repo_info.get("vector_store_path"):
-            raise HTTPException(
-                status_code=404,
-                detail="No vector index for this repository. Generate documentation via /generate first.",
-            )
-
-        vector_store_path = normalize_vector_store_path(
-            repo_info["vector_store_path"], repo_url
+        turn = prepare_chat_turn(
+            supabase_client,
+            question=question,
+            repo_url=repo_url,
+            user_id=user_id,
+            chat_id=chat_id,
+            current_page_context=current_page_context,
         )
-        graph_path, repo_root = resolve_agent_paths(repo_url, vector_store_path)
-
-        enhanced_question = question
-        if current_page_context:
-            enhanced_question = f"[Current page context: {current_page_context}]\n\nUser question: {question}"
+        chat_id = turn.chat_id
+        graph_path, repo_root = resolve_agent_paths(repo_url, turn.vector_store_path)
 
         logger.info(
             f"Agent 模式问答开始: question={question[:50]}... repo_url={repo_url} "
@@ -95,9 +74,9 @@ async def agent_chat_api(request: Request):
         result = await loop.run_in_executor(
             None,
             lambda: run_agent(
-                question=enhanced_question,
+                question=turn.enhanced_question,
                 repo_url=repo_url,
-                vector_store_path=vector_store_path,
+                vector_store_path=turn.vector_store_path,
                 graph_path=graph_path,
                 repo_root=repo_root,
                 conversation_history=conversation_history,
@@ -167,49 +146,28 @@ async def agent_chat_stream_api(request: Request):
         conversation_history = data.get("conversation_history")
         current_page_context = data.get("current_page_context")
 
-        if not question or not repo_url or not user_id:
-            raise HTTPException(status_code=400, detail="Missing question, repo_url or user_id")
-
         supabase_client = SupabaseClient()
-
-        if not chat_id:
-            # Use fast sync title generation (no LLM call)
-            preview_text = generate_chat_preview_sync(question)
-
-            chat_session = supabase_client.create_chat_session(user_id, repo_url, title=preview_text, preview_text=preview_text)
-            if not chat_session:
-                raise HTTPException(status_code=500, detail="Failed to create chat session")
-            chat_id = chat_session["id"]
-
-        if supabase_client.add_chat_message(chat_id, "user", question) is None:
-            raise HTTPException(status_code=500, detail="Failed to save user message")
-
-        repo_info = supabase_client.get_repo_information(repo_url)
-        if not repo_info or not repo_info.get("vector_store_path"):
-            raise HTTPException(
-                status_code=404,
-                detail="No vector index for this repository. Generate documentation via /generate first.",
-            )
-
-        vector_store_path = normalize_vector_store_path(
-            repo_info["vector_store_path"], repo_url
+        turn = prepare_chat_turn(
+            supabase_client,
+            question=question,
+            repo_url=repo_url,
+            user_id=user_id,
+            chat_id=chat_id,
+            current_page_context=current_page_context,
         )
-        graph_path, repo_root = resolve_agent_paths(repo_url, vector_store_path)
-
-        enhanced_question = question
-        if current_page_context:
-            enhanced_question = f"[Current page context: {current_page_context}]\n\nUser question: {question}"
+        chat_id = turn.chat_id
+        graph_path, repo_root = resolve_agent_paths(repo_url, turn.vector_store_path)
 
         async def event_generator():
             runner = AgentRunner(
-                vector_store_path=vector_store_path,
+                vector_store_path=turn.vector_store_path,
                 graph_path=graph_path,
                 repo_root=repo_root,
                 max_iterations=5,
             )
 
             async for event in runner.run_streaming(
-                question=enhanced_question,
+                question=turn.enhanced_question,
                 repo_url=repo_url,
                 conversation_history=conversation_history
             ):
