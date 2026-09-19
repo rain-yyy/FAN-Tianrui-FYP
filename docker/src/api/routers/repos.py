@@ -65,4 +65,9 @@ async def list_available_repos_api():
 
     return {"repos": available_repos}
 
-## TODO: What the differents between list_dashboard_repositories_api() and list_available_repos_api()
+
+# list_dashboard_repositories_api (`/dashboard/repos`) vs. list_available_repos_api (`/chat/repos`):
+# the former is per-user and filtered to repos with complete wiki artifacts (dashboard cards,
+# via get_user_dashboard_repositories); the latter is unfiltered, all repositories ever indexed
+# by anyone (chat page's repo picker, via get_all_indexed_repos). See supabase_client.py
+# docstrings on those two methods for the full rationale.

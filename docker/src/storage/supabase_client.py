@@ -192,7 +192,11 @@ class SupabaseClient:
 
     def get_all_indexed_repos(self) -> List[dict]:
         """
-        Return all repositories that have been indexed (full rows from repositories table).
+        返回 `repositories` 表的全部行（含所有列），不做用户/完整性过滤。
+        供 `/chat/repos` 使用：聊天页的仓库选择器需要展示每一个曾经被处理过的仓库，
+        不区分是否属于当前用户、wiki 是否生成完整。与 `get_user_dashboard_repositories`
+        （按用户 + wiki 完整性过滤）和 `get_all_repositories_metadata`（仅取 3 个展示列）
+        是三个不同用途的读法，并非重复实现。
         Always returns a list (empty on no data); raises SupabaseStorageError on failure.
         """
         if not self.client:
@@ -202,14 +206,15 @@ class SupabaseClient:
             response = self.client.table("repositories").select("*").execute()
             data = getattr(response, "data", None)
             return data if isinstance(data, list) else []
-        
+
         except Exception as e:
             raise SupabaseStorageError(f"Failed to fetch repositories: {e}") from e
 
-    ## TODO: What is the purpose of this function
     def get_all_repositories_metadata(self) -> List[dict]:
         """
         返回 repositories 表中所有行的 repo_url / stargazers_count / github_short_description。
+        供 `/repos/github-metadata` 使用：仅为展示 GitHub 元数据（star 数、简介）而取的窄列查询，
+        比 `get_all_indexed_repos` 的 `select("*")` 更省带宽，两者服务不同端点，不是重复代码。
         """
         if not self.client:
             return []
@@ -258,12 +263,15 @@ class SupabaseClient:
             print(f"[Supabase] Error getting repo information: {e}")
             return None
         
-    ## TODO: What is the purpose of this functoin, if we always check the statue of repo, maybe we don't need this function. 
     def get_repo_wiki_artifacts(self, repo_url: str):
         """
         Check whether a repository has complete wiki artifacts (r2_structure_url + r2_content_urls).
         Returns the artifact payload dict if complete, or None if any artifact is missing.
         TTL/staleness check is handled separately in wiki_pipeline.execute_generation_task.
+
+        Used both as the wiki-generation cache-hit check (single repo, called with the
+        requested repo_url) and, via `get_user_dashboard_repositories`, as the per-repo
+        completeness filter when building a user's dashboard card list.
         """
         repo_info = self.get_repo_information(repo_url)
         if not repo_info:
@@ -281,11 +289,14 @@ class SupabaseClient:
             "repo_url": self._normalize_repo_url(repo_url),
         }
 
-    # TODO: 这个和get_all_indexed_repos不冲突吗，两个应该可以合并吧，输入就是user_id
     def get_user_dashboard_repositories(self, user_id: str) -> List[dict]:
         """
         工作台展示用：仅包含 `repositories` 表中已具备完整 wiki 产物的仓库（与缓存命中条件一致），
         且该用户存在已完成/缓存任务。卡片数据以 repositories 行为准；task_id 用于跳转 Wiki。
+
+        与 `get_all_indexed_repos` 的区别：后者不按用户或完整性过滤，返回 `repositories` 表
+        全部行，服务的是聊天页仓库选择器（`/chat/repos`）而非用户工作台，两者输入/输出/用途
+        均不同，不能合并为一个方法。
         """
         if not self.client:
             return []
