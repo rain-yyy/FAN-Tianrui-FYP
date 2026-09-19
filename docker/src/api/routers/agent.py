@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from src.agent import AgentRunner, run_agent
 from src.core.chat_session import prepare_chat_turn
 from src.core.path_resolver import resolve_agent_paths
-from src.storage.supabase_client import SupabaseClient
+from src.storage.supabase_client import get_supabase_client
 from src.utils.json_utils import to_jsonable
 from src.utils.logger import setup_logger
 
@@ -53,7 +53,7 @@ async def agent_chat_api(request: Request):
         conversation_history = data.get("conversation_history")
         current_page_context = data.get("current_page_context")
 
-        supabase_client = SupabaseClient()
+        supabase_client = get_supabase_client()
         turn = prepare_chat_turn(
             supabase_client,
             question=question,
@@ -146,7 +146,7 @@ async def agent_chat_stream_api(request: Request):
         conversation_history = data.get("conversation_history")
         current_page_context = data.get("current_page_context")
 
-        supabase_client = SupabaseClient()
+        supabase_client = get_supabase_client()
         turn = prepare_chat_turn(
             supabase_client,
             question=question,

@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 from typing import List, Optional
 
 from src.core.task_manager import TaskStatus, cancel_running_task, start_generation_task
-from src.storage.supabase_client import SupabaseClient, SupabaseStorageError, DeleteTaskResult
+from src.storage.supabase_client import SupabaseStorageError, DeleteTaskResult, get_supabase_client
 from src.utils.logger import setup_logger
 
 from src.storage.models import TaskRecord
@@ -26,7 +26,7 @@ async def generate_wiki(request: Request):
         if not url_link or not user_id:
             raise HTTPException(status_code=400, detail="Missing url_link or user_id")
 
-        supabase_client = SupabaseClient()
+        supabase_client = get_supabase_client()
         task_id = str(uuid.uuid4())
 
         # 创建任务记录；缓存判断在后台 execute_generation_task 中进行
@@ -57,7 +57,7 @@ async def get_task_information_api(task_id: str) -> Optional[TaskRecord]:
     """
     logger.debug(f"查询任务信息: {task_id}")
 
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
 
     try:
         task_information = supabase_client.get_task(task_id)
@@ -83,7 +83,7 @@ async def list_tasks_api(request: Request) -> Optional[List[TaskRecord]]:
         raise HTTPException(status_code=400, detail="Missing user_id")
 
     logger.debug(f"List all associated tasks for: {user_id}")
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
     all_tasks = supabase_client.get_all_tasks(user_id)
     return all_tasks
 
@@ -94,7 +94,7 @@ async def cancel_task_api(task_id: str) -> dict:
     Termination task with task_id
     """
     logger.info(f"Terminate: {task_id}")
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
 
     def _persist_cancelled_status() -> bool:
         return supabase_client.update_task_status(
@@ -144,7 +144,7 @@ async def delete_task_api(task_id: str, user_id: str) -> dict[str,bool]:
     if not task_id or not user_id:
         raise HTTPException(status_code=400, detail="Missing task_id or user_id")
     logger.info(f"Delete task record: {task_id}")
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
     result = supabase_client.delete_task(task_id, user_id)
     if result == DeleteTaskResult.NOT_FOUND:
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")

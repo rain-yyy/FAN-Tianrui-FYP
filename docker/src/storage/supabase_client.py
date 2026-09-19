@@ -480,9 +480,6 @@ class SupabaseClient:
         """
         Upsert wiki artifact data for a repository (r2 URLs, vector store path, description).
         Only non-None fields are written; repo_url and last_updated are always set.
-
-        Note: graph_path is accepted for API compatibility but NOT written to the DB —
-        it is derived dynamically at runtime from vector_store_pgraph_path is intentionally NOTath/code_graph.json.
         """
         if not self.client:
             return False
@@ -505,8 +502,6 @@ class SupabaseClient:
                 data["description"] = description
             if graph_path is not None:
                 data["graph_path"] = graph_path
-            # graph_path is intentionally NOT persisted — it is always computed
-            # at runtime as vector_store_path/code_graph.json by _resolve_agent_paths()
 
             self.client.table("repositories").upsert(data).execute()
             print(f"[Supabase] Upserted repository information for {repo_url}")
@@ -515,4 +510,18 @@ class SupabaseClient:
             print(f"[Supabase] Error updating repository information (upsert): {e}")
             return False
 
+
+_default_client: Optional["SupabaseClient"] = None
+
+
+def get_supabase_client() -> "SupabaseClient":
+    """
+    进程级共享单例，避免每个路由 handler / wiki_pipeline 函数各自 `SupabaseClient()`
+    重新构造一次客户端。环境变量在进程启动时通过 dotenv 读入一次，不会在运行期变化，
+    因此复用同一个客户端（含"未配置"的失败状态）是安全的。
+    """
+    global _default_client
+    if _default_client is None:
+        _default_client = SupabaseClient()
+    return _default_client
 

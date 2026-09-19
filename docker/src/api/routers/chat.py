@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 
 from src.core.chat import answer_question, answer_question_stream
 from src.core.chat_session import prepare_chat_turn
-from src.storage.supabase_client import SupabaseClient
+from src.storage.supabase_client import get_supabase_client
 from src.utils.json_utils import to_jsonable
 from src.utils.logger import setup_logger
 
@@ -28,7 +28,7 @@ async def chat_with_repo_api(request: Request):
         conversation_history = data.get("conversation_history")
         current_page_context = data.get("current_page_context")
 
-        supabase_client = SupabaseClient()
+        supabase_client = get_supabase_client()
         turn = prepare_chat_turn(
             supabase_client,
             question=question,
@@ -107,7 +107,7 @@ async def chat_stream_api(request: Request):
         conversation_history = data.get("conversation_history")
         current_page_context = data.get("current_page_context")
 
-        supabase_client = SupabaseClient()
+        supabase_client = get_supabase_client()
         turn = prepare_chat_turn(
             supabase_client,
             question=question,
@@ -191,7 +191,7 @@ async def list_chat_history_api(user_id: str):
         raise HTTPException(status_code=400, detail="Missing user_id")
 
     logger.info(f"获取用户聊天记录: {user_id}")
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
     history = supabase_client.get_user_chat_sessions(user_id)
     return {"history": history}
 
@@ -205,7 +205,7 @@ async def get_chat_messages_api(chat_id: str):
         raise HTTPException(status_code=400, detail="Missing chat_id")
 
     logger.info(f"获取会话消息: {chat_id}")
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
     messages = supabase_client.get_chat_messages(chat_id)
     return {"messages": messages}
 
@@ -218,7 +218,7 @@ async def delete_chat_session_api(chat_id: str, user_id: str):
     """
     if not chat_id or not user_id:
         raise HTTPException(status_code=400, detail="Missing chat_id or user_id")
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
     ok = supabase_client.delete_chat_session(chat_id, user_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Chat not found or unauthorized")

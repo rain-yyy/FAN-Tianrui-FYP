@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request
 
-from src.storage.supabase_client import SupabaseClient, SupabaseStorageError
+from src.storage.supabase_client import SupabaseStorageError, get_supabase_client
 from src.utils.logger import setup_logger
 
 logger = setup_logger("api.repos")
@@ -18,7 +18,7 @@ async def list_dashboard_repositories_api(request: Request):
     if not user_id:
         raise HTTPException(status_code=400, detail="Missing user_id")
 
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
     try:
         repos = supabase_client.get_user_dashboard_repositories(user_id)
     except Exception as e:
@@ -33,7 +33,7 @@ async def repos_github_metadata_api():
     """
     返回 repositories 表中所有仓库的 stargazers_count 与 github_short_description。
     """
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
     if not supabase_client.client:
         raise HTTPException(status_code=503, detail="Database not configured")
 
@@ -56,7 +56,7 @@ async def list_available_repos_api():
     列出所有可用于聊天的仓库
     """
     logger.info("列出所有可用于聊天的仓库")
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
     try:
         available_repos = supabase_client.get_all_indexed_repos()
     except SupabaseStorageError as e:

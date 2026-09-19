@@ -17,7 +17,7 @@ from src.ingestion.vector_store import upsert_vector_store
 from src.wiki.struct_gen import generate_wiki_structure
 from src.wiki.content_gen import WikiContentGenerator
 from src.storage.r2_client import upload_wiki_to_r2
-from src.storage.supabase_client import SupabaseClient, SupabaseStorageError
+from src.storage.supabase_client import SupabaseClient, SupabaseStorageError, get_supabase_client
 from src.paths import PROJECT_ROOT, VECTOR_STORE_ROOT, REPO_STORE_ROOT, repo_disk_dirname
 from src.utils.wiki_cache_policy import wiki_generation_cache_is_stale, WIKI_GENERATION_CACHE_MAX_AGE_DAYS
 
@@ -102,7 +102,7 @@ def _update_progress(task_id: Optional[str], progress: float, step: str) -> None
     """同步更新任务进度到 Supabase"""
     if task_id:
         try:
-            success = SupabaseClient().update_task_progress(task_id, progress, step)
+            success = get_supabase_client().update_task_progress(task_id, progress, step)
             if not success:
                 logger.warning(f"Task {task_id} not found (likely deleted), aborting...")
                 raise InterruptedError(f"Task {task_id} was deleted.")
@@ -265,7 +265,7 @@ def run_rag_indexing(
 
     # 同步到 Supabase
     try:
-        SupabaseClient().upsert_repo_wiki_data(
+        get_supabase_client().upsert_repo_wiki_data(
             repo_url, r2_structure_url=None, r2_content_urls=None, vector_store_path=str(vector_store_path)
         )
     except Exception as e:
@@ -335,7 +335,7 @@ async def _background_retry_rag_indexing(task_id: str, url_link: str, config_pat
     Wiki 已成功上传后，若 RAG 失败则在后台多次重试索引；成功后合并写回 tasks.result 与 repositories。
     每次重试单独克隆到持久目录，不依赖已清理的任务临时目录。
     """
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
     delays_before_attempt_sec = [30, 120, 300]
     loop = asyncio.get_event_loop()
     last_error: Optional[str] = None
@@ -448,7 +448,7 @@ async def execute_generation_task(task_id: str, url_link: str):
     repo_path: Optional[str] = None
     output_path: Optional[Path] = None
     json_output_dir: Optional[Path] = None
-    supabase_client = SupabaseClient()
+    supabase_client = get_supabase_client()
 
     try:
         # 更新状态为处理中
