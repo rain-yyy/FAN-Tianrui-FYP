@@ -493,11 +493,15 @@ class _GenerationContext:
     embedding_error: Optional[str] = None
 
 
+async def _run_in_executor(fn):
+    """在线程池中运行一次同步调用，返回其结果。四个阶段函数共用，
+    避免每个阶段各自重新获取 `asyncio.get_event_loop()`。"""
+    return await asyncio.get_event_loop().run_in_executor(None, fn)
+
+
 async def _run_structure_and_graph_stage(ctx: _GenerationContext) -> None:
     """阶段 1：生成 wiki 结构 + 构建代码图，并尽早把 graphrag/code_graph 落盘到向量库目录。"""
-    loop = asyncio.get_event_loop()
-    ctx.repo_path, ctx.wiki_structure = await loop.run_in_executor(
-        None,
+    ctx.repo_path, ctx.wiki_structure = await _run_in_executor(
         lambda: run_structure_generation(
             repo_url=ctx.url_link,
             config_path=ctx.config_path,
@@ -512,12 +516,10 @@ async def _run_structure_and_graph_stage(ctx: _GenerationContext) -> None:
 
     # 尽早将 graphrag_communities.json 和 code_graph.json 写入向量库目录，
     # 保证即使后续 RAG 或上传失败，本地副本依然存在供 Agent 使用。
-    await loop.run_in_executor(
-        None,
+    await _run_in_executor(
         lambda: _persist_graphrag_communities_to_vector_store(ctx.url_link, ctx.graphrag_json_path),
     )
-    ctx.graph_path = await loop.run_in_executor(
-        None,
+    ctx.graph_path = await _run_in_executor(
         lambda: _persist_code_graph_to_vector_store(ctx.url_link, ctx.code_graph_path),
     )
     await asyncio.sleep(0)
@@ -525,9 +527,7 @@ async def _run_structure_and_graph_stage(ctx: _GenerationContext) -> None:
 
 async def _run_content_stage(ctx: _GenerationContext) -> None:
     """阶段 2：生成 Wiki 正文与对应 JSON 详情。"""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        None,
+    await _run_in_executor(
         lambda: run_wiki_content_generation(
             repo_path=ctx.repo_path,
             wiki_structure=ctx.wiki_structure,
@@ -541,9 +541,7 @@ async def _run_content_stage(ctx: _GenerationContext) -> None:
 async def _run_upload_stage(ctx: _GenerationContext) -> None:
     """阶段 3：上传 R2——先于 RAG，避免仅因 RAG/embedding 失败导致 Wiki 成果未持久化。"""
     _update_progress(ctx.task_id, 86, "Uploading to R2 storage...")
-    loop = asyncio.get_event_loop()
-    upload_result = await loop.run_in_executor(
-        None,
+    upload_result = await _run_in_executor(
         lambda gp=ctx.graphrag_json_path, cgp=ctx.code_graph_path: upload_wiki_to_r2(
             repo_url=ctx.url_link,
             wiki_structure=ctx.wiki_structure,
@@ -563,10 +561,8 @@ async def _run_upload_stage(ctx: _GenerationContext) -> None:
 
 async def _run_rag_stage(ctx: _GenerationContext) -> None:
     """阶段 4：构建 RAG 向量索引；失败不推翻已完成的上传与任务，改为记录 embedding_error 供后台重试。"""
-    loop = asyncio.get_event_loop()
     try:
-        ctx.vector_store_path = await loop.run_in_executor(
-            None,
+        ctx.vector_store_path = await _run_in_executor(
             lambda: run_rag_indexing(
                 repo_path=ctx.repo_path,
                 repo_url=ctx.url_link,

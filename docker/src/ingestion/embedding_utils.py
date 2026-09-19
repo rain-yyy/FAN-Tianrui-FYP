@@ -25,7 +25,7 @@ from langchain_core.embeddings import Embeddings
 from dotenv import load_dotenv
 
 from src.clients import get_model_name
-from src.config import get_ingestion_config
+from src.config import get_embedding_inner_batch_size, get_embedding_inner_batch_sleep_sec
 
 load_dotenv()
 
@@ -102,9 +102,9 @@ class OpenRouterEmbeddings(Embeddings):
         )
 
     # 每次实际发送给 OpenRouter API 的最大文本条数（降低以缓解 504/无响应问题）
-    INNER_BATCH_SIZE = get_ingestion_config().get("embedding_inner_batch_size", 20)
+    INNER_BATCH_SIZE = get_embedding_inner_batch_size()
     # 两次 API 请求之间的冷却时间（秒）
-    INNER_BATCH_SLEEP_SEC = get_ingestion_config().get("embedding_inner_batch_sleep_sec", 1.0)
+    INNER_BATCH_SLEEP_SEC = get_embedding_inner_batch_sleep_sec()
 
     def _embeddings_create(self, input_payload: List[str], batch_label: str):
         kwargs: dict = {"model": self.model, "input": input_payload}
