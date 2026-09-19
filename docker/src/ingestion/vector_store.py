@@ -10,6 +10,7 @@ from langchain_core.documents import Document
 from qdrant_client import QdrantClient, models
 
 from src.ingestion.embedding_utils import get_openrouter_embeddings
+from src.utils.doc_identity import compute_doc_key, payload_to_document
 
 logger = logging.getLogger("app.ingestion.vector_store")
 
@@ -65,15 +66,6 @@ def repo_filter(repo_id: str) -> models.Filter:
     )
 
 
-def payload_to_document(payload: Optional[dict], category: str) -> Document:
-    """将 Qdrant point payload 还原为 Document，供检索侧（retrieval.py/chat.py）共用。"""
-    payload = payload or {}
-    content = payload.get("content", "")
-    metadata = {k: v for k, v in payload.items() if k != "content" and v is not None}
-    metadata["kb_category"] = category
-    return Document(page_content=content, metadata=metadata)
-
-
 def ensure_collection(category: str) -> str:
     """幂等创建 collection（dense + sparse 命名向量 + repo_id payload index）。"""
     collection_name = COLLECTIONS[category]
@@ -102,12 +94,6 @@ def ensure_collection(category: str) -> str:
     )
     logger.info("Created Qdrant collection '%s' (dense_dim=%d)", collection_name, dense_dim)
     return collection_name
-
-
-def _doc_key(doc: Document) -> str:
-    from src.core.retrieval import compute_doc_key
-
-    return compute_doc_key(doc)
 
 
 def _build_payload(doc: Document, repo_id: str, category: str) -> dict:
@@ -182,7 +168,7 @@ def upsert_vector_store(docs: list[Document], repo_id: str, category: str) -> No
 
             points = []
             for doc, dense_vec, sparse_vec in zip(batch_docs, dense_vectors, sparse_vectors):
-                doc_key = _doc_key(doc)
+                doc_key = compute_doc_key(doc)
                 point_id = compute_point_id(doc_key)
                 payload = _build_payload(doc, repo_id, category)
                 points.append(

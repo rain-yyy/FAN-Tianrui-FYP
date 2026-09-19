@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 import math
 import re
@@ -9,6 +8,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from langchain_core.documents import Document
+
+from src.ingestion.vector_store import payload_to_document, query_dense, query_sparse
+from src.utils.doc_identity import compute_doc_key
 
 logger = logging.getLogger("app.core.retrieval")
 
@@ -28,17 +30,6 @@ def default_tokenizer(text: str) -> List[str]:
 
 def _clone_document(doc: Document) -> Document:
     return Document(page_content=doc.page_content, metadata=dict(doc.metadata))
-
-
-def compute_doc_key(doc: Document) -> str:
-    """
-    通过来源+内容哈希为每个文档生成稳定的唯一key，方便跨检索结果融合与去重。
-    """
-    meta = doc.metadata or {}
-    source = meta.get("source") or meta.get("file_path") or "unknown"
-    anchor = meta.get("chunk_id") or meta.get("line_start") or meta.get("page") or ""
-    digest = hashlib.md5(doc.page_content.encode("utf-8")).hexdigest()[:12]
-    return f"{source}|{anchor}|{digest}"
 
 
 def normalize_scores(values: Sequence[float]) -> List[float]:
@@ -555,7 +546,6 @@ def qdrant_search_category(
     sparse 检索始终使用 query，保留 rag_tool.py 中"HyDE 只增强 dense、不影响稀疏检索"的行为。
     """
     from concurrent.futures import ThreadPoolExecutor
-    from src.ingestion.vector_store import payload_to_document, query_dense, query_sparse
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         dense_future = pool.submit(query_dense, client, category, repo_id, dense_query or query, dense_k)
