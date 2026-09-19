@@ -220,6 +220,54 @@ def mmr_select(
     return selected
 
 
+def _fuse_dense_sparse(
+    dense_items: Sequence[Tuple[Document, float]],
+    sparse_items: Sequence[Tuple[Document, float]],
+    *,
+    dense_weight: float,
+    sparse_weight: float,
+    key_fn: Optional[Callable[[Document], str]] = None,
+    category_fn: Optional[Callable[[Document], str]] = None,
+) -> List[RankedCandidate]:
+    """
+    对 dense/sparse 两路 (Document, score) 结果做归一化 + 加权融合，按 final_score
+    降序排序返回（不做 top_k 截断，由调用方决定）。CommunityFirstRetriever.hybrid_retrieve
+    与 qdrant_search_category 此前各自内联实现了这套完全相同的归一化+加权逻辑。
+
+    key_fn/category_fn 允许调用方覆盖候选去重键/分类来源——例如 qdrant_search_category
+    的候选来自 Qdrant payload 还原的 Document，其 category 由调用参数决定而非文档
+    metadata（payload_to_document 写入的是 "kb_category" 而非 "category"）。
+    """
+    key_fn = key_fn or compute_doc_key
+    category_fn = category_fn or (lambda doc: doc.metadata.get("category", "unknown"))
+    candidates: Dict[str, RankedCandidate] = {}
+
+    def _get_or_create(doc: Document) -> RankedCandidate:
+        key = key_fn(doc)
+        current = candidates.get(key)
+        if current is None:
+            current = RankedCandidate(key=key, category=category_fn(doc), doc=doc)
+            candidates[key] = current
+        return current
+
+    dense_scores = normalize_scores([score for _, score in dense_items])
+    for idx, (doc, _) in enumerate(dense_items):
+        norm_score = dense_scores[idx] if idx < len(dense_scores) else 0.0
+        candidate = _get_or_create(doc)
+        candidate.dense_score = max(candidate.dense_score, norm_score)
+
+    sparse_scores = normalize_scores([score for _, score in sparse_items])
+    for idx, (doc, _) in enumerate(sparse_items):
+        norm_score = sparse_scores[idx] if idx < len(sparse_scores) else 0.0
+        candidate = _get_or_create(doc)
+        candidate.sparse_score = max(candidate.sparse_score, norm_score)
+
+    for candidate in candidates.values():
+        candidate.final_score = dense_weight * candidate.dense_score + sparse_weight * candidate.sparse_score
+
+    return sorted(candidates.values(), key=lambda c: c.final_score, reverse=True)
+
+
 # ====================== 社区优先两阶段检索 ======================
 
 @dataclass
@@ -474,56 +522,13 @@ class CommunityFirstRetriever:
             top_k_total=top_k * 2,
         )
 
-        # 合并结果
-        candidates_map: Dict[str, RankedCandidate] = {}
-
-        # 归一化分数
-        dense_scores = [s for _, s in dense_results]
-        sparse_scores = [s for _, s in sparse_results]
-        norm_dense = normalize_scores(dense_scores)
-        norm_sparse = normalize_scores(sparse_scores)
-
-        # 添加稠密检索结果
-        for idx, (doc, _) in enumerate(dense_results):
-            key = compute_doc_key(doc)
-            category = doc.metadata.get("category", "unknown")
-            candidates_map[key] = RankedCandidate(
-                key=key,
-                category=category,
-                doc=doc,
-                dense_score=norm_dense[idx] if idx < len(norm_dense) else 0.0,
-                sparse_score=0.0,
-            )
-
-        # 添加/更新稀疏检索结果
-        for idx, (doc, _) in enumerate(sparse_results):
-            key = compute_doc_key(doc)
-            category = doc.metadata.get("category", "unknown")
-            score = norm_sparse[idx] if idx < len(norm_sparse) else 0.0
-
-            if key in candidates_map:
-                candidates_map[key].sparse_score = score
-            else:
-                candidates_map[key] = RankedCandidate(
-                    key=key,
-                    category=category,
-                    doc=doc,
-                    dense_score=0.0,
-                    sparse_score=score,
-                )
-
-        # 计算最终分数
-        for cand in candidates_map.values():
-            cand.final_score = alpha * cand.dense_score + (1 - alpha) * cand.sparse_score
-
-        # 排序并返回
-        sorted_candidates = sorted(
-            candidates_map.values(),
-            key=lambda c: c.final_score,
-            reverse=True,
+        fused = _fuse_dense_sparse(
+            dense_results,
+            sparse_results,
+            dense_weight=alpha,
+            sparse_weight=1 - alpha,
         )
-
-        return sorted_candidates[:top_k]
+        return fused[:top_k]
 
 
 def qdrant_search_category(
@@ -558,35 +563,17 @@ def qdrant_search_category(
         dense_hits = dense_future.result()
         sparse_hits = sparse_future.result()
 
-    candidates: Dict[str, RankedCandidate] = {}
+    dense_items = [(payload_to_document(payload, category), score) for payload, score in dense_hits]
+    sparse_items = [(payload_to_document(payload, category), score) for payload, score in sparse_hits]
 
-    def _get_or_create(payload: dict) -> RankedCandidate:
-        doc = payload_to_document(payload, category)
-        key = f"{category}|{compute_doc_key(doc)}"
-        current = candidates.get(key)
-        if current is None:
-            current = RankedCandidate(key=key, category=category, doc=doc)
-            candidates[key] = current
-        return current
-
-    dense_scores = normalize_scores([score for _, score in dense_hits])
-    for idx, (payload, _) in enumerate(dense_hits):
-        norm_score = dense_scores[idx] if idx < len(dense_scores) else 0.0
-        candidate = _get_or_create(payload)
-        candidate.dense_score = max(candidate.dense_score, norm_score)
-
-    sparse_scores = normalize_scores([score for _, score in sparse_hits])
-    for idx, (payload, _) in enumerate(sparse_hits):
-        norm_score = sparse_scores[idx] if idx < len(sparse_scores) else 0.0
-        candidate = _get_or_create(payload)
-        candidate.sparse_score = max(candidate.sparse_score, norm_score)
-
-    for candidate in candidates.values():
-        candidate.final_score = (
-            dense_weight * candidate.dense_score + sparse_weight * candidate.sparse_score
-        )
-
-    return list(candidates.values())
+    return _fuse_dense_sparse(
+        dense_items,
+        sparse_items,
+        dense_weight=dense_weight,
+        sparse_weight=sparse_weight,
+        key_fn=lambda doc: f"{category}|{compute_doc_key(doc)}",
+        category_fn=lambda doc: category,
+    )
 
 
 def create_community_retriever(
