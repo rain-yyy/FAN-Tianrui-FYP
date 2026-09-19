@@ -25,9 +25,21 @@ def start_generation_task(task_id: str, url_link: str) -> asyncio.Task:
     from src.core.wiki_pipeline import execute_generation_task
 
     task = asyncio.create_task(execute_generation_task(task_id, url_link))
-    _running_tasks[task_id] = task
-    task.add_done_callback(lambda t: _running_tasks.pop(task_id, None))
+    register_task(task_id, task)
     return task
+
+
+def register_task(task_id: str, task: asyncio.Task) -> None:
+    """
+    登记一个已创建的 asyncio.Task，使 /task/{id}/cancel 能够找到并取消它。
+
+    用于主生成任务已完成、登记已被移除之后才启动的后续任务（例如 Wiki 上传成功但
+    RAG 索引失败时调度的后台重试），否则该任务会脱离取消登记表，无法被用户中断。
+    """
+    _running_tasks[task_id] = task
+    task.add_done_callback(
+        lambda t: _running_tasks.pop(task_id, None) if _running_tasks.get(task_id) is t else None
+    )
 
 
 def cancel_running_task(task_id: str) -> bool:

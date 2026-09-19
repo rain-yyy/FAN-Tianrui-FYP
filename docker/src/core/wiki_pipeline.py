@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional, List, Tuple
 # 导入必要的模块
 from scripts.setup_repository import setup_repository
 from src.config import CONFIG_PATH
-from src.core.task_manager import TaskStatus
+from src.core.task_manager import TaskStatus, register_task
 from src.ingestion.file_processor import generate_file_tree, get_files_to_process, split_code_and_text_files
 from src.ingestion.docu_splitter import load_and_split_docs
 from src.ingestion.vector_store import upsert_vector_store
@@ -435,6 +435,10 @@ async def _background_retry_rag_indexing(task_id: str, url_link: str, config_pat
     emb["failed_at"] = datetime.now(timezone.utc).isoformat()
     prev["embedding"] = emb
     supabase_client.update_task_status(task_id, TaskStatus.COMPLETED, result=prev)
+
+    # 记录到 repositories 表：wiki 已成功但 RAG 索引最终失败，避免该状态只存在于
+    # tasks.result 里、repositories 行看起来和索引正常的仓库毫无区别
+    supabase_client.upsert_repo_wiki_data(url_link, None, None, None)
     logger.error(f"[RAG 重试] task={task_id} 已达最大重试次数，embedding 仍为失败")
 
 
@@ -616,9 +620,10 @@ async def execute_generation_task(task_id: str, url_link: str):
             logger.error(f"同步supabase repository表失败: {url_link}")
 
         if embedding_error is not None:
-            asyncio.create_task(
+            retry_task = asyncio.create_task(
                 _background_retry_rag_indexing(task_id, url_link, config_path)
             )
+            register_task(task_id, retry_task)
 
     except InterruptedError:
         logger.info(f"任务 {task_id} 被用户中断（删除），停止后台处理")
