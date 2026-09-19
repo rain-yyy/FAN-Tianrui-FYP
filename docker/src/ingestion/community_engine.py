@@ -122,25 +122,11 @@ class CommunityEngine:
             self.communities[idx] = [g.vs[node_idx]["name"] for node_idx in community]
         return self.communities
 
-    def _run_leiden_file_collapsed(
-        self,
-        resolution_parameter: float,
-        call_weight: float,
-        dir_chain_weight: float,
-    ) -> Dict[int, List[str]]:
-        """
-        在「文件级」图上做 Leiden，再把社区展开回原始（文件 + 符号）节点。
-
-        缓解混合粒度图上的模块度碎片化，并与 Microsoft GraphRAG 文档中「提高主连通分量/
-        调整 resolution」的思路一致：用跨文件调用为强边、同目录链式弱边补足连通性。
-        """
-        und = self.nx_graph.to_undirected()
-        all_files: Set[str] = set()
-        for n, d in self.nx_graph.nodes(data=True):
-            all_files.add(self._resolve_file_for_node(n, d))
-
+    def _compute_file_edge_weights(
+        self, und: nx.Graph, call_weight: float
+    ) -> DefaultDict[Tuple[str, str], float]:
+        """按跨文件调用/引用边，为文件级图累加基础权重（同一文件内部的边忽略）。"""
         edge_weights: DefaultDict[Tuple[str, str], float] = defaultdict(float)
-
         for u, v in und.edges():
             du = self.nx_graph.nodes[u]
             dv = self.nx_graph.nodes[v]
@@ -150,35 +136,50 @@ class CommunityEngine:
                 continue
             a, b = (fu, fv) if fu <= fv else (fv, fu)
             edge_weights[(a, b)] += call_weight
+        return edge_weights
 
-        # Hub dampening ─────────────────────────────────────────────────
-        # Files like utils / helpers / logger accumulate very high cross-file
-        # degree and act as super-nodes that pull semantically unrelated
-        # modules into the same community.  We apply a sqrt-decay factor on
-        # edges incident to any file whose degree exceeds 3× the mean, so
-        # their cohesive effect is softened rather than eliminated.
-        if edge_weights:
-            file_degree: Dict[str, int] = {}
-            for (fa, fb) in edge_weights:
-                file_degree[fa] = file_degree.get(fa, 0) + 1
-                file_degree[fb] = file_degree.get(fb, 0) + 1
+    def _apply_hub_dampening(self, edge_weights: DefaultDict[Tuple[str, str], float]) -> None:
+        """
+        Hub dampening（原地修改 edge_weights）。
 
-            degrees = list(file_degree.values())
-            mean_deg = sum(degrees) / len(degrees)
-            hub_threshold = max(mean_deg * 3.0, 5)
+        Files like utils / helpers / logger accumulate very high cross-file
+        degree and act as super-nodes that pull semantically unrelated
+        modules into the same community. We apply a sqrt-decay factor on
+        edges incident to any file whose degree exceeds 3× the mean, so
+        their cohesive effect is softened rather than eliminated.
+        """
+        if not edge_weights:
+            return
+        file_degree: Dict[str, int] = {}
+        for (fa, fb) in edge_weights:
+            file_degree[fa] = file_degree.get(fa, 0) + 1
+            file_degree[fb] = file_degree.get(fb, 0) + 1
 
-            for key in list(edge_weights.keys()):
-                ka, kb = key
-                max_deg = max(file_degree.get(ka, 1), file_degree.get(kb, 1))
-                if max_deg > hub_threshold:
-                    edge_weights[key] *= (hub_threshold / max_deg) ** 0.5
+        degrees = list(file_degree.values())
+        mean_deg = sum(degrees) / len(degrees)
+        hub_threshold = max(mean_deg * 3.0, 5)
 
-        # Directory chain ────────────────────────────────────────────────
-        # The chain only helps isolate files that have no call/import
-        # connections; for files that already participate in the semantic
-        # graph the chain edge is noise that overrides structural signals.
-        # So: only add a chain edge between a consecutive pair when at
-        # least one of the two files is otherwise unconnected.
+        for key in list(edge_weights.keys()):
+            ka, kb = key
+            max_deg = max(file_degree.get(ka, 1), file_degree.get(kb, 1))
+            if max_deg > hub_threshold:
+                edge_weights[key] *= (hub_threshold / max_deg) ** 0.5
+
+    def _augment_with_directory_chains(
+        self,
+        edge_weights: DefaultDict[Tuple[str, str], float],
+        all_files: Set[str],
+        dir_chain_weight: float,
+    ) -> None:
+        """
+        Directory chain（原地修改 edge_weights）.
+
+        The chain only helps isolate files that have no call/import
+        connections; for files that already participate in the semantic
+        graph the chain edge is noise that overrides structural signals.
+        So: only add a chain edge between a consecutive pair when at
+        least one of the two files is otherwise unconnected.
+        """
         connected_files: Set[str] = set()
         for (fa, fb) in edge_weights:
             connected_files.add(fa)
@@ -200,9 +201,10 @@ class CommunityEngine:
                 key = (a, b) if a <= b else (b, a)
                 edge_weights[key] += dir_chain_weight
 
-        if not all_files:
-            return {}
-
+    def _build_file_level_igraph(
+        self, all_files: Set[str], edge_weights: DefaultDict[Tuple[str, str], float]
+    ) -> ig.Graph:
+        """按文件名建顶点，正权重的 (a, b) 对建边，得到文件级 igraph。"""
         names = sorted(all_files)
         name_to_idx = {n: i for i, n in enumerate(names)}
         g = ig.Graph(n=len(names), directed=False)
@@ -212,6 +214,44 @@ class CommunityEngine:
             if w <= 0:
                 continue
             g.add_edge(name_to_idx[a], name_to_idx[b], weight=w)
+        return g
+
+    def _expand_partition_to_communities(self, g: ig.Graph, partition: Any) -> Dict[int, List[str]]:
+        """把文件级 partition 按文件分组，再展开回原始（文件+符号）节点，重新编号社区 id。"""
+        comm_to_files: DefaultDict[int, Set[str]] = defaultdict(set)
+        for vi, comm_id in enumerate(partition.membership):
+            comm_to_files[comm_id].add(g.vs[vi]["name"])
+
+        communities_expanded: Dict[int, List[str]] = {}
+        for new_id, (_, files) in enumerate(sorted(comm_to_files.items(), key=lambda x: x[0])):
+            communities_expanded[new_id] = self._expand_files_to_all_nodes(set(files))
+        return communities_expanded
+
+    def _run_leiden_file_collapsed(
+        self,
+        resolution_parameter: float,
+        call_weight: float,
+        dir_chain_weight: float,
+    ) -> Dict[int, List[str]]:
+        """
+        在「文件级」图上做 Leiden，再把社区展开回原始（文件 + 符号）节点。
+
+        缓解混合粒度图上的模块度碎片化，并与 Microsoft GraphRAG 文档中「提高主连通分量/
+        调整 resolution」的思路一致：用跨文件调用为强边、同目录链式弱边补足连通性。
+        """
+        und = self.nx_graph.to_undirected()
+        all_files: Set[str] = set()
+        for n, d in self.nx_graph.nodes(data=True):
+            all_files.add(self._resolve_file_for_node(n, d))
+
+        edge_weights = self._compute_file_edge_weights(und, call_weight)
+        self._apply_hub_dampening(edge_weights)
+        self._augment_with_directory_chains(edge_weights, all_files, dir_chain_weight)
+
+        if not all_files:
+            return {}
+
+        g = self._build_file_level_igraph(all_files, edge_weights)
 
         if g.ecount() == 0:
             expanded = self._expand_files_to_all_nodes(set(all_files))
@@ -228,15 +268,7 @@ class CommunityEngine:
             seed=seed,
         )
 
-        comm_to_files: DefaultDict[int, Set[str]] = defaultdict(set)
-        for vi, comm_id in enumerate(partition.membership):
-            comm_to_files[comm_id].add(g.vs[vi]["name"])
-
-        communities_expanded: Dict[int, List[str]] = {}
-        for new_id, (_, files) in enumerate(sorted(comm_to_files.items(), key=lambda x: x[0])):
-            communities_expanded[new_id] = self._expand_files_to_all_nodes(set(files))
-
-        self.communities = communities_expanded
+        self.communities = self._expand_partition_to_communities(g, partition)
         return self.communities
 
     def _distinct_files_in_community(self, nodes: List[str]) -> Set[str]:
