@@ -9,16 +9,17 @@ from fastembed import SparseTextEmbedding
 from langchain_core.documents import Document
 from qdrant_client import QdrantClient, models
 
+from src.config import get_ingestion_config
 from src.ingestion.embedding_utils import get_openrouter_embeddings
 from src.utils.doc_identity import compute_doc_key, payload_to_document
 
 logger = logging.getLogger("app.ingestion.vector_store")
 
 # 外层批次大小（每批送入 Qdrant），降低以减轻 OpenRouter 压力
-EMBEDDING_BATCH_SIZE = 50
+EMBEDDING_BATCH_SIZE = get_ingestion_config().get("vector_store_batch_size", 50)
 
 # 两次外层批次之间的等待时间（秒），避免瞬间并发过高
-INTER_BATCH_SLEEP_SEC = 2.0
+INTER_BATCH_SLEEP_SEC = get_ingestion_config().get("vector_store_inter_batch_sleep_sec", 2.0)
 
 COLLECTIONS: Dict[str, str] = {
     "code": "code_chunks",

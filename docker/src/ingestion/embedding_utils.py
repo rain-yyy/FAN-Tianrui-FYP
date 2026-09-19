@@ -24,11 +24,13 @@ from openai import OpenAI
 from langchain_core.embeddings import Embeddings
 from dotenv import load_dotenv
 
+from src.clients import get_model_name
+from src.config import get_ingestion_config
+
 load_dotenv()
 
 logger = logging.getLogger("app.ingestion.embedding_utils")
 
-OPENROUTER_EMBEDDING_MODEL = "qwen/qwen3-embedding-8b"
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 
 # 仅此 hostname 视为「官方 OpenAI API」；其余（含 Azure 自定义域、OpenRouter、本地 litellm 等）按兼容网关处理。
@@ -100,9 +102,9 @@ class OpenRouterEmbeddings(Embeddings):
         )
 
     # 每次实际发送给 OpenRouter API 的最大文本条数（降低以缓解 504/无响应问题）
-    INNER_BATCH_SIZE = 20
+    INNER_BATCH_SIZE = get_ingestion_config().get("embedding_inner_batch_size", 20)
     # 两次 API 请求之间的冷却时间（秒）
-    INNER_BATCH_SLEEP_SEC = 1.0
+    INNER_BATCH_SLEEP_SEC = get_ingestion_config().get("embedding_inner_batch_sleep_sec", 1.0)
 
     def _embeddings_create(self, input_payload: List[str], batch_label: str):
         kwargs: dict = {"model": self.model, "input": input_payload}
@@ -216,7 +218,7 @@ def get_openrouter_embeddings() -> Embeddings:
     if not api_key:
         raise ValueError("未检测到 OPENROUTER_API_KEY，请设置环境变量。")
     return OpenRouterEmbeddings(
-        model=OPENROUTER_EMBEDDING_MODEL,
+        model=get_model_name(model_key="embedding"),
         api_key=api_key,
         base_url=OPENROUTER_API_BASE,
     )

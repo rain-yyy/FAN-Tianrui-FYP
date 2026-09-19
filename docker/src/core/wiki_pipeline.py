@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional, List, Tuple
 
 # 导入必要的模块
 from scripts.setup_repository import setup_repository
-from src.config import CONFIG_PATH
+from src.config import CONFIG_PATH, get_rag_retry_delays_sec, should_save_rag_chunk_debug
 from src.core.task_manager import TaskStatus, register_task
 from src.ingestion.file_processor import generate_file_tree, get_files_to_process, split_code_and_text_files
 from src.ingestion.docu_splitter import load_and_split_docs
@@ -211,28 +211,28 @@ def run_rag_indexing(
     
     logger.info(f"[RAG] Found {len(code_files)} code files, {len(text_files)} text files")
     
-    # debug 输出目录放在向量库路径下，保证不同任务互相隔离
-    chunk_debug_dir = vector_store_path / "chunk_debug"
+    # debug 输出目录放在向量库路径下，保证不同任务互相隔离；默认关闭，避免长期运行进程磁盘无限增长
+    chunk_debug_dir = vector_store_path / "chunk_debug" if should_save_rag_chunk_debug() else None
 
     # 处理代码文件
-    if code_files:  
+    if code_files:
         _update_progress(task_id, 89, f"Indexing {len(code_files)} code files...")
-        
+
         code_docs = load_and_split_docs(
             code_files,
-            debug_output_path=str(chunk_debug_dir / "code_chunks.jsonl"),
+            debug_output_path=str(chunk_debug_dir / "code_chunks.jsonl") if chunk_debug_dir else None,
         )
         if code_docs:
             upsert_vector_store(code_docs, repo_id=repo_dir, category="code")
             logger.info(f"[RAG] Code chunks upserted to Qdrant: repo_id={repo_dir}, count={len(code_docs)}")
-    
+
     # 处理文本文件
     if text_files:
         _update_progress(task_id, 90, f"Indexing {len(text_files)} text files...")
-        
+
         text_docs = load_and_split_docs(
             text_files,
-            debug_output_path=str(chunk_debug_dir / "text_chunks.jsonl"),
+            debug_output_path=str(chunk_debug_dir / "text_chunks.jsonl") if chunk_debug_dir else None,
         )
         if text_docs:
             upsert_vector_store(text_docs, repo_id=repo_dir, category="text")
@@ -355,7 +355,7 @@ async def _background_retry_rag_indexing(task_id: str, url_link: str, config_pat
     每次重试单独克隆到持久目录，不依赖已清理的任务临时目录。
     """
     supabase_client = get_supabase_client()
-    delays_before_attempt_sec = [30, 120, 300]
+    delays_before_attempt_sec = get_rag_retry_delays_sec()
     loop = asyncio.get_event_loop()
     last_error: Optional[str] = None
 

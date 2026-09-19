@@ -43,3 +43,31 @@ def get_wiki_content_concurrency(config: Dict[str, Any] | None = None) -> int:
     """获取 wiki 正文生成并发数，默认 3"""
     cfg = config or CONFIG
     return cfg.get("wiki_generation", {}).get("content_concurrency", 3)
+
+
+def get_rag_retry_delays_sec(config: Dict[str, Any] | None = None) -> list:
+    """RAG 索引失败后台重试前的等待秒数序列，默认 [30, 120, 300]"""
+    cfg = config or CONFIG
+    return cfg.get("wiki_generation", {}).get("rag_retry_delays_sec", [30, 120, 300])
+
+
+def _get_debug_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    cfg = config or CONFIG
+    raw = cfg.get("debug")
+    return raw if isinstance(raw, dict) else {}
+
+
+def should_save_wiki_structure_raw_responses(config: Dict[str, Any] | None = None) -> bool:
+    """是否将 wiki 结构生成的原始 LLM 响应落盘到 ./wiki_structure_raw/，默认关闭（避免长期运行进程磁盘无限增长）。"""
+    return bool(_get_debug_config(config).get("save_wiki_structure_raw_responses", False))
+
+
+def should_save_rag_chunk_debug(config: Dict[str, Any] | None = None) -> bool:
+    """是否将 RAG 索引的 chunk 切分结果落盘到向量库目录下的 chunk_debug/，默认关闭。"""
+    return bool(_get_debug_config(config).get("save_rag_chunk_debug", False))
+
+
+def get_ingestion_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    cfg = config or CONFIG
+    raw = cfg.get("ingestion")
+    return raw if isinstance(raw, dict) else {}

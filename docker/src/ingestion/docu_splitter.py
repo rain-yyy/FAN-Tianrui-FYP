@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 from langchain_community.document_loaders import TextLoader
 from langchain_core.documents import Document
+from src.config import get_ingestion_config
 from src.ingestion.ts_parser import TreeSitterParser
 
 
@@ -24,8 +25,8 @@ class SemanticDocumentSplitter:
     对于非 Markdown 纯文本，直接走段落 → 句子两级策略。
     """
 
-    MAX_CHUNK_SIZE: int = 2000
-    OVERLAP_SIZE: int = 150
+    MAX_CHUNK_SIZE: int = get_ingestion_config().get("chunk_max_size", 2000)
+    OVERLAP_SIZE: int = get_ingestion_config().get("chunk_overlap_size", 150)
 
     _HEADING_RE = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
     _CODE_FENCE_RE = re.compile(r'```[\s\S]*?```')
@@ -260,8 +261,8 @@ def save_chunks_debug(docs: list[Document], output_path: str) -> None:
 # Code chunk 后处理（合并过短块 / 分割过长块）
 # ---------------------------------------------------------------------------
 
-MIN_CODE_CHUNK: int = 150   # 低于此字符数的 chunk 会与同文件相邻块合并
-MAX_CODE_CHUNK: int = 2000  # 超过此字符数的 chunk 会按行分割
+MIN_CODE_CHUNK: int = get_ingestion_config().get("code_chunk_min_size", 150)   # 低于此字符数的 chunk 会与同文件相邻块合并
+MAX_CODE_CHUNK: int = get_ingestion_config().get("code_chunk_max_size", 2000)  # 超过此字符数的 chunk 会按行分割
 
 
 def _split_code_by_lines(content: str, metadata: dict, max_size: int) -> list[Document]:

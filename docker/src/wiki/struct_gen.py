@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 import dotenv
-from src.config import PROJECT_ROOT, CONFIG
+from src.config import PROJECT_ROOT, CONFIG, should_save_wiki_structure_raw_responses
 from src.clients import get_llm, StrOutputParser
 from src.prompts import STRUCTURE_PROMPT
 from src.ingestion.code_graph import CodeGraphBuilder
@@ -170,17 +170,18 @@ def generate_wiki_structure(
 
     logger.info("AI response received.")
 
-    # 4.1 保存原始响应到文件（辅助调试）
-    debug_dir = os.path.join(os.getcwd(), "wiki_structure_raw")
-    os.makedirs(debug_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    debug_path = os.path.join(debug_dir, f"{timestamp}.txt")
-    try:
-        with open(debug_path, "w", encoding="utf-8") as f:
-            f.write(ai_message_content)
-        logger.info(f"Raw AI response saved to: {debug_path}")
-    except Exception as e:
-        logger.warning(f"Failed to save raw AI response: {e}")
+    # 4.1 保存原始响应到文件（辅助调试）；默认关闭，避免长期运行进程磁盘无限增长
+    if should_save_wiki_structure_raw_responses():
+        debug_dir = os.path.join(os.getcwd(), "wiki_structure_raw")
+        os.makedirs(debug_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        debug_path = os.path.join(debug_dir, f"{timestamp}.txt")
+        try:
+            with open(debug_path, "w", encoding="utf-8") as f:
+                f.write(ai_message_content)
+            logger.info(f"Raw AI response saved to: {debug_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save raw AI response: {e}")
 
     # 5. 解析 JSON 输出
     logger.info("Parsing AI response...")

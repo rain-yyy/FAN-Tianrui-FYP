@@ -12,11 +12,27 @@
         "agent_tool_router": "google/gemini-2.5-flash",
         "agent_evaluator": "google/gemini-2.5-flash",
         "agent_synthesizer": "qwen/qwen3-235b-a22b-2507",
-        "agent_session_compressor": "google/gemini-2.5-flash"
+        "agent_session_compressor": "google/gemini-2.5-flash",
+        "embedding": "qwen/qwen3-embedding-8b"
       }
     },
     "wiki_generation": {
-      "content_concurrency": 3
+      "content_concurrency": 3,
+      "rag_retry_delays_sec": [30, 120, 300]
+    },
+    "ingestion": {
+      "embedding_inner_batch_size": 20,
+      "embedding_inner_batch_sleep_sec": 1.0,
+      "vector_store_batch_size": 50,
+      "vector_store_inter_batch_sleep_sec": 2.0,
+      "chunk_max_size": 2000,
+      "chunk_overlap_size": 150,
+      "code_chunk_min_size": 150,
+      "code_chunk_max_size": 2000
+    },
+    "debug": {
+      "save_wiki_structure_raw_responses": false,
+      "save_rag_chunk_debug": false
     },
     "community_detection": {
       "file_level_collapse": true,
