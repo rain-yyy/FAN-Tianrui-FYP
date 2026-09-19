@@ -75,14 +75,23 @@ class WikiContentGenerator:
         """
         toc = structure.get("toc") or []
         sections = list(self._flatten_sections(toc))
-        total = len(sections)
-        if total == 0:
+        if not sections:
             logger.info(f"[task={self.task_id}] 无章节需要生成")
             return []
 
-        # Phase 5: 预处理文件名映射，在主线程中一次性完成，避免并发冲突
+        # 预处理文件名映射，在主线程中一次性完成，避免并发冲突
         filename_map = self._build_filename_map(sections)
 
+        return self._run_sections_concurrently(structure, sections, filename_map)
+
+    def _run_sections_concurrently(
+        self,
+        structure: Dict[str, Any],
+        sections: List[WikiSection],
+        filename_map: Dict[str, str],
+    ) -> List[Path]:
+        """用线程池并发运行每个章节的生成 worker，收集成功写入的文件路径。"""
+        total = len(sections)
         concurrency = min(self.max_concurrency, total)
         logger.info(
             f"[task={self.task_id}] 开始并发生成 wiki 正文: "
@@ -94,57 +103,15 @@ class WikiContentGenerator:
         counters = {"completed": 0, "failed": 0, "active": 0}
         generated_files: List[Path] = []
 
-        def _worker(section: WikiSection) -> Tuple[WikiSection, Optional[Path]]:
-            """单个章节的生成 worker，共享线程安全的 LCEL chain"""
-            with lock:
-                counters["active"] += 1
-                active = counters["active"]
-                completed = counters["completed"]
-            logger.info(
-                f"[task={self.task_id}] 章节开始: section_id={section.id!r}, "
-                f"title={section.title!r}, "
-                f"active={active}, completed={completed}/{total}"
-            )
-            t0 = time.monotonic()
-            try:
-                file_path = self._generate_section(
-                    structure, section,
-                    filename_override=filename_map.get(section.id),
-                )
-                elapsed = time.monotonic() - t0
-                with lock:
-                    counters["active"] -= 1
-                    counters["completed"] += 1
-                    completed_now = counters["completed"]
-                logger.info(
-                    f"[task={self.task_id}] 章节完成: section_id={section.id!r}, "
-                    f"耗时={elapsed:.1f}s, "
-                    f"文件={file_path.name if file_path else 'N/A'}, "
-                    f"完成={completed_now}/{total}"
-                )
-                # 推进进度: 50 -> 85 按章节完成比例线性推进
-                if self.progress_callback:
-                    progress = 50.0 + (completed_now / total) * 35.0
-                    self.progress_callback(
-                        progress,
-                        f"Generating Wiki content ({completed_now}/{total})..."
-                    )
-                return section, file_path
-            except Exception as exc:
-                elapsed = time.monotonic() - t0
-                with lock:
-                    counters["active"] -= 1
-                    counters["failed"] += 1
-                    failed_now = counters["failed"]
-                logger.warning(
-                    f"[task={self.task_id}] 章节失败: section_id={section.id!r}, "
-                    f"耗时={elapsed:.1f}s, 异常={exc!r}, "
-                    f"累计失败={failed_now}"
-                )
-                return section, None
-
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
-            futures = {pool.submit(_worker, sec): sec for sec in sections}
+            futures = {
+                pool.submit(
+                    self._generate_section_worker,
+                    structure, section,
+                    filename_map=filename_map, total=total, counters=counters, lock=lock,
+                ): section
+                for section in sections
+            }
             for future in as_completed(futures):
                 _, file_path = future.result()
                 if file_path:
@@ -155,6 +122,67 @@ class WikiContentGenerator:
             f"成功={len(generated_files)}, 失败={counters['failed']}, 总数={total}"
         )
         return generated_files
+
+    def _generate_section_worker(
+        self,
+        structure: Dict[str, Any],
+        section: WikiSection,
+        *,
+        filename_map: Dict[str, str],
+        total: int,
+        counters: Dict[str, int],
+        lock: threading.Lock,
+    ) -> Tuple[WikiSection, Optional[Path]]:
+        """单个章节的生成 worker，共享线程安全的 LCEL chain。"""
+        with lock:
+            counters["active"] += 1
+            active = counters["active"]
+            completed = counters["completed"]
+        logger.info(
+            f"[task={self.task_id}] 章节开始: section_id={section.id!r}, "
+            f"title={section.title!r}, "
+            f"active={active}, completed={completed}/{total}"
+        )
+        t0 = time.monotonic()
+        try:
+            file_path = self._generate_section(
+                structure, section,
+                filename_override=filename_map.get(section.id),
+            )
+            elapsed = time.monotonic() - t0
+            with lock:
+                counters["active"] -= 1
+                counters["completed"] += 1
+                completed_now = counters["completed"]
+            logger.info(
+                f"[task={self.task_id}] 章节完成: section_id={section.id!r}, "
+                f"耗时={elapsed:.1f}s, "
+                f"文件={file_path.name if file_path else 'N/A'}, "
+                f"完成={completed_now}/{total}"
+            )
+            self._report_content_progress(completed_now, total)
+            return section, file_path
+        except Exception as exc:
+            elapsed = time.monotonic() - t0
+            with lock:
+                counters["active"] -= 1
+                counters["failed"] += 1
+                failed_now = counters["failed"]
+            logger.warning(
+                f"[task={self.task_id}] 章节失败: section_id={section.id!r}, "
+                f"耗时={elapsed:.1f}s, 异常={exc!r}, "
+                f"累计失败={failed_now}"
+            )
+            return section, None
+
+    def _report_content_progress(self, completed_now: int, total: int) -> None:
+        """章节完成后按比例（50 -> 85）推进整体进度回调。"""
+        if self.progress_callback:
+            progress = 50.0 + (completed_now / total) * 35.0
+            self.progress_callback(
+                progress,
+                f"Generating Wiki content ({completed_now}/{total})..."
+            )
 
     def _generate_section(
         self,
