@@ -4,6 +4,7 @@ import asyncio
 import shutil
 import logging
 from pathlib import Path
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 
@@ -459,14 +460,167 @@ async def _background_retry_rag_indexing(task_id: str, url_link: str, config_pat
     logger.error(f"[RAG 重试] task={task_id} 已达最大重试次数，embedding 仍为失败")
 
 
+def _check_wiki_generation_cache(supabase_client: SupabaseClient, url_link: str) -> Optional[dict]:
+    """
+    查询 repositories 表：若记录存在且距今不超过 WIKI_GENERATION_CACHE_MAX_AGE_DAYS 天，
+    返回可直接写入 tasks.result 的缓存 payload；否则返回 None（需要完整重新生成）。
+    """
+    repo_info = supabase_client.get_repo_information(url_link)
+    if not repo_info or wiki_generation_cache_is_stale(repo_info, WIKI_GENERATION_CACHE_MAX_AGE_DAYS):
+        return None
+    return supabase_client.wiki_artifacts_from_row(repo_info, url_link)
+
+
+@dataclass
+class _GenerationContext:
+    """execute_generation_task 各阶段之间传递的工作状态，取代原先散落的一堆局部变量。"""
+
+    task_id: str
+    url_link: str
+    config_path: Path
+    output_path: Path
+    json_output_dir: Path
+    code_graph_path: Path
+    repo_path: Optional[str] = None
+    wiki_structure: Optional[Dict[str, Any]] = None
+    graphrag_json_path: Optional[Path] = None
+    graph_path: Optional[str] = None
+    r2_structure_url: Optional[str] = None
+    r2_content_urls: Optional[List[str]] = None
+    r2_graphrag_url: Optional[str] = None
+    r2_code_graph_url: Optional[str] = None
+    vector_store_path: Optional[str] = None
+    embedding_error: Optional[str] = None
+
+
+async def _run_structure_and_graph_stage(ctx: _GenerationContext) -> None:
+    """阶段 1：生成 wiki 结构 + 构建代码图，并尽早把 graphrag/code_graph 落盘到向量库目录。"""
+    loop = asyncio.get_event_loop()
+    ctx.repo_path, ctx.wiki_structure = await loop.run_in_executor(
+        None,
+        lambda: run_structure_generation(
+            repo_url=ctx.url_link,
+            config_path=ctx.config_path,
+            output_path=ctx.output_path,
+            task_id=ctx.task_id,
+            code_graph_persist_path=str(ctx.code_graph_path),
+        )
+    )
+    await asyncio.sleep(0)
+
+    ctx.graphrag_json_path = (ctx.output_path.parent / "graphrag_communities.json").resolve()
+
+    # 尽早将 graphrag_communities.json 和 code_graph.json 写入向量库目录，
+    # 保证即使后续 RAG 或上传失败，本地副本依然存在供 Agent 使用。
+    await loop.run_in_executor(
+        None,
+        lambda: _persist_graphrag_communities_to_vector_store(ctx.url_link, ctx.graphrag_json_path),
+    )
+    ctx.graph_path = await loop.run_in_executor(
+        None,
+        lambda: _persist_code_graph_to_vector_store(ctx.url_link, ctx.code_graph_path),
+    )
+    await asyncio.sleep(0)
+
+
+async def _run_content_stage(ctx: _GenerationContext) -> None:
+    """阶段 2：生成 Wiki 正文与对应 JSON 详情。"""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        lambda: run_wiki_content_generation(
+            repo_path=ctx.repo_path,
+            wiki_structure=ctx.wiki_structure,
+            json_output_dir=ctx.json_output_dir,
+            task_id=ctx.task_id,
+        )
+    )
+    await asyncio.sleep(0)
+
+
+async def _run_upload_stage(ctx: _GenerationContext) -> None:
+    """阶段 3：上传 R2——先于 RAG，避免仅因 RAG/embedding 失败导致 Wiki 成果未持久化。"""
+    _update_progress(ctx.task_id, 86, "Uploading to R2 storage...")
+    loop = asyncio.get_event_loop()
+    upload_result = await loop.run_in_executor(
+        None,
+        lambda gp=ctx.graphrag_json_path, cgp=ctx.code_graph_path: upload_wiki_to_r2(
+            repo_url=ctx.url_link,
+            wiki_structure=ctx.wiki_structure,
+            structure_local_path=ctx.output_path,
+            content_dir=ctx.json_output_dir,
+            task_id=ctx.task_id,
+            graphrag_local_path=gp if gp.is_file() else None,
+            code_graph_local_path=cgp if cgp.is_file() else None,
+        )
+    )
+    ctx.r2_structure_url = upload_result.structure_url
+    ctx.r2_content_urls = upload_result.content_urls
+    ctx.r2_graphrag_url = upload_result.graphrag_url
+    ctx.r2_code_graph_url = upload_result.code_graph_url
+    await asyncio.sleep(0)
+
+
+async def _run_rag_stage(ctx: _GenerationContext) -> None:
+    """阶段 4：构建 RAG 向量索引；失败不推翻已完成的上传与任务，改为记录 embedding_error 供后台重试。"""
+    loop = asyncio.get_event_loop()
+    try:
+        ctx.vector_store_path = await loop.run_in_executor(
+            None,
+            lambda: run_rag_indexing(
+                repo_path=ctx.repo_path,
+                repo_url=ctx.url_link,
+                config_path=ctx.config_path,
+                task_id=ctx.task_id,
+                communities_json_path=str(ctx.graphrag_json_path),
+                code_graph_json_path=str(ctx.code_graph_path) if ctx.code_graph_path.is_file() else None,
+            )
+        )
+        # RAG 成功后从向量库目录确认 graph_path（优先以向量库副本为准）
+        if ctx.vector_store_path:
+            vsp_code_graph = Path(ctx.vector_store_path) / "code_graph.json"
+            if vsp_code_graph.is_file():
+                ctx.graph_path = str(vsp_code_graph)
+    except Exception as rag_exc:
+        ctx.embedding_error = str(rag_exc)
+        logger.exception(
+            "Task %s Wiki uploaded to R2, but RAG vector indexing failed. Marking as completed and scheduling background retry: %s",
+            ctx.task_id,
+            rag_exc,
+        )
+    await asyncio.sleep(0)
+
+
+def _build_generation_result(ctx: _GenerationContext) -> Dict[str, Any]:
+    """阶段 5：把各阶段产出汇总为写入 tasks.result 的最终 payload。"""
+    result: Dict[str, Any] = {
+        "r2_structure_url": ctx.r2_structure_url,
+        "r2_content_urls": ctx.r2_content_urls,
+        "r2_graphrag_url": ctx.r2_graphrag_url,
+        "r2_code_graph_url": ctx.r2_code_graph_url,
+        "json_wiki": str(ctx.output_path) if not ctx.r2_structure_url else None,
+        "json_content": str(ctx.json_output_dir) if not ctx.r2_content_urls else None,
+        "vector_store_path": ctx.vector_store_path,
+        "graph_path": ctx.graph_path,
+        "repo_url": ctx.url_link,
+        "embedding": {
+            "status": "ready" if ctx.embedding_error is None else "retry_scheduled",
+            "last_error": ctx.embedding_error,
+        },
+    }
+    if ctx.embedding_error is not None:
+        result["embedding"]["message"] = (
+            "Wiki generated and uploaded; vector indexing failed, system will retry in background."
+        )
+    return result
+
+
 async def execute_generation_task(task_id: str, url_link: str):
     """
     后台异步执行 Wiki 生成任务
     """
-    repo_path: Optional[str] = None
-    output_path: Optional[Path] = None
-    json_output_dir: Optional[Path] = None
     supabase_client = get_supabase_client()
+    ctx: Optional[_GenerationContext] = None
 
     try:
         # 更新状态为处理中
@@ -474,137 +628,34 @@ async def execute_generation_task(task_id: str, url_link: str):
             logger.info(f"Task {task_id} not found (deleted) at start, aborting.")
             return
 
-        # 缓存判断：查询 repositories 表的 last_updated 字段
-        # 若记录存在且距今不超过 WIKI_GENERATION_CACHE_MAX_AGE_DAYS 天，则直接返回已有数据
-        # TODO 等下检查这里的逻辑，感觉有问题
-        repo_info = supabase_client.get_repo_information(url_link)
-        if repo_info and not wiki_generation_cache_is_stale(repo_info, WIKI_GENERATION_CACHE_MAX_AGE_DAYS):
-            cached_result = supabase_client.wiki_artifacts_from_row(repo_info, url_link)
-            if cached_result:
-                supabase_client.update_task_progress(task_id, 100.0, "Cache hit — loaded existing docs")
-                supabase_client.update_task_status(task_id, TaskStatus.CACHED, result=cached_result)
-                logger.info(
-                    "缓存命中 (last_updated 在 %d 天内)，跳过重新生成: task=%s repo=%s",
-                    WIKI_GENERATION_CACHE_MAX_AGE_DAYS, task_id, url_link,
-                )
-                return
+        cached_result = _check_wiki_generation_cache(supabase_client, url_link)
+        if cached_result:
+            supabase_client.update_task_progress(task_id, 100.0, "Cache hit — loaded existing docs")
+            supabase_client.update_task_status(task_id, TaskStatus.CACHED, result=cached_result)
+            logger.info(
+                "缓存命中 (last_updated 在 %d 天内)，跳过重新生成: task=%s repo=%s",
+                WIKI_GENERATION_CACHE_MAX_AGE_DAYS, task_id, url_link,
+            )
+            return
 
         # 构建任务级隔离路径
         config_path = CONFIG_PATH.expanduser().resolve()
-        task_dir = _task_output_dir(task_id) #临时工作目录
-        output_path = (task_dir / "wiki_structure.json").resolve()
-        json_output_dir = (task_dir / "wiki_section_json").resolve()
-        code_graph_path = (task_dir / "code_graph.json").resolve()
-
-        # 1. 生成项目结构 (wiki_structure.json) + 构建代码图 (code_graph.json)
-        loop = asyncio.get_event_loop()
-        repo_path, wiki_structure = await loop.run_in_executor(
-            None,
-            lambda: run_structure_generation(
-                repo_url=url_link,
-                config_path=config_path,
-                output_path=output_path,
-                task_id=task_id,
-                code_graph_persist_path=str(code_graph_path),
-            )
+        task_dir = _task_output_dir(task_id)  # 临时工作目录
+        ctx = _GenerationContext(
+            task_id=task_id,
+            url_link=url_link,
+            config_path=config_path,
+            output_path=(task_dir / "wiki_structure.json").resolve(),
+            json_output_dir=(task_dir / "wiki_section_json").resolve(),
+            code_graph_path=(task_dir / "code_graph.json").resolve(),
         )
-        await asyncio.sleep(0)
 
-        graphrag_json_path = (output_path.parent / "graphrag_communities.json").resolve()
+        await _run_structure_and_graph_stage(ctx)
+        await _run_content_stage(ctx)
+        await _run_upload_stage(ctx)
+        await _run_rag_stage(ctx)
 
-        # 尽早将 graphrag_communities.json 和 code_graph.json 写入向量库目录，
-        # 保证即使后续 RAG 或上传失败，本地副本依然存在供 Agent 使用。
-        await loop.run_in_executor(
-            None,
-            lambda: _persist_graphrag_communities_to_vector_store(url_link, graphrag_json_path),
-        )
-        graph_path: Optional[str] = await loop.run_in_executor(
-            None,
-            lambda: _persist_code_graph_to_vector_store(url_link, code_graph_path),
-        )
-        await asyncio.sleep(0)
-
-        # 2. 生成 Wiki 内容和对应的 JSON 详情
-        await loop.run_in_executor(
-            None,
-            lambda: run_wiki_content_generation(
-                repo_path=repo_path,
-                wiki_structure=wiki_structure,
-                json_output_dir=json_output_dir,
-                task_id=task_id
-            )
-        )
-        await asyncio.sleep(0)
-        
-        # 3. 先上传 R2，避免仅因 RAG/embedding 失败导致 Wiki 成果未持久化
-        _update_progress(task_id, 86, "Uploading to R2 storage...")
-        upload_result = await loop.run_in_executor(
-            None,
-            lambda gp=graphrag_json_path, cgp=code_graph_path: upload_wiki_to_r2(
-                repo_url=url_link,
-                wiki_structure=wiki_structure,
-                structure_local_path=output_path,
-                content_dir=json_output_dir,
-                task_id=task_id,
-                graphrag_local_path=gp if gp.is_file() else None,
-                code_graph_local_path=cgp if cgp.is_file() else None,
-            )
-        )
-        r2_structure_url = upload_result.structure_url
-        r2_content_urls = upload_result.content_urls
-        r2_graphrag_url = upload_result.graphrag_url
-        r2_code_graph_url = upload_result.code_graph_url
-        await asyncio.sleep(0)
-        
-        # 4. 构建 RAG 向量索引（失败不推翻已完成的上传与任务）
-        vector_store_path: Optional[str] = None
-        embedding_error: Optional[str] = None
-        try:
-            vector_store_path = await loop.run_in_executor(
-                None,
-                lambda: run_rag_indexing(
-                    repo_path=repo_path,
-                    repo_url=url_link,
-                    config_path=config_path,
-                    task_id=task_id,
-                    communities_json_path=str(graphrag_json_path),
-                    code_graph_json_path=str(code_graph_path) if code_graph_path.is_file() else None,
-                )
-            )
-            # RAG 成功后从向量库目录确认 graph_path（优先以向量库副本为准）
-            if vector_store_path:
-                _vsp_cg = Path(vector_store_path) / "code_graph.json"
-                if _vsp_cg.is_file():
-                    graph_path = str(_vsp_cg)
-        except Exception as rag_exc:
-            embedding_error = str(rag_exc)
-            logger.exception(
-                "Task %s Wiki uploaded to R2, but RAG vector indexing failed. Marking as completed and scheduling background retry: %s",
-                task_id,
-                rag_exc,
-            )
-
-        await asyncio.sleep(0)
-
-        result: Dict[str, Any] = {
-            "r2_structure_url": r2_structure_url,
-            "r2_content_urls": r2_content_urls,
-            "r2_graphrag_url": r2_graphrag_url,
-            "r2_code_graph_url": r2_code_graph_url,
-            "json_wiki": str(output_path) if not r2_structure_url else None,
-            "json_content": str(json_output_dir) if not r2_content_urls else None,
-            "vector_store_path": vector_store_path,
-            "graph_path": graph_path,
-            "repo_url": url_link,
-            "embedding": {
-                "status": "ready" if embedding_error is None else "retry_scheduled",
-                "last_error": None if embedding_error is None else embedding_error,
-            },
-        }
-        if embedding_error is not None:
-            result["embedding"]["message"] = (
-                "Wiki generated and uploaded; vector indexing failed, system will retry in background."
-            )
+        result = _build_generation_result(ctx)
 
         if _task_marked_cancelled_by_user(supabase_client, task_id):
             logger.info(f"任务 {task_id} 已被用户取消，跳过写入完成状态")
@@ -615,21 +666,21 @@ async def execute_generation_task(task_id: str, url_link: str):
         logger.info(
             "任务 %s Wiki 流程结束（embedding 成功=%s, graph_path=%s）",
             task_id,
-            embedding_error is None,
-            graph_path,
+            ctx.embedding_error is None,
+            ctx.graph_path,
         )
 
         success = supabase_client.upsert_repo_wiki_data(
             url_link,
-            r2_structure_url,
-            r2_content_urls,
-            vector_store_path if embedding_error is None else None,
-            graph_path=graph_path,
+            ctx.r2_structure_url,
+            ctx.r2_content_urls,
+            ctx.vector_store_path if ctx.embedding_error is None else None,
+            graph_path=ctx.graph_path,
         )
         if not success:
             logger.error(f"同步supabase repository表失败: {url_link}")
 
-        if embedding_error is not None:
+        if ctx.embedding_error is not None:
             retry_task = asyncio.create_task(
                 _background_retry_rag_indexing(task_id, url_link, config_path)
             )
@@ -646,9 +697,9 @@ async def execute_generation_task(task_id: str, url_link: str):
 
     finally:
         # 无论成功还是失败，都清理本地文件以释放存储空间
-        if output_path and json_output_dir:
+        if ctx is not None:
             await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: cleanup_local_files(repo_path, output_path, json_output_dir)
+                lambda: cleanup_local_files(ctx.repo_path, ctx.output_path, ctx.json_output_dir)
             )
         logger.info(f"[任务 {task_id}] 本地临时文件清理完成")
