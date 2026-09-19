@@ -17,7 +17,7 @@ from src.ingestion.vector_store import upsert_vector_store
 from src.wiki.struct_gen import generate_wiki_structure
 from src.wiki.content_gen import WikiContentGenerator
 from src.storage.r2_client import upload_wiki_to_r2
-from src.storage.supabase_client import update_repo_vector_path, SupabaseClient, SupabaseStorageError
+from src.storage.supabase_client import SupabaseClient, SupabaseStorageError
 from src.storage.models import coerce_str_list
 from src.paths import PROJECT_ROOT, VECTOR_STORE_ROOT, REPO_STORE_ROOT, repo_disk_dirname
 from src.utils.wiki_cache_policy import wiki_generation_cache_is_stale, WIKI_GENERATION_CACHE_MAX_AGE_DAYS
@@ -266,7 +266,9 @@ def run_rag_indexing(
 
     # 同步到 Supabase
     try:
-        update_repo_vector_path(repo_url, str(vector_store_path))
+        SupabaseClient().upsert_repo_wiki_data(
+            repo_url, r2_structure_url=None, r2_content_urls=None, vector_store_path=str(vector_store_path)
+        )
     except Exception as e:
         logger.error(f"[Supabase] Failed to sync vector path: {e}")
     

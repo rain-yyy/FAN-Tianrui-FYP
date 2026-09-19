@@ -53,29 +53,6 @@ class SupabaseClient:
 
     def _repo_owner_slug(self,repo_url: str) -> str:
         return ("/").join(repo_url.split("/")[-2:])
-    
-    def update_repository_vector_path(self, repo_name: str, vector_store_path: str):
-        """
-        Update or insert the vector_store_path for a repository in Supabase using upsert.
-        """
-        if not self.client:
-            print("[Supabase] Client not initialized. Skipping update.")
-            return False
-
-        try:
-            # Use upsert to either update an existing record or insert a new one
-            # The 'repo_url' is the primary key, so upsert will use it to match
-            self.client.table("repositories").upsert({
-                "repo_name": repo_name,
-                "vector_store_path": vector_store_path,
-                "last_updated": "now()"
-            }).execute()
-            
-            print(f"[Supabase] Upserted repository record (vector path) for {repo_name}")
-            return True
-        except Exception as e:
-            print(f"[Supabase] Error updating repository (upsert): {e}")
-            return False
 
     def create_task(self, user_id: str, task_id: str, repo_url: str):
         """
@@ -517,12 +494,5 @@ class SupabaseClient:
         except Exception as e:
             print(f"[Supabase] Error updating repository information (upsert): {e}")
             return False
-
-def update_repo_vector_path(repo_url: str, vector_store_path: str):
-    """
-    Helper function to update repository vector path in Supabase.
-    """
-    client = SupabaseClient()
-    return client.update_repository_vector_path(repo_url, vector_store_path)
 
 
