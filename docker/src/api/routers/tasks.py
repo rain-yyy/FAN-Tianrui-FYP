@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request
 from typing import List, Optional
 
-from src.core.task_manager import TaskStatus, cancel_running_task, start_generation_task
+from src.core.task_manager import CancelOutcome, cancel_task, start_generation_task
 from src.storage.supabase_client import SupabaseStorageError, DeleteTaskResult, get_supabase_client
 from src.utils.logger import setup_logger
 
@@ -94,40 +94,33 @@ async def cancel_task_api(task_id: str) -> dict:
     Termination task with task_id
     """
     logger.info(f"Terminate: {task_id}")
-    supabase_client = get_supabase_client()
+    outcome, error_detail = cancel_task(task_id, get_supabase_client())
 
-    def _persist_cancelled_status() -> bool:
-        return supabase_client.update_task_status(
-            task_id, TaskStatus.FAILED.value, error="Cancelled by user"
-        )
-
-    if cancel_running_task(task_id):
-        if not _persist_cancelled_status():
-            logger.error(f"取消任务后写入 Supabase 失败: {task_id}")
-            raise HTTPException(
-                status_code=503,
-                detail="Task stopped locally but failed to persist cancelled status; try again.",
-            )
+    if outcome == CancelOutcome.CANCELLED:
         logger.info(f"Task has been terminated: {task_id}")
         return {"success": True, "message": "Task cancelled"}
 
-    try:
-        task_info = supabase_client.get_task(task_id)
-    except SupabaseStorageError as e:
-        logger.error("取消任务时无法查询 Supabase: %s", e)
-        raise HTTPException(status_code=503, detail=f"Could not verify task status: {e}")
-
-    # The service has been restarted
-    if task_info and task_info.status == TaskStatus.PROCESSING.value:
-        if not _persist_cancelled_status():
-            logger.error(f"仅 DB 标记取消时写入失败: {task_id}")
-            raise HTTPException(status_code=503, detail="Failed to update task status in database")
+    if outcome == CancelOutcome.MARKED_CANCELLED_IN_DB:
         logger.info(f"The task was not found in the memory, but it has been marked as cancelled in the datbase: {task_id}")
         return {"success": True, "message": "Task marked as cancelled"}
 
-    # 尚未进入 execute_generation_task 的 processing，无内存任务可杀；删除流程可继续
-    if task_info and task_info.status == TaskStatus.PENDING.value:
+    if outcome == CancelOutcome.NOT_YET_RUNNING:
         return {"success": True, "message": "Task not yet running; nothing to cancel"}
+
+    if outcome == CancelOutcome.PERSIST_FAILED_AFTER_STOP:
+        logger.error(f"取消任务后写入 Supabase 失败: {task_id}")
+        raise HTTPException(
+            status_code=503,
+            detail="Task stopped locally but failed to persist cancelled status; try again.",
+        )
+
+    if outcome == CancelOutcome.PERSIST_FAILED_DB_ONLY:
+        logger.error(f"仅 DB 标记取消时写入失败: {task_id}")
+        raise HTTPException(status_code=503, detail="Failed to update task status in database")
+
+    if outcome == CancelOutcome.QUERY_FAILED:
+        logger.error("取消任务时无法查询 Supabase: %s", error_detail)
+        raise HTTPException(status_code=503, detail=f"Could not verify task status: {error_detail}")
 
     logger.warning(f"Task is not running or does not exist: {task_id}")
     raise HTTPException(
