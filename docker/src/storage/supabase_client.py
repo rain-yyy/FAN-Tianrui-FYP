@@ -276,7 +276,16 @@ class SupabaseClient:
         repo_info = self.get_repo_information(repo_url)
         if not repo_info:
             return None
+        return self.wiki_artifacts_from_row(repo_info, repo_url)
 
+    def wiki_artifacts_from_row(self, repo_info: dict, repo_url: str) -> Optional[dict]:
+        """
+        Same completeness check/payload shape as `get_repo_wiki_artifacts`, but takes an
+        already-fetched `repositories` row instead of querying again. Used by
+        `get_repo_wiki_artifacts` itself, and by wiki_pipeline's cache-hit check, which already
+        has the row in hand for the staleness check and would otherwise re-implement this
+        normalization inline.
+        """
         r2_structure_url = repo_info.get("r2_structure_url")
         r2_content_urls = coerce_str_list(repo_info.get("r2_content_urls"))
         if not r2_structure_url or not r2_content_urls:

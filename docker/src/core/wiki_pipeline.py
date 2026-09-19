@@ -18,7 +18,6 @@ from src.wiki.struct_gen import generate_wiki_structure
 from src.wiki.content_gen import WikiContentGenerator
 from src.storage.r2_client import upload_wiki_to_r2
 from src.storage.supabase_client import SupabaseClient, SupabaseStorageError
-from src.storage.models import coerce_str_list
 from src.paths import PROJECT_ROOT, VECTOR_STORE_ROOT, REPO_STORE_ROOT, repo_disk_dirname
 from src.utils.wiki_cache_policy import wiki_generation_cache_is_stale, WIKI_GENERATION_CACHE_MAX_AGE_DAYS
 
@@ -462,15 +461,8 @@ async def execute_generation_task(task_id: str, url_link: str):
         # TODO 等下检查这里的逻辑，感觉有问题
         repo_info = supabase_client.get_repo_information(url_link)
         if repo_info and not wiki_generation_cache_is_stale(repo_info, WIKI_GENERATION_CACHE_MAX_AGE_DAYS):
-            r2_structure_url = repo_info.get("r2_structure_url")
-            r2_content_urls = coerce_str_list(repo_info.get("r2_content_urls"))
-            if r2_structure_url and r2_content_urls:
-                cached_result = {
-                    "r2_structure_url": r2_structure_url,
-                    "r2_content_urls": r2_content_urls,
-                    "vector_store_path": repo_info.get("vector_store_path"),
-                    "repo_url": supabase_client._normalize_repo_url(url_link),
-                }
+            cached_result = supabase_client.wiki_artifacts_from_row(repo_info, url_link)
+            if cached_result:
                 supabase_client.update_task_progress(task_id, 100.0, "Cache hit — loaded existing docs")
                 supabase_client.update_task_status(task_id, TaskStatus.CACHED, result=cached_result)
                 logger.info(
