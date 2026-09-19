@@ -218,6 +218,27 @@ def _extract_balanced_braces(s: str) -> str:
     return s
 
 
+# 哨兵：区分「解析失败」与「解析成功但结果恰好是 None/False/0」等假值。
+_PARSE_FAILED = object()
+
+
+def _try_raw_decode(text: str) -> Any:
+    """标准 JSON raw_decode，允许尾随内容；失败返回 _PARSE_FAILED（不抛异常）。"""
+    try:
+        data, _ = json.JSONDecoder().raw_decode(text)
+        return data
+    except (json.JSONDecodeError, ValueError):
+        return _PARSE_FAILED
+
+
+def _try_literal_eval(text: str) -> Any:
+    """ast.literal_eval（Python 字面量，如单引号 dict）；失败返回 _PARSE_FAILED。"""
+    try:
+        return ast.literal_eval(text)
+    except (ValueError, SyntaxError):
+        return _PARSE_FAILED
+
+
 def _parse_llm_json(candidate: str) -> Any:
     """
     多策略解析 LLM 输出的 JSON / 类 JSON 字符串：
@@ -226,33 +247,25 @@ def _parse_llm_json(candidate: str) -> Any:
     2. ast.literal_eval —— 处理 Python 风格单引号 dict
     3. 单引号 → 双引号替换后再 raw_decode —— 兜底
     """
-    # 策略 1：标准 JSON，允许尾随内容
-    try:
-        data, _ = json.JSONDecoder().raw_decode(candidate)
+    data = _try_raw_decode(candidate)
+    if data is not _PARSE_FAILED:
         return data
-    except json.JSONDecodeError:
-        pass
 
-    # 策略 2：Python 字面量（单引号 dict 等）
-    try:
-        balanced = _extract_balanced_braces(candidate)
-        data = ast.literal_eval(balanced)
-        if isinstance(data, dict):
-            # 将 Python 对象序列化再反序列化，确保可以被后续校验代码处理
-            return json.loads(json.dumps(data, ensure_ascii=False))
-    except (ValueError, SyntaxError):
-        pass
+    literal = _try_literal_eval(_extract_balanced_braces(candidate))
+    if isinstance(literal, dict):
+        # 将 Python 对象序列化再反序列化，确保可以被后续校验代码处理
+        return json.loads(json.dumps(literal, ensure_ascii=False))
 
-    # 策略 3：单引号统一替换为双引号后再解析
     try:
         fixed = re.sub(
             r"'([^'\\]*(?:\\.[^'\\]*)*)'",
             lambda m: '"' + m.group(1).replace('"', '\\"') + '"',
             candidate,
         )
-        data, _ = json.JSONDecoder().raw_decode(fixed)
-        return data
-    except (json.JSONDecodeError, re.error):
+        data = _try_raw_decode(fixed)
+        if data is not _PARSE_FAILED:
+            return data
+    except re.error:
         pass
 
     raise json.JSONDecodeError("All JSON parsing strategies failed", candidate, 0)
@@ -277,32 +290,21 @@ def parse_wiki_structure_json(raw_json: str, *, fallback_date: str) -> Dict[str,
     # (b) 模型将 JSON 双重编码为字符串字面量（如 `"{\\"title\\"...}"}`）
     #     → 解外层字符串 → 再 raw_decode 解内层 JSON 对象
     try:
-        outer = None
-        try:
-            outer, _ = json.JSONDecoder().raw_decode(cleaned_json.lstrip())
-        except (json.JSONDecodeError, ValueError):
+        stripped = cleaned_json.lstrip()
+        outer = _try_raw_decode(stripped)
+        if outer is _PARSE_FAILED and (stripped.startswith('"') or stripped.startswith("'")):
             # 兼容带有非法转义字符（如 \'）的双引号包裹字符串
-            if cleaned_json.lstrip().startswith('"') or cleaned_json.lstrip().startswith("'"):
-                try:
-                    import ast
-                    outer = ast.literal_eval(cleaned_json.lstrip())
-                except (SyntaxError, ValueError):
-                    pass
+            outer = _try_literal_eval(stripped)
 
         if isinstance(outer, dict):
             data = outer
         elif isinstance(outer, str):
-            inner = None
-            try:
-                inner, _ = json.JSONDecoder().raw_decode(outer.lstrip())
-            except (json.JSONDecodeError, ValueError):
+            inner_stripped = outer.lstrip()
+            inner = _try_raw_decode(inner_stripped)
+            if inner is _PARSE_FAILED:
                 # 兼容内层也是用 ast 解析的情况
-                try:
-                    import ast
-                    inner = ast.literal_eval(outer.lstrip())
-                except (SyntaxError, ValueError):
-                    pass
-            
+                inner = _try_literal_eval(inner_stripped)
+
             if isinstance(inner, dict):
                 data = inner
     except Exception:
