@@ -112,9 +112,12 @@ def generate_wiki_structure(
     repo_map = _build_repo_map_context(repo_path)
     logger.info(f"Repo map context built: {len(repo_map)} characters")
 
-    # 2.2 准备有效文件列表（用于约束 LLM 输出）
+    # 2.2 准备有效文件列表（用于约束 LLM 输出，防止其虚构不存在的文件路径）
     filtered_file_paths = get_files_to_process(repo_path)
-        
+    if valid_file_list is None:
+        relative_paths = sorted(os.path.relpath(p, repo_path) for p in filtered_file_paths)
+        valid_file_list = "\n".join(relative_paths)
+
     # 2.3 准备社区信息
     if communities_info is None:
         try:
