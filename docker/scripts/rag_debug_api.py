@@ -17,8 +17,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
-from src.agent.tools.rag_tool import RAGSearchTool
-from src.agent.state import ContextPiece
+from src.chat.tools.rag_tool import RAGSearchEngine
 
 # 初始化日志
 logging.basicConfig(level=logging.INFO)
@@ -42,21 +41,18 @@ async def debug_rag(request: RAGRequest):
             raise HTTPException(status_code=404, detail=f"Vector store path not found: {request.vector_store_path}")
 
         # 初始化工具
-        tool = RAGSearchTool(vector_store_path=request.vector_store_path)
-        
-        # 执行检索
-        # 注意：execute 现在内部会自动处理 HyDE 逻辑
-        result: ContextPiece = tool.execute(query=request.query, top_k=request.top_k)
-        
+        engine = RAGSearchEngine(vector_store_path=request.vector_store_path)
+
+        # 执行检索（内部自动处理 HyDE 逻辑）
+        content, artifact = engine.search(query=request.query, top_k=request.top_k)
+
         # 构造返回结果，包含一些元数据以便观察中间逻辑
         return {
             "query": request.query,
             "vector_store_path": request.vector_store_path,
             "result": {
-                "source": result.source,
-                "content": result.content,
-                "relevance_score": result.relevance_score,
-                "metadata": result.metadata
+                "content": content,
+                "artifact": artifact,
             }
         }
     except Exception as e:

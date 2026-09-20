@@ -81,6 +81,37 @@ def _docstring_python(node: Node, code_bytes: bytes) -> Optional[str]:
     return None
 
 
+def rank_important_symbols(graph: nx.DiGraph, top_n: int = 60) -> List[Dict[str, Any]]:
+    """
+    对 code graph 的 function/class 节点跑 PageRank，返回按重要性降序排列的定义列表。
+
+    每个 function/class 节点在创建时都保证带有 file_path/start_line/qualified_name
+    （见本文件各 `_upsert_node` 调用点），因此这里直接索引取值，不做防御性 `.get()`。
+    """
+    if graph is None or graph.number_of_nodes() == 0:
+        return []
+
+    scores = nx.pagerank(graph)
+
+    ranked = sorted(
+        (
+            {
+                "file_path": data["file_path"],
+                "start_line": data["start_line"],
+                "type": data["type"],
+                "qualified_name": data["qualified_name"],
+                "score": scores.get(node_id, 0.0),
+            }
+            for node_id, data in graph.nodes(data=True)
+            if data.get("type") in ("function", "class")
+        ),
+        key=lambda item: item["score"],
+        reverse=True,
+    )
+
+    return ranked[:top_n]
+
+
 # ---------------------------------------------------------------------------
 # Main builder
 # ---------------------------------------------------------------------------

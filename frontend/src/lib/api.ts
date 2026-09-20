@@ -46,85 +46,42 @@ export interface ChatMessage {
   content: string;
 }
 
-export interface ChatRequest {
-  user_id: string;
+// ============ Unified chat types (single agent-first /chat, /chat/stream) ============
+
+export interface ChatTurnRequest {
   question: string;
   repo_url: string;
-  chat_id?: string;
-  conversation_history?: ChatMessage[];
-  current_page_context?: string;
+  user_id: string;
+  chat_id?: string | null;
+  current_page_context?: string | null;
 }
 
-export interface ChatResponse {
-  answer: string;
-  sources: string[];
+export interface ToolTrajectoryStep {
+  tool: string;
+  arguments: Record<string, unknown>;
+  status: 'success' | 'error';
+  summary: string;
+  duration_ms: number | null;
+}
+
+export interface ChatTurnResponse {
   chat_id: string;
   repo_url: string;
-}
-
-// ============ Agent Mode Types ============
-
-export interface AgentTrajectoryStep {
-  step: number;
-  icon?: string;
-  tool: string;
-  description: string;
-  success: boolean;
-  preview?: string;
-  arguments?: Record<string, unknown>;
-  result?: string;
-  duration_ms?: number;
-  metrics?: Record<string, unknown>;
-  used_fallback?: boolean;
-}
-
-export type ConfidenceLevel = 'confirmed' | 'likely' | 'unknown';
-
-export type AgentChatRequest = ChatRequest;
-
-export interface AgentChatResponse {
   answer: string;
-  mermaid?: string | null;
   sources: string[];
-  trajectory: AgentTrajectoryStep[];
-  confidence: number;
-  confidence_level: ConfidenceLevel;
+  tool_trajectory: ToolTrajectoryStep[];
   iterations: number;
-  anchors_count: number;
-  evidence_count: number;
-  caveats: string[];
-  chat_id: string;
-  repo_url: string;
-  error?: string | null;
 }
 
-export interface AgentStreamEvent {
-  type: 'planning' | 'tool_call' | 'evaluation' | 'synthesis' | 'answer_delta' | 'complete' | 'error';
-  data: Record<string, unknown>;
-}
-
-// Tool call detail for live display
-export interface LiveToolStep {
-  tool: string;
-  description: string;
-  query?: string;
-  pattern?: string;
-  operation?: string;
-  symbol_name?: string;
-  file_path?: string;
-  status: 'pending' | 'running' | 'done' | 'error';
-  elapsed_ms?: number;
-  success?: boolean;
-  metrics?: Record<string, unknown>;
-}
-
-// RAG streaming event types
-export interface RagStreamEvent {
-  type: 'retrieval_start' | 'hyde_generated' | 'retrieval_done' | 'answer_delta' | 'answer_done' | 'complete' | 'error';
-  data: Record<string, unknown>;
-}
-
-export type ChatMode = 'rag' | 'agent';
+export type ChatStreamEvent =
+  | { type: 'turn_start'; data: { chat_id: string; repo_url: string } }
+  | { type: 'iteration_start'; data: { iteration: number; max_iterations: number } }
+  | { type: 'tool_call_start'; data: { tool: string; arguments: Record<string, unknown>; iteration: number } }
+  | { type: 'tool_call_result'; data: { tool: string; status: 'success' | 'error'; summary: string } }
+  | { type: 'answer_token'; data: { delta: string } }
+  | { type: 'answer_done'; data: { answer: string; sources: string[] } }
+  | { type: 'complete'; data: { chat_id: string; repo_url: string } }
+  | { type: 'error'; data: { detail: string } };
 
 export interface ChatHistoryItem {
   id: string;
@@ -171,10 +128,6 @@ export interface TaskStatusResponse {
   last_updated: string;
   result: GenResponse | null;
   error: string | null;
-}
-
-export interface TasksResponse {
-  tasks: TaskStatusResponse[];
 }
 
 /** 工作台卡片：以 repositories 表为准，含跳转 Wiki 用的 task_id */
@@ -236,18 +189,13 @@ export const api = {
   },
 
   getTaskStatus: async (task_id: string): Promise<TaskStatusResponse> => {
-    try {
-      const data = await requestJson<{ task: TaskStatusResponse }>(`/task/${task_id}`, {
-        method: 'POST',
-      });
-      return data.task;
-    } catch (error) {
-      throw error;
-    }
+    return requestJson<TaskStatusResponse>(`/task/${task_id}`, {
+      method: 'POST',
+    });
   },
 
-  getTasks: async (user_id: string): Promise<TasksResponse> => {
-    return requestJson<TasksResponse>('/tasks', {
+  getTasks: async (user_id: string): Promise<TaskStatusResponse[]> => {
+    return requestJson<TaskStatusResponse[]>('/tasks', {
       method: 'POST',
       body: JSON.stringify({ user_id }),
     });
@@ -301,7 +249,7 @@ export const api = {
     return true;
   },
 
-  askQuestion: async (request: ChatRequest): Promise<ChatResponse> => {
+  askQuestion: async (request: ChatTurnRequest): Promise<ChatTurnResponse> => {
     try {
       const res = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
@@ -399,120 +347,10 @@ export const api = {
     }
   },
 
-  // ============ Agent Mode APIs ============
-
-  askAgentQuestion: async (request: AgentChatRequest): Promise<AgentChatResponse> => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/agent/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-
-      if (!res.ok) {
-        const status = res.status;
-        let detail = res.statusText;
-        try {
-          const errorData = await res.json();
-          detail = errorData.detail || detail;
-        } catch {
-          // ignore
-        }
-
-        if (status === 404) {
-          throw new Error('No vector index for this repo. Generate documentation first, then try Agent again.');
-        } else if (status === 400) {
-          throw new Error(`Invalid request: ${detail}`);
-        } else {
-          throw new Error(`Agent request failed: ${detail}`);
-        }
-      }
-      return res.json();
-    } catch (error) {
-      console.error('Agent question failed:', error);
-      throw error;
-    }
-  },
-
-  askAgentQuestionStream: async function* (
-    request: AgentChatRequest
-  ): AsyncGenerator<AgentStreamEvent, void, unknown> {
-    const res = await fetch(`${API_BASE_URL}/agent/chat/stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-
-    if (!res.ok) {
-      throw new Error(`Agent stream request failed: ${res.statusText}`);
-    }
-
-    const reader = res.body?.getReader();
-    if (!reader) {
-      throw new Error('No response body');
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let currentEventType: AgentStreamEvent['type'] = 'planning';
-    let currentDataLines: string[] = [];
-
-    const emitCurrentEvent = (): AgentStreamEvent | null => {
-      if (currentDataLines.length === 0) return null;
-      const rawData = currentDataLines.join('\n').trim();
-      currentDataLines = [];
-      if (!rawData) return null;
-      try {
-        const data = JSON.parse(rawData) as Record<string, unknown>;
-        return { type: currentEventType, data };
-      } catch {
-        return {
-          type: 'error',
-          data: { detail: 'Invalid SSE data payload', raw: rawData },
-        };
-      }
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed === '') {
-          const event = emitCurrentEvent();
-          if (event) {
-            yield event;
-          }
-          continue;
-        }
-
-        if (trimmed.startsWith('event:')) {
-          const rawType = trimmed.slice(6).trim() as AgentStreamEvent['type'];
-          currentEventType = rawType || 'planning';
-          continue;
-        }
-
-        if (trimmed.startsWith('data:')) {
-          currentDataLines.push(trimmed.slice(5).trim());
-        }
-      }
-    }
-
-    const tailEvent = emitCurrentEvent();
-    if (tailEvent) {
-      yield tailEvent;
-    }
-  },
-
-  // RAG Streaming API
+  // Unified agent-first chat streaming API (single event vocabulary, single node loop)
   askQuestionStream: async function* (
-    request: ChatRequest
-  ): AsyncGenerator<RagStreamEvent, void, unknown> {
+    request: ChatTurnRequest
+  ): AsyncGenerator<ChatStreamEvent, void, unknown> {
     const res = await fetch(`${API_BASE_URL}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -520,7 +358,7 @@ export const api = {
     });
 
     if (!res.ok) {
-      throw new Error(`RAG stream request failed: ${res.statusText}`);
+      throw new Error(`Chat stream request failed: ${res.statusText}`);
     }
 
     const reader = res.body?.getReader();
@@ -530,21 +368,21 @@ export const api = {
 
     const decoder = new TextDecoder();
     let buffer = '';
-    let currentEventType: RagStreamEvent['type'] = 'retrieval_start';
+    let currentEventType: ChatStreamEvent['type'] = 'turn_start';
     let currentDataLines: string[] = [];
 
-    const emitCurrentEvent = (): RagStreamEvent | null => {
+    const emitCurrentEvent = (): ChatStreamEvent | null => {
       if (currentDataLines.length === 0) return null;
       const rawData = currentDataLines.join('\n').trim();
       currentDataLines = [];
       if (!rawData) return null;
       try {
         const data = JSON.parse(rawData) as Record<string, unknown>;
-        return { type: currentEventType, data };
+        return { type: currentEventType, data } as ChatStreamEvent;
       } catch {
         return {
           type: 'error',
-          data: { detail: 'Invalid SSE data payload', raw: rawData },
+          data: { detail: 'Invalid SSE data payload' },
         };
       }
     };
@@ -568,8 +406,8 @@ export const api = {
         }
 
         if (trimmed.startsWith('event:')) {
-          const rawType = trimmed.slice(6).trim() as RagStreamEvent['type'];
-          currentEventType = rawType || 'retrieval_start';
+          const rawType = trimmed.slice(6).trim() as ChatStreamEvent['type'];
+          currentEventType = rawType || 'turn_start';
           continue;
         }
 

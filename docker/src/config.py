@@ -112,3 +112,74 @@ def get_code_chunk_min_size(config: Dict[str, Any] | None = None) -> int:
 def get_code_chunk_max_size(config: Dict[str, Any] | None = None) -> int:
     """超过此字符数的代码 chunk 会按行分割，默认 2000"""
     return _config_value("ingestion", "code_chunk_max_size", 2000, config)
+
+
+# ── chat 段：Agent 循环/记忆/检索调优常量。此前分散为 core/chat.py 与
+# agent/graph.py 里的 Python 字面量（CATEGORY_TOP_K、HYBRID_*_WEIGHT、
+# max_iterations=5 等），无法通过 repo_config.json 调整；现统一收进这里 ──
+
+def get_chat_max_tool_iterations(config: Dict[str, Any] | None = None) -> int:
+    """单轮对话内允许的最大工具调用轮次，默认 6"""
+    return _config_value("chat", "max_tool_iterations", 6, config)
+
+
+def get_chat_context_token_budget(config: Dict[str, Any] | None = None) -> int:
+    """喂给聊天模型的历史+系统提示词总 token 预算（近似估算），默认 12000"""
+    return _config_value("chat", "context_token_budget", 12000, config)
+
+
+def get_chat_reserved_output_tokens(config: Dict[str, Any] | None = None) -> int:
+    """从 context_token_budget 中为模型输出预留的 token 数，默认 2000"""
+    return _config_value("chat", "reserved_output_tokens", 2000, config)
+
+
+def get_chat_history_summary_trigger_messages(config: Dict[str, Any] | None = None) -> int:
+    """未摘要的消息数超过此值时后台触发一次会话摘要，默认 20"""
+    return _config_value("chat", "history_summary_trigger_messages", 20, config)
+
+
+def get_hybrid_dense_weight(config: Dict[str, Any] | None = None) -> float:
+    """混合检索中 dense 分数的权重，默认 0.6"""
+    return _config_value("chat", "hybrid_dense_weight", 0.6, config)
+
+
+def get_hybrid_sparse_weight(config: Dict[str, Any] | None = None) -> float:
+    """混合检索中 sparse(BM25) 分数的权重，默认 0.4"""
+    return _config_value("chat", "hybrid_sparse_weight", 0.4, config)
+
+
+def get_mmr_lambda(config: Dict[str, Any] | None = None) -> float:
+    """MMR 多样性选择的 lambda（1=纯相关性，0=纯多样性），默认 0.5"""
+    return _config_value("chat", "mmr_lambda", 0.5, config)
+
+
+def get_retrieval_k_multipliers(config: Dict[str, Any] | None = None) -> tuple:
+    """返回 (dense_k_multiplier, sparse_k_multiplier, max_method_k)，默认 (4, 3, 30)"""
+    cfg = config or CONFIG
+    return (
+        _config_value("chat", "dense_k_multiplier", 4, cfg),
+        _config_value("chat", "sparse_k_multiplier", 3, cfg),
+        _config_value("chat", "max_method_k", 30, cfg),
+    )
+
+
+def get_max_total_candidates(config: Dict[str, Any] | None = None) -> int:
+    """跨分类融合后保留的最大候选数，默认 50"""
+    return _config_value("chat", "max_total_candidates", 50, config)
+
+
+def get_category_top_k(config: Dict[str, Any] | None = None) -> Dict[str, int]:
+    """rag_search 每个分类的基础 top_k，默认 {"code": 20, "text": 20}"""
+    return _config_value("chat", "category_top_k", {"code": 20, "text": 20}, config)
+
+
+def should_use_hyde(config: Dict[str, Any] | None = None) -> bool:
+    """是否对 'text' 分类的 dense 查询启用 HyDE 增强，默认开启"""
+    return bool(_config_value("chat", "hyde_enabled", True, config))
+
+
+def get_web_search_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """整段透传 web_search 配置（provider/api key/allowed_domains/timeout/max_results）"""
+    cfg = config or CONFIG
+    section = cfg.get("web_search")
+    return section if isinstance(section, dict) else {}

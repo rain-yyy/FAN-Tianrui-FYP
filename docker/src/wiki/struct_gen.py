@@ -4,16 +4,16 @@ import ast
 import json
 import os
 import re
-import sys
 import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 import dotenv
-from src.config import PROJECT_ROOT, CONFIG, should_save_wiki_structure_raw_responses
+import networkx as nx
+from src.config import CONFIG, should_save_wiki_structure_raw_responses
 from src.clients import get_llm, StrOutputParser
 from src.prompts import STRUCTURE_PROMPT
-from src.ingestion.code_graph import CodeGraphBuilder
+from src.ingestion.code_graph import CodeGraphBuilder, rank_important_symbols
 from src.ingestion.community_engine import CommunityEngine
 from src.ingestion.file_processor import get_files_to_process
 
@@ -22,65 +22,29 @@ logger = logging.getLogger("app.wiki.struct_gen")
 
 dotenv.load_dotenv()
 
-REPO_MAPPER_DIR = PROJECT_ROOT / "RepoMapper"
 
-
-def _build_repo_map_context(repo_path: str, target_subdir: str = "src") -> str:
+def _build_key_symbols_context(graph: Optional[nx.DiGraph], top_n: int = 60) -> str:
     """
-    调用 RepoMapper，生成用于提示词的代码骨架摘要。
+    用 code graph 的 PageRank 排名结果，渲染成用于提示词的"关键符号"摘要。
     """
-    repo_mapper_dir = REPO_MAPPER_DIR
-    if not repo_mapper_dir.exists():
-        logger.warning(f"Repo map directory missing: {repo_mapper_dir}")
+    if graph is None:
         return ""
-
-    repo_mapper_path = str(repo_mapper_dir)
-    if repo_mapper_path not in sys.path:
-        sys.path.insert(0, repo_mapper_path)
 
     try:
-        from RepoMapper.repomap import find_src_files
-        from RepoMapper.repomap_class import RepoMap
-    except ImportError as exc:
-        logger.warning(f"Repo map dependencies missing, skip context: {exc}")
+        ranked = rank_important_symbols(graph, top_n=top_n)
+    except Exception as exc:  # noqa: BLE001 - 图退化（如无边）时 PageRank 可能报错，按现有策略吞掉
+        logger.error(f"Key symbols ranking failed: {exc}")
         return ""
 
-    repo_root = Path(repo_path).resolve()
-    search_root = repo_root / target_subdir
-    if not search_root.exists():
-        search_root = repo_root
-
-    try:
-        candidate_files = find_src_files(str(search_root))
-    except Exception as exc:  # noqa: BLE001 - 依赖库内部异常需吞掉
-        logger.error(f"Repo map file discovery failed: {exc}")
+    if not ranked:
         return ""
 
-    if not candidate_files:
-        logger.info("Repo map: no files discovered, skip context.")
-        return ""
+    lines = sorted(
+        f"{item['file_path']}:{item['start_line']}  {item['type']} {item['qualified_name']}"
+        for item in ranked
+    )
 
-    resolved_files = [str(Path(path).resolve()) for path in candidate_files]
-
-    try:
-        repo_map = RepoMap(
-            map_tokens=8192,
-            root=str(repo_root),
-            verbose=False,
-        )
-        map_content, _ = repo_map.get_repo_map(
-            chat_files=[],
-            other_files=resolved_files,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.error(f"Repo map generation failed: {exc}")
-        return ""
-
-    if not map_content:
-        logger.info("Repo map returned empty content.")
-        return ""
-
-    return map_content.strip()
+    return "Key Symbols (ranked by importance):\n" + "\n".join(lines)
 
 
 def generate_wiki_structure(
@@ -107,55 +71,65 @@ def generate_wiki_structure(
     chain = STRUCTURE_PROMPT.build() | get_llm("wiki_structure", temperature=0.1) | StrOutputParser()
     current_date = datetime.utcnow().date().isoformat()
 
-    # 2.1 准备 RepoMap 语境
-    logger.info("Building repo map context...")
-    repo_map = _build_repo_map_context(repo_path)
-    logger.info(f"Repo map context built: {len(repo_map)} characters")
-
-    # 2.2 准备有效文件列表（用于约束 LLM 输出，防止其虚构不存在的文件路径）
+    # 2.1 准备有效文件列表（用于约束 LLM 输出，防止其虚构不存在的文件路径）
     filtered_file_paths = get_files_to_process(repo_path)
     if valid_file_list is None:
         relative_paths = sorted(os.path.relpath(p, repo_path) for p in filtered_file_paths)
         valid_file_list = "\n".join(relative_paths)
 
+    # 2.2 构建代码图（社区信息与关键符号排名共用同一份图，二者互不依赖对方是否成功）
+    graph = None
+    try:
+        logger.info("Building code graph...")
+
+        builder = CodeGraphBuilder()
+        graph = builder.build_graph(repo_path, filtered_file_paths)
+
+        if code_graph_persist_path:
+            try:
+                builder.save_graph(code_graph_persist_path)
+                logger.info("Code graph saved to %s", code_graph_persist_path)
+            except OSError as cg_exc:
+                logger.warning("Failed to persist code graph: %s", cg_exc)
+    except Exception as e:
+        logger.error(f"Failed to build code graph: {e}")
+
     # 2.3 准备社区信息
     if communities_info is None:
-        try:
-            logger.info("Building code graph and communities...")
-            
-            builder = CodeGraphBuilder()
-            graph = builder.build_graph(repo_path, filtered_file_paths)
-
-            if code_graph_persist_path:
-                try:
-                    builder.save_graph(code_graph_persist_path)
-                    logger.info("Code graph saved to %s", code_graph_persist_path)
-                except OSError as cg_exc:
-                    logger.warning("Failed to persist code graph: %s", cg_exc)
-
-            engine = CommunityEngine(graph)
-            communities = engine.run_leiden()
-            summaries = engine.generate_summaries()
-            
-            # 格式化社区信息为字符串
-            comm_list = []
-            for cid, summary in summaries.items():
-                nodes = communities.get(cid, [])
-                # 只列出前几个核心文件
-                core_files = [n for n in nodes if ":" not in n][:5]
-                comm_list.append(f"Community {cid}:\n- Summary: {summary}\n- Key Files: {', '.join(core_files)}")
-            
-            communities_info = "\n\n".join(comm_list)
-            logger.info(f"Community info built: {len(communities_info)} chars")
-            if communities_persist_path:
-                try:
-                    engine.save_results(communities_persist_path)
-                    logger.info("GraphRAG communities saved to %s", communities_persist_path)
-                except OSError as persist_exc:
-                    logger.warning("Failed to persist GraphRAG communities: %s", persist_exc)
-        except Exception as e:
-            logger.error(f"Failed to build communities: {e}")
+        if graph is None:
             communities_info = "No community information available."
+        else:
+            try:
+                logger.info("Building communities...")
+
+                engine = CommunityEngine(graph)
+                communities = engine.run_leiden()
+                summaries = engine.generate_summaries()
+
+                # 格式化社区信息为字符串
+                comm_list = []
+                for cid, summary in summaries.items():
+                    nodes = communities.get(cid, [])
+                    # 只列出前几个核心文件
+                    core_files = [n for n in nodes if ":" not in n][:5]
+                    comm_list.append(f"Community {cid}:\n- Summary: {summary}\n- Key Files: {', '.join(core_files)}")
+
+                communities_info = "\n\n".join(comm_list)
+                logger.info(f"Community info built: {len(communities_info)} chars")
+                if communities_persist_path:
+                    try:
+                        engine.save_results(communities_persist_path)
+                        logger.info("GraphRAG communities saved to %s", communities_persist_path)
+                    except OSError as persist_exc:
+                        logger.warning("Failed to persist GraphRAG communities: %s", persist_exc)
+            except Exception as e:
+                logger.error(f"Failed to build communities: {e}")
+                communities_info = "No community information available."
+
+    # 2.4 准备关键符号语境（不依赖 communities_info 是否由调用方预先提供）
+    logger.info("Building key symbols context...")
+    key_symbols = _build_key_symbols_context(graph)
+    logger.info(f"Key symbols context built: {len(key_symbols)} characters")
 
     # 4. 调用 AI
     logger.info("Invoking AI model...")
@@ -163,7 +137,7 @@ def generate_wiki_structure(
         "file_tree": file_tree,
         "readme_content": readme_content,
         "current_date": current_date,
-        "repo_map": repo_map or "",
+        "key_symbols": key_symbols or "",
         "communities": communities_info or "",
         "valid_file_list": valid_file_list or "",
     })

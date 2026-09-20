@@ -394,6 +394,40 @@ class SupabaseClient:
             print(f"[Supabase] Error getting user chat history: {e}")
             return []
 
+    def get_chat_session(self, chat_id: str) -> Optional[dict]:
+        """
+        Fetch a single `chat_history` row by id (session_summary/summary_up_to_created_at
+        included). Returns None if not found or the client isn't configured.
+        """
+        if not self.client:
+            return None
+        try:
+            response = self.client.table("chat_history").select("*").eq("id", chat_id).limit(1).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            print(f"[Supabase] Error getting chat session: {e}")
+            return None
+
+    def update_chat_session_summary(self, chat_id: str, summary: str, summary_up_to_created_at: str) -> bool:
+        """
+        Persist a rolling conversation summary so history reconstruction (see
+        `src/chat/memory.py`) doesn't have to re-read/re-summarize the whole
+        session on every turn once it grows long. `summary_up_to_created_at` is
+        the `created_at` of the last message folded into `summary` (not a message
+        id — `chat_messages.id` is a uuid, so there's no numeric cutoff to use).
+        """
+        if not self.client:
+            return False
+        try:
+            self.client.table("chat_history").update({
+                "session_summary": summary,
+                "summary_up_to_created_at": summary_up_to_created_at,
+            }).eq("id", chat_id).execute()
+            return True
+        except Exception as e:
+            print(f"[Supabase] Error updating chat session summary: {e}")
+            return False
+
     def get_chat_messages(self, chat_id: str):
         """
         Get all messages for a specific chat session.
@@ -488,6 +522,7 @@ class SupabaseClient:
         try:
             data = {
                 "repo_url": repo_url,
+                "repo_name": self._repo_owner_slug(repo_url),
                 "last_updated": "now()"
             }
             

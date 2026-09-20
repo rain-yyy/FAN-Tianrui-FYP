@@ -5,22 +5,23 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { motion } from 'framer-motion';
-import { 
-  Sparkles, 
-  Bot, 
-  ChevronDown, 
-  ChevronUp, 
-  Search, 
-  GitBranch, 
-  FileCode, 
-  Map, 
-  CheckCircle2, 
+import {
+  Sparkles,
+  Bot,
+  ChevronDown,
+  ChevronUp,
+  Search,
+  GitBranch,
+  FileCode,
+  Map,
+  CheckCircle2,
   XCircle,
   TextSearch,
+  Globe,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ChatMessage, AgentTrajectoryStep, ChatMode } from '@/lib/api';
-import Mermaid from './Mermaid';
+import { ChatMessage, ToolTrajectoryStep } from '@/lib/api';
+import { getToolDescription } from '@/lib/toolDescriptions';
 import CodeViewer from './CodeViewer';
 import SourcesPanel, { parseSource } from './SourcesPanel';
 
@@ -29,9 +30,7 @@ export interface DisplayMessage extends ChatMessage {
   timestamp: Date;
   sources?: string[];
   isError?: boolean;
-  mode?: ChatMode;
-  mermaid?: string | null;
-  trajectory?: AgentTrajectoryStep[];
+  tool_trajectory?: ToolTrajectoryStep[];
   isNew?: boolean;
 }
 
@@ -41,58 +40,7 @@ const toolIcons: Record<string, React.ReactNode> = {
   'file_read': <FileCode className="w-3.5 h-3.5" />,
   'repo_map': <Map className="w-3.5 h-3.5" />,
   'grep_search': <TextSearch className="w-3.5 h-3.5" />,
-};
-
-// Mermaid wrapper with error boundary
-const MermaidWrapper = ({ chart, isStreaming }: { chart: string; isStreaming?: boolean }) => {
-  const [hasError, setHasError] = React.useState(false);
-
-  // Reset error state when chart changes
-  React.useEffect(() => {
-    setHasError(false);
-  }, [chart]);
-
-  if (hasError) {
-    return (
-      <div className="text-xs text-stone-600 p-2 bg-stone-100 rounded border border-stone-200">
-        Failed to load diagram
-      </div>
-    );
-  }
-
-  // Wrap in error boundary
-  try {
-    return <Mermaid chart={chart} isStreaming={isStreaming} />;
-  } catch {
-    setHasError(true);
-    return null;
-  }
-};
-
-const getToolDescription = (tool: string, args?: Record<string, unknown>): string => {
-  const descriptions: Record<string, (args?: Record<string, unknown>) => string> = {
-    'rag_search': (a) => a?.query ? `Search docs: ${String(a.query).slice(0, 30)}...` : 'Search project docs',
-    'code_graph': (a) => {
-      const op = String(a?.operation || '');
-      const symbol = String(a?.symbol_name || a?.file_path || '').split('/').pop();
-      if (op === 'find_definition' && symbol) return `Find definition: ${symbol}`;
-      if (op === 'find_callers' && symbol) return `Find callers: ${symbol}`;
-      if (op === 'find_callees' && symbol) return `Find callees: ${symbol}`;
-      if (op === 'get_all_symbols') return 'List all symbols';
-      return 'Analyze code structure';
-    },
-    'file_read': (a) => {
-      const path = String(a?.file_path || '');
-      const fileName = path.split('/').pop() || path;
-      return `Read file: ${fileName}`;
-    },
-    'repo_map': () => 'Scan repository layout',
-    'grep_search': (a) => {
-      const p = String(a?.pattern || '').slice(0, 40);
-      return p ? `Grep: ${p}${p.length >= 40 ? '…' : ''}` : 'Lexical repo search';
-    },
-  };
-  return descriptions[tool]?.(args) || `Run ${tool}`;
+  'web_search': <Globe className="w-3.5 h-3.5" />,
 };
 
 const StreamingMarkdown = ({ content, isNew }: { content: string, isNew?: boolean }) => {
@@ -132,13 +80,13 @@ const StreamingMarkdown = ({ content, isNew }: { content: string, isNew?: boolea
   );
 };
 
-const TrajectoryDisplay = ({ trajectory }: { trajectory: AgentTrajectoryStep[] }) => {
+const TrajectoryDisplay = ({ trajectory }: { trajectory: ToolTrajectoryStep[] }) => {
   const [expanded, setExpanded] = useState(false);
-  
+
   if (!trajectory || trajectory.length === 0) return null;
-  
-  const successCount = trajectory.filter(s => s.success).length;
-  
+
+  const successCount = trajectory.filter(s => s.status === 'success').length;
+
   return (
     <div className="mt-4 border border-stone-200 rounded-xl overflow-hidden bg-stone-50">
       <button
@@ -157,22 +105,22 @@ const TrajectoryDisplay = ({ trajectory }: { trajectory: AgentTrajectoryStep[] }
         </div>
         {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
       </button>
-      
+
       {expanded && (
         <div className="px-4 pb-4 space-y-2">
           {trajectory.map((step, idx) => (
-            <div 
+            <div
               key={idx}
               className={cn(
                 "flex items-center gap-3 p-3 rounded-lg transition-colors",
-                step.success 
-                  ? "bg-white" 
+                step.status === 'success'
+                  ? "bg-white"
                   : "bg-rose-50"
               )}
             >
               <div className={cn(
                 "w-7 h-7 rounded-lg flex items-center justify-center shrink-0",
-                step.success ? "bg-teal-100 text-teal-900" : "bg-rose-100 text-rose-800"
+                step.status === 'success' ? "bg-teal-100 text-teal-900" : "bg-rose-100 text-rose-800"
               )}>
                 {toolIcons[step.tool] || <Sparkles className="w-3.5 h-3.5" />}
               </div>
@@ -180,7 +128,7 @@ const TrajectoryDisplay = ({ trajectory }: { trajectory: AgentTrajectoryStep[] }
                 <span className="text-sm text-stone-700">
                   {getToolDescription(step.tool, step.arguments)}
                 </span>
-                {step.success ? (
+                {step.status === 'success' ? (
                   <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
                 ) : (
                   <XCircle className="w-4 h-4 text-red-400 shrink-0" />
@@ -202,7 +150,6 @@ export interface MessageItemProps {
 
 export const MessageItem = React.memo(({ message, repoUrl }: MessageItemProps) => {
   const isUser = message.role === 'user';
-  const isAgentMode = message.mode === 'agent';
   const [isCodeViewerOpen, setIsCodeViewerOpen] = useState(false);
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
 
@@ -229,17 +176,8 @@ export const MessageItem = React.memo(({ message, repoUrl }: MessageItemProps) =
 
       <div className={cn("flex gap-4 group", isUser ? "flex-row-reverse" : "flex-row")}>
       {!isUser && (
-        <div className={cn(
-          "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-1 shadow-sm",
-          isAgentMode
-            ? "bg-teal-50 ring-1 ring-teal-200"
-            : "bg-sky-50 ring-1 ring-sky-200"
-        )}>
-          {isAgentMode ? (
-            <Bot className="w-4 h-4 text-teal-700" />
-          ) : (
-            <Sparkles className="w-4 h-4 text-sky-700" />
-          )}
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-1 shadow-sm bg-teal-50 ring-1 ring-teal-200">
+          <Bot className="w-4 h-4 text-teal-700" />
         </div>
       )}
       
@@ -249,17 +187,12 @@ export const MessageItem = React.memo(({ message, repoUrl }: MessageItemProps) =
       )}>
         {!isUser && (
           <div className="flex items-center gap-2 mb-1.5 ml-1">
-            <span className={cn(
-              "text-[13px] font-medium tracking-wide", 
-              isAgentMode ? "text-teal-700" : "text-sky-700"
-            )}>
-              {isAgentMode ? "Agent" : "Assistant"}
+            <span className="text-[13px] font-medium tracking-wide text-teal-700">
+              Agent
             </span>
-            {isAgentMode && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-teal-100 text-teal-900 border border-teal-200 font-mono tracking-wider">
-                AGENT
-              </span>
-            )}
+            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-teal-100 text-teal-900 border border-teal-200 font-mono tracking-wider">
+              AGENT
+            </span>
             <span className="text-[11px] text-muted-foreground/40">
               {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
@@ -278,18 +211,8 @@ export const MessageItem = React.memo(({ message, repoUrl }: MessageItemProps) =
           )}
         </div>
         
-        {!isUser && message.mermaid && (
-          <div className="mt-6 p-4 rounded-2xl bg-stone-50 border border-stone-200">
-            <div className="text-[11px] text-stone-500 mb-3 font-mono uppercase tracking-widest flex items-center gap-2">
-              <Map className="w-3.5 h-3.5" />
-              Architecture
-            </div>
-            <MermaidWrapper chart={message.mermaid} isStreaming={message.isNew} />
-          </div>
-        )}
-        
-        {!isUser && message.trajectory && message.trajectory.length > 0 && (
-          <TrajectoryDisplay trajectory={message.trajectory} />
+        {!isUser && message.tool_trajectory && message.tool_trajectory.length > 0 && (
+          <TrajectoryDisplay trajectory={message.tool_trajectory} />
         )}
 
         {!isUser && message.sources && message.sources.length > 0 && (

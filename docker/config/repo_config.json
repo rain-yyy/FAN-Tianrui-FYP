@@ -2,19 +2,30 @@
     "ai_models": {
       "provider": "openrouter",
       "models": {
-        "hyde_generation": "google/gemini-2.5-flash",
-        "rag_answer": "qwen/qwen3-235b-a22b-2507",
-        "wiki_structure": "openai/gpt-5.4",
-        "wiki_content": "qwen/qwen3.5-flash-02-23",
-        "community_summary": "google/gemini-2.5-flash",
-        "chat_title": "google/gemini-2.5-flash",
-        "agent_planner": "google/gemini-2.5-flash",
-        "agent_tool_router": "google/gemini-2.5-flash",
-        "agent_evaluator": "google/gemini-2.5-flash",
-        "agent_synthesizer": "qwen/qwen3-235b-a22b-2507",
-        "agent_session_compressor": "google/gemini-2.5-flash",
+        "hyde_generation": "google/gemini-3.1-flash-lite",
+        "wiki_structure": "anthropic/claude-sonnet-4.5",
+        "wiki_content": "deepseek/deepseek-v3.2",
+        "community_summary": "google/gemini-3.1-flash-lite",
+        "chat_title": "qwen/qwen3.7-flash",
+        "chat_agent": "openai/gpt-5.1",
+        "chat_session_compressor": "google/gemini-3.5-flash-lite",
         "embedding": "qwen/qwen3-embedding-8b"
       }
+    },
+    "chat": {
+      "max_tool_iterations": 6,
+      "context_token_budget": 12000,
+      "reserved_output_tokens": 2000,
+      "history_summary_trigger_messages": 20,
+      "hybrid_dense_weight": 0.6,
+      "hybrid_sparse_weight": 0.4,
+      "mmr_lambda": 0.5,
+      "dense_k_multiplier": 4,
+      "sparse_k_multiplier": 3,
+      "max_method_k": 30,
+      "max_total_candidates": 50,
+      "category_top_k": { "code": 20, "text": 20 },
+      "hyde_enabled": true
     },
     "wiki_generation": {
       "content_concurrency": 3,

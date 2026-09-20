@@ -1,3 +1,9 @@
+> **状态：已完成（存档）。** 本迁移已全部落地——`docker/src/ingestion/vector_store.py` 现在直接写 Qdrant，`docker/requirements.txt` 已移除 `faiss-cpu`、加入 `qdrant-client`/`fastembed`，磁盘上不再产生新的 `index.faiss`/`index.pkl`。本文档现在只作为"为什么现在是这个样子"的历史记录保留，不再是待办事项列表——下面所有"需要改动的文件"章节描述的都已经是过去时。
+>
+> 注意：本文档第 86 行提到的 `Document/AGENT_CHAT_ARCHITECTURE.md`、`Document/API_DOCUMENTATION.md` 中"检索后端已换成 Qdrant"的同步更新——`API_DOCUMENTATION.md` 已重新创建并反映 Qdrant 现状；`AGENT_CHAT_ARCHITECTURE.md` 描述的旧 Agent 状态机已在后续一次（与本次 Qdrant 迁移无关、目前尚未提交的）聊天后端重写中被整体删除替换，不再需要恢复该文档。
+>
+> 当前最新的后端 API / 数据库参考见 `Document/API_DOCUMENTATION.md`。
+
 # 迁移 RAG 向量库到 Qdrant Cloud
 
 ## Context

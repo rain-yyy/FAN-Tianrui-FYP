@@ -107,9 +107,9 @@ STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
             - **Architecture/Services**: Include enough files to explain boundaries, orchestration, request handling, core services, persistence, and major cross-module interactions.
             - **Feature Areas**: Prefer one broad section per major feature area, but pack it with the key implementation files across UI entry points, service layer, shared state, dialogs/forms, and rendering/output paths when relevant.
             - **Data Models**: Include schema, DTO, sample data, and persistence definitions when they collectively explain the domain model.
-            - **Repo Map Usage**: Use the provided Repo Map to identify which files contain the most important classes and function definitions. Cross-reference with <VALID_FILE_LIST> to ensure paths are valid.
+            - **Key Symbols Usage**: Use the provided Key Symbols list (PageRank-ranked classes and function definitions from the repository's code graph) to identify which files contain the most important definitions. Cross-reference with <VALID_FILE_LIST> to ensure paths are valid.
             - **Community Logic (GraphRAG)**: Use the <COMMUNITIES> section to identify major subsystems, but merge or discard clusters that are low-value, repetitive, or implementation-noisy.
-            - **Sparse README Handling**: If the README is short or missing, rely on the file tree, communities, repo map, and naming conventions to infer the highest-value documentation structure.
+            - **Sparse README Handling**: If the README is short or missing, rely on the file tree, communities, key symbols, and naming conventions to infer the highest-value documentation structure.
             - **Source Preference**: Prefer source code and architecture-defining config over prose docs whenever possible. Use docs as supplements, not substitutes, unless the docs are the canonical implementation guide for setup or operations.
             - **End-to-End Coverage**: For a core product capability, include files from multiple layers when available, such as route/page entry points, service or API layer, schemas/contracts, state management, and rendering/export/integration files.
 
@@ -146,54 +146,14 @@ STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
             {readme_content}
             </README>
 
-            <REPO_MAP>
-            {repo_map}
-            </REPO_MAP>
+            <KEY_SYMBOLS>
+            {key_symbols}
+            </KEY_SYMBOLS>
 
             <COMMUNITIES>
             {communities}
             </COMMUNITIES>
           """,
-)
-
-
-RAG_CHAT_PROMPT: PromptDefinition = PromptDefinition(
-    name="rag-chat",
-    system="""
-You are a senior RAG (Retrieval-Augmented Generation) assistant helping developers understand this codebase.
-
-## Knowledge Base Architecture
-Our knowledge base uses a categorical storage strategy:
-- **Code Files (code)**: Store actual source code, serving as the authoritative source of truth for system behavior. When analyzing, focus on logic flow, side effects, and edge cases.
-- **Text Documents (text)**: Store design documents, READMEs, comments, and other descriptive content, providing design intent and usage guidelines.
-
-During retrieval, relevant snippets are extracted from both categories and tagged with a `type` field indicating their source classification.
-
-## Response Principles
-- **Strictly grounded in retrieved content**: Every statement must derive from the provided context; do not speculate.
-- **Prioritize code evidence**: When code and documentation conflict, defer to the code implementation.
-- **Integrate multi-source information**: Synthesize snippets from different types into a coherent, complete answer.
-- **Acknowledge knowledge boundaries**: If the context is insufficient to answer the question, clearly state what information is missing.
-- **Professional technical communication**: Use clear, concise technical language appropriate for developer audiences.
-
-## Response Requirements
-Provide the best possible answer directly, without listing evidence sources or follow-up suggestions. Focus on:
-- Accurately answering the user's question
-- Providing actionable technical insights
-- Highlighting potential risks or considerations (when applicable)
-"""
-    + OUTPUT_LANGUAGE_EN,
-    human="""
-<RETRIEVED_CONTEXT>
-{context}
-</RETRIEVED_CONTEXT>
-
-<QUESTION>
-{question}
-</QUESTION>
-
-Please provide your answer directly.
-""",
 )
 
 
@@ -220,51 +180,6 @@ Write the documentation directly, as if it exists in the codebase.
 """,
 )
 
-
-RAG_CHAT_WITH_HISTORY_PROMPT: PromptDefinition = PromptDefinition(
-    name="rag-chat-with-history",
-    system="""
-You are a senior RAG (Retrieval-Augmented Generation) assistant helping developers understand this codebase.
-
-## Knowledge Base Architecture
-Our knowledge base uses a categorical storage strategy:
-- **Code Files (code)**: Store actual source code, serving as the authoritative source of truth for system behavior. When analyzing, focus on logic flow, side effects, and edge cases.
-- **Text Documents (text)**: Store design documents, READMEs, comments, and other descriptive content, providing design intent and usage guidelines.
-
-During retrieval, relevant snippets are extracted from both categories and tagged with a `type` field indicating their source classification.
-
-## Response Principles
-- **Strictly grounded in retrieved content**: Every statement must derive from the provided context; do not speculate.
-- **Prioritize code evidence**: When code and documentation conflict, defer to the code implementation.
-- **Integrate multi-source information**: Synthesize snippets from different types into a coherent, complete answer.
-- **Acknowledge knowledge boundaries**: If the context is insufficient to answer the question, clearly state what information is missing.
-- **Professional technical communication**: Use clear, concise technical language appropriate for developer audiences.
-- **Context-aware responses**: Consider the conversation history when formulating your answer. Build upon previous exchanges naturally.
-
-## Response Requirements
-Provide the best possible answer directly, without listing evidence sources or follow-up suggestions. Focus on:
-- Accurately answering the user's question in the context of the ongoing conversation
-- Providing actionable technical insights
-- Referencing previous discussion points when relevant
-- Highlighting potential risks or considerations (when applicable)
-"""
-    + OUTPUT_LANGUAGE_EN,
-    human="""
-<RETRIEVED_CONTEXT>
-{context}
-</RETRIEVED_CONTEXT>
-
-<CONVERSATION_HISTORY>
-{conversation_history}
-</CONVERSATION_HISTORY>
-
-<CURRENT_QUESTION>
-{question}
-</CURRENT_QUESTION>
-
-Please provide your answer directly, considering the conversation context.
-""",
-)
 
 WIKI_SECTION_PROMPT: PromptDefinition = PromptDefinition(
     name="wiki-section-writer",
@@ -311,10 +226,8 @@ Return only the JSON string, with no extra commentary.
 
 PROMPT_REGISTRY: Dict[str, PromptDefinition] = {
     STRUCTURE_PROMPT.name: STRUCTURE_PROMPT,
-    RAG_CHAT_PROMPT.name: RAG_CHAT_PROMPT,
     WIKI_SECTION_PROMPT.name: WIKI_SECTION_PROMPT,
     HYDE_PROMPT.name: HYDE_PROMPT,
-    RAG_CHAT_WITH_HISTORY_PROMPT.name: RAG_CHAT_WITH_HISTORY_PROMPT,
 }
 
 
@@ -324,14 +237,6 @@ def get_structure_prompt() -> ChatPromptTemplate:
     """
 
     return STRUCTURE_PROMPT.build()
-
-
-def get_rag_chat_prompt() -> ChatPromptTemplate:
-    """
-    获取用于 RAG 问答的提示词模板。
-    """
-
-    return RAG_CHAT_PROMPT.build()
 
 
 def get_wiki_section_prompt() -> ChatPromptTemplate:
@@ -350,27 +255,15 @@ def get_hyde_prompt() -> ChatPromptTemplate:
     return HYDE_PROMPT.build()
 
 
-def get_rag_chat_with_history_prompt() -> ChatPromptTemplate:
-    """
-    获取用于带对话历史的 RAG 问答的提示词模板。
-    """
-
-    return RAG_CHAT_WITH_HISTORY_PROMPT.build()
-
-
 __all__ = [
     "PromptDefinition",
     "OUTPUT_LANGUAGE_EN",
     "STRUCTURE_PROMPT",
-    "RAG_CHAT_PROMPT",
     "WIKI_SECTION_PROMPT",
     "HYDE_PROMPT",
-    "RAG_CHAT_WITH_HISTORY_PROMPT",
     "PROMPT_REGISTRY",
     "get_structure_prompt",
-    "get_rag_chat_prompt",
     "get_wiki_section_prompt",
     "get_hyde_prompt",
-    "get_rag_chat_with_history_prompt",
 ]
 

@@ -20,8 +20,8 @@ export default function HistoryPage() {
     if (!user) return;
     setIsLoading(true);
     try {
-      const taskResult = await api.getTasks(user.id);
-      setTasks(taskResult.tasks);
+      const taskList = await api.getTasks(user.id);
+      setTasks(taskList);
     } finally {
       setIsLoading(false);
     }

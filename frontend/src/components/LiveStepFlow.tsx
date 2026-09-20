@@ -2,33 +2,31 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Search, 
-  GitBranch, 
-  FileCode, 
-  Map, 
+import {
+  Search,
+  GitBranch,
+  FileCode,
+  Map,
   Loader2,
   CheckCircle2,
   Brain,
   Sparkles,
-  Database,
-  FileSearch,
-  Zap,
   TextSearch,
+  Globe,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { LiveToolStep } from '@/lib/api';
 import { t } from '@/lib/i18n';
 
 export interface LiveStep {
   id: string;
-  type: 'planning' | 'tool' | 'retrieval' | 'evaluation' | 'synthesis' | 'hyde';
+  type: 'iteration' | 'tool';
   status: 'pending' | 'running' | 'done' | 'error';
   title: string;
   description?: string;
   details?: string;
   elapsed_ms?: number;
-  tool?: LiveToolStep;
+  /** Tool identifier (e.g. "rag_search"), used only to pick an icon. */
+  toolName?: string;
 }
 
 interface LiveStepFlowProps {
@@ -39,21 +37,18 @@ interface LiveStepFlowProps {
 }
 
 const stepIcons: Record<string, React.ReactNode> = {
-  planning: <Brain className="w-4 h-4" />,
-  retrieval: <Database className="w-4 h-4" />,
-  hyde: <Sparkles className="w-4 h-4" />,
-  evaluation: <Zap className="w-4 h-4" />,
-  synthesis: <FileSearch className="w-4 h-4" />,
+  iteration: <Brain className="w-4 h-4" />,
   rag_search: <Search className="w-4 h-4" />,
   code_graph: <GitBranch className="w-4 h-4" />,
   file_read: <FileCode className="w-4 h-4" />,
   repo_map: <Map className="w-4 h-4" />,
   grep_search: <TextSearch className="w-4 h-4" />,
+  web_search: <Globe className="w-4 h-4" />,
 };
 
 const StepItem = ({ step, isLast }: { step: LiveStep; isLast: boolean }) => {
-  const icon = step.tool 
-    ? stepIcons[step.tool.tool] || <Sparkles className="w-4 h-4" />
+  const icon = step.toolName
+    ? stepIcons[step.toolName] || <Sparkles className="w-4 h-4" />
     : stepIcons[step.type] || <Sparkles className="w-4 h-4" />;
 
   const statusColors = {

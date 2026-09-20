@@ -25,15 +25,15 @@ This is a Next.js 16 (App Router) app, but the App Router is used only as a **st
 
 ### Backend integration
 
-- `src/lib/api.ts` is the single client for the FastAPI backend (see `../docker/scripts/api.py` in the monorepo). It covers wiki generation tasks (`/generate`, `/task/:id`, `/tasks`, `/dashboard/repos`), chat (`/chat`, `/chat/stream` SSE, `/chat/history`, `/chat/messages/:id`), and "Agent mode" chat (`/agent/chat`, `/agent/chat/stream` SSE) which returns a tool-call trajectory (`AgentTrajectoryStep`) in addition to the answer.
+- `src/lib/api.ts` is the single client for the FastAPI backend (see `../docker/scripts/api.py` in the monorepo). It covers wiki generation tasks (`/generate`, `/task/:id`, `/tasks`, `/dashboard/repos`) and the single unified, agent-first chat endpoint (`/chat`, `/chat/stream` SSE, `/chat/history`, `/chat/messages/:id`) — there is no separate "RAG mode" vs. "Agent mode" split; `/chat`'s `ChatTurnResponse` returns a tool-call trajectory (`ToolTrajectoryStep[]`, field `tool_trajectory`) alongside the answer, and `/chat/stream` emits it incrementally via `turn_start`/`iteration_start`/`tool_call_start`/`tool_call_result`/`answer_token`/`answer_done`/`complete`/`error` events.
 - **`API_BASE_URL` in `src/lib/api.ts` is currently hardcoded to `http://localhost:8000`** (the `NEXT_PUBLIC_API_URL` env read is commented out). When working against a deployed backend, check this constant first.
-- The two SSE stream parsers (`askQuestionStream`, `askAgentQuestionStream`) are hand-rolled `event:`/`data:` line parsers, not `EventSource` — follow the same pattern if adding another streaming endpoint.
+- The SSE stream parser (`askQuestionStream`) is a hand-rolled `event:`/`data:` line parser, not `EventSource` — follow the same pattern if adding another streaming endpoint.
 - `normalizeRepoUrl()` in `api.ts` must stay in sync with the backend's `_normalize_repo_url` — it's how the frontend matches a pasted GitHub URL to an already-indexed repo.
 
 ### Wiki viewer / chat
 
 - `WikiViewer` (`src/components/WikiViewer.tsx`) fetches a wiki structure JSON and per-section content JSON (from R2/CDN URLs returned by the task status, not from the API base) and renders Markdown + Mermaid diagrams, with an in-memory TTL cache (`contentCache`) keyed by content URL.
-- `ChatInterface` (`src/components/ChatInterface.tsx`) implements the chat/agent panel embedded in the wiki view: mode toggle between plain RAG chat and Agent mode, chat history sidebar, streaming answer rendering (`MessageItem`), source citations (`SourcesPanel`, `CodeViewer`), and live tool-call display for agent mode (`LiveStepFlow`). It locally replicates the backend's chat-title generation (`generateChatPreview`) to avoid an extra round trip.
+- `ChatInterface` (`src/components/ChatInterface.tsx`) implements the single chat/agent panel embedded in the wiki view: chat history sidebar, streaming answer rendering (`MessageItem`), source citations (`SourcesPanel`, `CodeViewer`), and a live tool-call/iteration display (`LiveStepFlow`) driven by the unified SSE event vocabulary — there is no mode toggle. It locally replicates the backend's chat-title generation (`generateChatPreview`) to avoid an extra round trip.
 - `src/lib/i18n.ts` is a flat English string table (`t()` lookup) — there is no locale switching, it exists purely to keep UI copy out of components.
 
 ### Path aliases

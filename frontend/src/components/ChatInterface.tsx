@@ -13,11 +13,12 @@ import {
   Trash2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { api, normalizeRepoUrl, ChatMessage, AgentChatResponse, ChatMode, ChatHistoryItem, AgentTrajectoryStep } from '@/lib/api';
+import { api, normalizeRepoUrl, ChatHistoryItem, ToolTrajectoryStep } from '@/lib/api';
+import { useChatStream } from '@/hooks/useChatStream';
 import { MessageItem, DisplayMessage } from './MessageItem';
 import SourcesPanel, { parseSource } from './SourcesPanel';
 import CodeViewer from './CodeViewer';
-import { LiveStepFlow, LiveStep } from './LiveStepFlow';
+import { LiveStepFlow } from './LiveStepFlow';
 import { t } from '@/lib/i18n';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -70,12 +71,8 @@ export default function ChatInterface({
     setCurrentRepoUrl(repoUrl);
   }, [repoUrl]);
   const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadingStatus, setLoadingStatus] = useState<string>('');
+  const { isStreaming, liveSteps, streamingAnswer, sendMessage } = useChatStream();
   const [chatId, setChatId] = useState<string | undefined>(undefined);
-  const [liveAgentLogs, setLiveAgentLogs] = useState<string[]>([]);
-  const [liveSteps, setLiveSteps] = useState<LiveStep[]>([]);
-  const [streamingAnswer, setStreamingAnswer] = useState<string>('');
   const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -169,10 +166,8 @@ export default function ChatInterface({
             role: msg.role,
             content: msg.content,
             timestamp: new Date(msg.created_at),
-            mode: (meta.mode as ChatMode) || 'rag',
             sources: (meta.sources as string[]) || [],
-            mermaid: (meta.mermaid as string) || null,
-            trajectory: (meta.trajectory as unknown as AgentTrajectoryStep[]) || [],
+            tool_trajectory: (meta.tool_trajectory as ToolTrajectoryStep[]) || [],
           };
         });
         setMessages(displayMessages);
@@ -219,10 +214,8 @@ export default function ChatInterface({
           role: msg.role,
           content: msg.content,
           timestamp: new Date(msg.created_at),
-          mode: (meta.mode as ChatMode) || 'rag',
           sources: (meta.sources as string[]) || [],
-          mermaid: (meta.mermaid as string) || null,
-          trajectory: (meta.trajectory as unknown as AgentTrajectoryStep[]) || [],
+          tool_trajectory: (meta.tool_trajectory as ToolTrajectoryStep[]) || [],
         };
       });
       setMessages(displayMessages);
@@ -248,25 +241,16 @@ export default function ChatInterface({
 
   const generateId = () => `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-  const buildConversationHistory = (): ChatMessage[] => {
-    return messages
-      .filter(msg => !msg.isError)
-      .map(msg => ({
-        role: msg.role,
-        content: msg.content,
-      }));
-  };
-
   const handleSendMessage = async () => {
     const question = inputValue.trim();
-    if (!question || isLoading) return;
+    if (!question || isStreaming) return;
 
     if (mode === 'closed') {
       setMode('open');
     }
 
     setInputValue('');
-    
+
     if (fullViewInputRef.current) fullViewInputRef.current.style.height = 'auto';
 
     const userMessage: DisplayMessage = {
@@ -274,252 +258,58 @@ export default function ChatInterface({
       role: 'user',
       content: question,
       timestamp: new Date(),
-      mode: 'agent',
     };
     setMessages(prev => [...prev, userMessage]);
 
-    setIsLoading(true);
-    setLiveAgentLogs([]);
-    setLiveSteps([]);
-    setStreamingAnswer('');
-    setLoadingStatus(t('analyzingStatus'));
-
-    // Helper to add a live step
-    const addStep = (step: LiveStep) => {
-      setLiveSteps(prev => {
-        const existing = prev.find(s => s.id === step.id);
-        if (existing) {
-          return prev.map(s => s.id === step.id ? step : s);
-        }
-        return [...prev, step];
-      });
-    };
-
-    // Helper to update step status
-    const updateStep = (id: string, updates: Partial<LiveStep>) => {
-      setLiveSteps(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
-    };
-
     try {
-      // Agent mode (streaming with detailed steps)
-      let stepCounter = 0;
+      const result = await sendMessage({
+        user_id: userId,
+        question,
+        repo_url: repoUrl,
+        chat_id: chatId,
+        current_page_context: currentPageContext,
+      });
 
-      addStep({
-          id: 'planning',
-          type: 'planning',
-          status: 'running',
-          title: t('analyzingIntent'),
-          description: t('analyzingIntentDesc'),
-        });
+      const isNewSession = !chatId;
+      setChatId(result.chatId);
 
-        let finalResponse: AgentChatResponse | null = null;
-        
-        for await (const event of api.askAgentQuestionStream({
+      // Optimistically add the new session to the history sidebar without
+      // refetching the full list — the server already persisted it.
+      if (isNewSession) {
+        const title = generateChatPreview(question);
+        setChatHistory(prev => [{
+          id: result.chatId,
+          chat_id: result.chatId,
           user_id: userId,
-          question,
           repo_url: repoUrl,
-          chat_id: chatId,
-          conversation_history: buildConversationHistory(),
-          current_page_context: currentPageContext,
-        })) {
-          if (event.type === 'planning') {
-            const status = String(event.data.status || '');
-            const intent = String(event.data.intent || '');
-            const entities = (event.data.entities as string[]) || [];
-            
-            if (status === 'planned' || status === 'direct_answer') {
-              updateStep('planning', {
-                status: 'done',
-                title: t('analysisDone'),
-                description: intent ? `${t('intentLabel')}: ${intent}` : undefined,
-                details: entities.length > 0 ? `${t('keyEntities')}: ${entities.slice(0, 3).join(', ')}` : undefined,
-              });
-            } else if (status === 'analyzing') {
-              updateStep('planning', {
-                description: t('understandingQuestion'),
-              });
-            }
-            continue;
-          }
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          title,
+        } as ChatHistoryItem, ...prev]);
+      }
 
-          if (event.type === 'tool_call') {
-            const status = String(event.data.status || '');
-            const iteration = Number(event.data.iteration || 1);
-            const tools = (event.data.tools as Array<{ tool: string; description?: string; query?: string; pattern?: string; file_path?: string; symbol_name?: string; operation?: string }>)|| [];
-            
-            if (status === 'start') {
-              // Add new steps for each tool
-              for (const toolInfo of tools) {
-                stepCounter++;
-                const stepId = `tool_${iteration}_${stepCounter}`;
-                addStep({
-                  id: stepId,
-                  type: 'tool',
-                  status: 'running',
-                  title: toolInfo.description || toolInfo.tool,
-                  description: toolInfo.query || toolInfo.pattern || toolInfo.file_path || toolInfo.symbol_name || undefined,
-                  tool: {
-                    tool: toolInfo.tool,
-                    description: toolInfo.description || '',
-                    query: toolInfo.query,
-                    pattern: toolInfo.pattern,
-                    file_path: toolInfo.file_path,
-                    symbol_name: toolInfo.symbol_name,
-                    operation: toolInfo.operation,
-                    status: 'running',
-                  },
-                });
-              }
-            } else if (status === 'done') {
-              const elapsedMs = Number(event.data.elapsed_ms || 0);
-              const results = (event.data.results as Array<{
-                tool: string;
-                success: boolean;
-                duration_ms?: number;
-                metrics?: Record<string, unknown>;
-              }>) || [];
-              
-              // Update all running tool steps to done
-              setLiveSteps(prev => prev.map(s => {
-                if (s.type === 'tool' && s.status === 'running') {
-                  const result = results.find(r => s.tool?.tool === r.tool);
-                  const perToolMs = typeof result?.duration_ms === 'number' ? result.duration_ms : elapsedMs;
-                  return {
-                    ...s,
-                    status: 'done' as const,
-                    elapsed_ms: perToolMs,
-                    tool: s.tool ? {
-                      ...s.tool,
-                      status: 'done' as const,
-                      success: result?.success ?? true,
-                      elapsed_ms: perToolMs,
-                      metrics: result?.metrics,
-                    } : undefined,
-                  };
-                }
-                return s;
-              }));
-            }
-            continue;
-          }
-
-          if (event.type === 'evaluation') {
-            const status = String(event.data.status || '');
-            const iteration = Number(event.data.iteration || 1);
-            
-            if (status === 'start') {
-              addStep({
-                id: `eval_${iteration}`,
-                type: 'evaluation',
-                status: 'running',
-                title: t('evaluatingInfo'),
-                description: t('evaluatingDesc'),
-              });
-            } else if (status === 'done') {
-              const isSufficient = Boolean(event.data.is_sufficient);
-              const confidence = String(event.data.confidence_level || '');
-              const missingCount = Number(event.data.missing_count || 0);
-              
-              updateStep(`eval_${iteration}`, {
-                status: 'done',
-                title: isSufficient ? t('infoSufficient') : t('needMoreInfo'),
-                description: confidence ? `${t('confidenceLabel')}: ${confidence}` : undefined,
-                details: missingCount > 0 ? t('missingItems', { n: missingCount }) : undefined,
-              });
-            }
-            continue;
-          }
-
-          if (event.type === 'synthesis') {
-            const status = String(event.data.status || '');
-            
-            if (status === 'start') {
-              addStep({
-                id: 'synthesis',
-                type: 'synthesis',
-                status: 'running',
-                title: t('synthesisingAnswer'),
-                description: t('synthesisingDesc'),
-              });
-            } else if (status === 'done') {
-              updateStep('synthesis', {
-                status: 'done',
-                title: t('answerDone'),
-              });
-            }
-            continue;
-          }
-
-          if (event.type === 'answer_delta') {
-            const delta = String(event.data.delta || '');
-            setStreamingAnswer(prev => prev + delta);
-            continue;
-          }
-
-          if (event.type === 'error') {
-            const errorDetail = String(event.data.error || event.data.detail || 'Agent stream failed');
-            throw new Error(errorDetail);
-          }
-
-          if (event.type === 'complete') {
-            finalResponse = event.data as unknown as AgentChatResponse;
-          }
-        }
-
-        if (!finalResponse) {
-          throw new Error(t('agentNoResult'));
-        }
-
-        const newChatId = finalResponse.chat_id;
-        const isNewSession = !chatId;
-        setChatId(newChatId);
-
-        // Optimistically add the new session to the history sidebar without
-        // refetching the full list — the server already persisted it.
-        if (isNewSession) {
-          const title = generateChatPreview(question);
-          setChatHistory(prev => [{
-            id: newChatId,
-            chat_id: newChatId,
-            user_id: userId,
-            repo_url: repoUrl,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            title,
-          } as ChatHistoryItem, ...prev]);
-        }
-
-        const assistantMessage: DisplayMessage = {
-          id: generateId(),
-          role: 'assistant',
-          content: finalResponse.answer,
-          timestamp: new Date(),
-          sources: finalResponse.sources,
-          mode: 'agent',
-          mermaid: finalResponse.mermaid,
-          trajectory: finalResponse.trajectory,
-          isNew: false, // Don't use typewriter effect since we already streamed
-        };
-        setMessages(prev => [...prev, assistantMessage]);
+      const assistantMessage: DisplayMessage = {
+        id: generateId(),
+        role: 'assistant',
+        content: result.answer,
+        timestamp: new Date(),
+        sources: result.sources,
+        tool_trajectory: result.trajectory,
+        isNew: false, // Don't use typewriter effect since we already streamed
+      };
+      setMessages(prev => [...prev, assistantMessage]);
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to send message';
-      
+
       const errorDisplayMessage: DisplayMessage = {
         id: generateId(),
         role: 'assistant',
         content: errorMessage,
         timestamp: new Date(),
         isError: true,
-        mode: 'agent',
       };
       setMessages(prev => [...prev, errorDisplayMessage]);
-    } finally {
-      setIsLoading(false);
-      setLoadingStatus('');
-      setLiveAgentLogs([]);
-      setLiveSteps([]);
-      setStreamingAnswer('');
     }
   };
 
@@ -723,7 +513,7 @@ export default function ChatInterface({
                       <p className="text-sm text-stone-600">{t('loadingChat')}</p>
                     </div>
                   )}
-                  {messages.length === 0 && !isLoading && !isChatLoading && (
+                  {messages.length === 0 && !isStreaming && !isChatLoading && (
                     <div className="flex flex-col items-center justify-center h-full text-center px-4">
                       <div className="w-16 h-16 rounded-3xl bg-teal-50 border border-teal-100 flex items-center justify-center mb-6 shadow-sm">
                         <Bot className="w-8 h-8 text-teal-700" />
@@ -744,19 +534,19 @@ export default function ChatInterface({
                     ))}
                   </div>
                   
-                  {isLoading && (
+                  {isStreaming && (
                     <div className="max-w-3xl mx-auto px-2 md:px-0 mt-4">
                       <div className="ml-2 md:ml-12 p-4 rounded-xl bg-stone-50 border border-stone-200">
-                        <LiveStepFlow 
+                        <LiveStepFlow
                           steps={liveSteps}
                           isAgent={true}
-                          currentPhase={loadingStatus}
+                          currentPhase={t('agentWorking')}
                           streamingAnswer={streamingAnswer}
                         />
                         {liveSteps.length === 0 && (
                           <div className="flex items-center gap-3 text-sm text-teal-700">
                             <Bot className="w-4 h-4 animate-pulse" />
-                            <span className="font-medium tracking-wide">{loadingStatus || 'Thinking...'}</span>
+                            <span className="font-medium tracking-wide">{t('agentWorking')}</span>
                           </div>
                         )}
                       </div>
@@ -776,7 +566,7 @@ export default function ChatInterface({
                         placeholder="Ask Agent to analyze the codebase..."
                         className="w-full bg-transparent border-none outline-none text-[15px] text-stone-900 placeholder:text-stone-400 resize-none px-4 py-3.5 max-h-[200px] leading-relaxed"
                         rows={1}
-                        disabled={isLoading}
+                        disabled={isStreaming}
                         aria-label="Follow-up question"
                       />
                       <div className="flex items-center justify-between px-3 pb-3">
@@ -788,10 +578,10 @@ export default function ChatInterface({
                         <div className="flex items-center gap-2">
                           <button
                             onClick={handleSendMessage}
-                            disabled={!inputValue.trim() || isLoading}
+                            disabled={!inputValue.trim() || isStreaming}
                             className={cn(
                               "p-2 rounded-xl transition-all shadow-sm",
-                              inputValue.trim() && !isLoading
+                              inputValue.trim() && !isStreaming
                                 ? "bg-teal-600 text-white hover:bg-teal-500"
                                 : "bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200"
                             )}
