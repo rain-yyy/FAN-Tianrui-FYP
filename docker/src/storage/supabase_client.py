@@ -428,6 +428,43 @@ class SupabaseClient:
             print(f"[Supabase] Error updating chat session summary: {e}")
             return False
 
+    def get_repo_memory(self, repo_url: str) -> Optional[dict]:
+        """
+        Fetch the durable cross-session fact sheet for a repo (see
+        `src/chat/repo_memory.py`). Returns None if not found, the client
+        isn't configured, or the `repo_memory` table doesn't exist yet
+        (migration not applied) — callers treat that identically to "no
+        facts recorded yet".
+        """
+        if not self.client:
+            return None
+        try:
+            response = self.client.table("repo_memory").select("*").eq("repo_url", repo_url).limit(1).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            print(f"[Supabase] Error getting repo memory: {e}")
+            return None
+
+    def upsert_repo_memory(self, repo_url: str, facts: dict) -> bool:
+        """
+        Replace the whole fact sheet for a repo. The extraction step in
+        `src/chat/repo_memory.py` computes the merged result itself (given
+        the prior facts as input), so this is a dumb overwrite, not a
+        field-by-field merge.
+        """
+        if not self.client:
+            return False
+        try:
+            self.client.table("repo_memory").upsert({
+                "repo_url": repo_url,
+                "facts": facts,
+                "updated_at": "now()",
+            }).execute()
+            return True
+        except Exception as e:
+            print(f"[Supabase] Error upserting repo memory: {e}")
+            return False
+
     def get_chat_messages(self, chat_id: str):
         """
         Get all messages for a specific chat session.

@@ -138,6 +138,11 @@ def get_chat_history_summary_trigger_messages(config: Dict[str, Any] | None = No
     return _config_value("chat", "history_summary_trigger_messages", 20, config)
 
 
+def get_chat_repo_memory_min_update_interval_hours(config: Dict[str, Any] | None = None) -> float:
+    """repo_memory 长期事实两次后台提取之间的最小间隔（小时），默认 6"""
+    return _config_value("chat", "repo_memory_min_update_interval_hours", 6, config)
+
+
 def get_hybrid_dense_weight(config: Dict[str, Any] | None = None) -> float:
     """混合检索中 dense 分数的权重，默认 0.6"""
     return _config_value("chat", "hybrid_dense_weight", 0.6, config)

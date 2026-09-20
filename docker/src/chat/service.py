@@ -17,7 +17,8 @@ from src.chat.events import format_sse
 from src.chat.graph import create_chat_graph, initial_state
 from src.chat.memory import build_message_window, maybe_trigger_summarization
 from src.chat.models import ChatTurnRequest, ChatTurnResponse, ToolTrajectoryStep
-from src.chat.prompts import build_system_prompt
+from src.chat.prompts import build_system_prompt, render_repo_facts
+from src.chat.repo_memory import maybe_update_repo_memory
 from src.config import get_chat_max_tool_iterations, get_web_search_config
 from src.core.chat_session import prepare_chat_turn
 from src.core.path_resolver import resolve_agent_paths
@@ -103,7 +104,9 @@ class ChatTurnService:
         return turn, graph_path, repo_root
 
     async def _build_graph_and_state(self, request: ChatTurnRequest, turn, graph_path, repo_root):
-        system_prompt = build_system_prompt(request.repo_url)
+        repo_memory_row = await run_sync(self.supabase.get_repo_memory, request.repo_url)
+        repo_facts_text = render_repo_facts((repo_memory_row or {}).get("facts") or {})
+        system_prompt = build_system_prompt(request.repo_url, repo_facts_text)
         messages = await build_message_window(self.supabase, turn.chat_id, system_prompt, turn.enhanced_question)
         max_iterations = get_chat_max_tool_iterations()
         graph = create_chat_graph(turn.vector_store_path, graph_path, repo_root, get_web_search_config())
@@ -134,6 +137,7 @@ class ChatTurnService:
         iterations = final_state.get("tool_call_count", 0)
 
         await self._persist_assistant_turn(turn.chat_id, answer, sources, trajectory, iterations)
+        await maybe_update_repo_memory(self.supabase, request.repo_url, final_state["messages"], trajectory)
 
         return ChatTurnResponse(
             chat_id=turn.chat_id,
@@ -201,6 +205,7 @@ class ChatTurnService:
             yield format_sse("answer_done", {"answer": answer, "sources": sources})
 
             await self._persist_assistant_turn(turn.chat_id, answer, sources, trajectory, iterations)
+            await maybe_update_repo_memory(self.supabase, request.repo_url, final_messages, trajectory)
 
             yield format_sse("complete", {"chat_id": turn.chat_id, "repo_url": request.repo_url})
 
