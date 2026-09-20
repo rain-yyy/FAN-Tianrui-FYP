@@ -160,7 +160,6 @@ def _cosine(counter_a: Counter[str], counter_b: Counter[str]) -> float:
 
 def mmr_select(
     candidates: Sequence[RankedCandidate],
-    query: str,
     *,
     top_n: int,
     lambda_mult: float = 0.5,
@@ -172,8 +171,13 @@ def mmr_select(
     if not candidates or top_n <= 0:
         return []
 
+    # 相关性直接用调用方已经算好的 final_score（dense+sparse 融合，语义层面的分数）。
+    # 之前这里对原始问题文本和文档内容做纯词袋余弦作为 sim_to_query，
+    # 但自然语言问句里全是通用词（which/file/defines/function/class...），
+    # 会让恰好重复这些词的泛用文档（README/CHANGELOG 等）在字面重合度上
+    # 反超真正包含目标标识符、但被大量代码 token 稀释了信号的正确代码块，
+    # 从而在 MMR 阶段把 final_score 已经排对的结果打乱。
     tokenizer = tokenizer or default_tokenizer
-    query_counter = Counter(tokenizer(query))
     doc_counters = {cand.key: Counter(tokenizer(cand.doc.page_content)) for cand in candidates}
 
     selected: List[RankedCandidate] = []
@@ -185,13 +189,6 @@ def mmr_select(
 
         for idx, cand in enumerate(remaining):
             relevance = cand.final_score
-            if not query_counter:
-                sim_to_query = relevance
-            else:
-                sim_to_query = _cosine(doc_counters[cand.key], query_counter)
-                # 若语义分未能区分，则用最终得分兜底
-                if math.isclose(sim_to_query, 0.0):
-                    sim_to_query = relevance
 
             if not selected:
                 penalty = 0.0
@@ -201,7 +198,7 @@ def mmr_select(
                     for sel in selected
                 )
 
-            mmr_score = lambda_mult * sim_to_query - (1 - lambda_mult) * penalty
+            mmr_score = lambda_mult * relevance - (1 - lambda_mult) * penalty
             if mmr_score > best_score:
                 best_score = mmr_score
                 best_idx = idx

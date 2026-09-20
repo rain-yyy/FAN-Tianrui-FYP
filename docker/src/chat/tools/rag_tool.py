@@ -77,7 +77,6 @@ class RAGSearchEngine:
 
         mmr_pick = mmr_select(
             candidates,
-            query,
             top_n=min(top_k, len(candidates)),
             lambda_mult=get_mmr_lambda(),
         )
