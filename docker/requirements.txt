@@ -15,6 +15,12 @@ GitPython>=3.1.40
 
 # Code graph / ingestion dependencies
 networkx>=3.0
+# nx.pagerank() (src/ingestion/code_graph.py::rank_important_symbols) requires
+# scipy for its default sparse-matrix implementation; without it every call
+# raises "No module named 'scipy'", caught by src/wiki/struct_gen.py's broad
+# except (meant for genuine graph-degeneracy cases) and silently dropping the
+# ranked "key symbols" context from wiki structure generation.
+scipy>=1.10.0
 tree-sitter>=0.22.0
 # src/ingestion/ts_parser.py prefers tree-sitter-language-pack (grammars built
 # for current tree-sitter ABI versions) and only falls back to the older
