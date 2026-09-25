@@ -257,7 +257,7 @@ export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
           
           // More aggressive fixes: quote ALL unquoted labels that have special chars
           const AGGRESSIVE_SPECIAL = /[()@<>#;&,:.`'"]/;
-          let aggressiveFix = cleanedChart
+          const aggressiveFix = cleanedChart
             .replace(/(\w+)\[([^\]"]*)\]/g, (match, nodeId: string, label: string) => {
               if (AGGRESSIVE_SPECIAL.test(label)) {
                 const cleanLabel = label
