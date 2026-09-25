@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+# Code Style
+- Python code follows PEP 8, checked and formatted by tuff (config in pyproject.toml)
+- Docstrings are not required; code just needs to satisfy PEP 8 and pass the ruff checks configured in `docker/pyproject.toml`
+- Import order: stblib -> third-patry -> local, sorted automatically by buff's isort rules
+
+# Workflow
+- After editing Python files, run (from `docker/`): `uv run ruff check --fix . && uv run ruff format .`
+- Make sure `ruff check . ` passes before commiting
+
+# Testing
+Smoke tests (fast, no real external calls; slow tests only via `pytest -m slow`):
+- Backend: `cd docker && uv run pytest` for unit tests, then start `uv run python scripts/api.py` and check `curl localhost:8000/health` returns OK.
+- Frontend: `cd frontend && npm run lint && npm run build` must both pass; then `npm run dev` and open `http://localhost:3000` to confirm the page loads.
+
 ## What this repo is
 
 A "repo-to-wiki" service: given a GitHub repo URL, it clones/ingests the repo, builds a code graph + vector index, generates a Wiki (structure + content), and answers questions about the repo via a single agent-first chat backend (a tool-using LangGraph agent — see Backend architecture below for the recent rewrite that unified what used to be a separate plain-RAG mode and Agent mode). Two independent apps:
@@ -14,8 +28,8 @@ A "repo-to-wiki" service: given a GitHub repo URL, it clones/ingests the repo, b
 Backend (run from `docker/`, since `api.py` loads env relative to CWD):
 ```bash
 cd docker
-pip install -r requirements.txt
-python scripts/api.py          # serves on :8000, loads ../../.env.local (repo-root .env.local)
+uv sync
+uv run python scripts/api.py          # serves on :8000, loads ../../.env.local (repo-root .env.local)
 ```
 Automated tests now exist: `docker/tests/` (pytest, config in `docker/pytest.ini`, run with `pytest` from `docker/`). Tests marked `slow` hit real git clone + real embeddings + real Qdrant/Supabase and only run explicitly (`pytest -m slow`).
 
@@ -60,8 +74,7 @@ This is not a standard Next.js App Router app internally. Actual pages live unde
 
 ## Known sharp edges (don't relitigate without checking source first)
 
-- **The chat backend rewrite (`docker/src/chat/`) is uncommitted.** `git status` shows `docker/src/agent/`, `docker/src/core/chat.py`, and `docker/src/api/routers/agent.py` as deleted and `docker/src/chat/` as untracked — this is all working-tree state, not yet in a commit. Don't assume `git log`/`git blame` on these paths reflects anything; read the working tree.
 - **The `chat_history.session_summary`/`summary_up_to_created_at` columns the new memory design (`docker/src/chat/memory.py`) depends on are not present in the live Supabase schema yet.** The migration (`docker/sql/2026_chat_memory.sql`) has not been applied (confirmed via `mcp__supabase__list_migrations` — only two unrelated `repositories.repo_name` migrations are recorded); the SQL to run is in `Document/API_DOCUMENTATION.md` §0. Until it's applied, `update_chat_session_summary`/`get_chat_session` calls will silently no-op or return rows without those keys (the Supabase client swallows the exception) and summarization will never actually persist — it won't crash requests. (The column was originally specified as `summary_up_to_message_id bigint REFERENCES chat_messages(id)`, which would have failed at apply time since `chat_messages.id` is `uuid` — fixed to a plain `summary_up_to_created_at timestamptz` watermark, with `chat/memory.py` and `supabase_client.py` updated to match.)
-- `repo_memory` (durable cross-session repo facts, meant to realize what the old `RepoFactsMemory` only claimed to be) is defined in `docker/sql/2026_chat_memory.sql` but has no read/write code anywhere yet and no table in the live DB — it's a placeholder for future work, not a live feature.
-- `docker/requirements.txt` now includes `duckduckgo-search` and `langgraph` (both previously missing/informally used). `rope` and `tavily-python` are still absent, but `rope` no longer matters — the `lsp_resolve` tool that needed it was deleted in the chat rewrite. `tavily-python` only matters if `web_search.provider` in `repo_config.json` is switched from the default `duckduckgo`.
+- `repo_memory` (durable cross-session repo facts) was removed from the chat agent along with its extractor/planner/verifier prompts and model roles. Only the table definition remains in `docker/sql/2026_chat_memory.sql`; nothing reads or writes it, and it is not in the live DB.
+- Python deps are managed only by uv: `docker/pyproject.toml` + `docker/uv.lock` (no `requirements.txt`; Dockerfile uses `uv sync --frozen`). `rope` and `tavily-python` are absent, but `rope` no longer matters — the `lsp_resolve` tool that needed it was deleted in the chat rewrite. `tavily-python` only matters if `web_search.provider` in `repo_config.json` is switched from the default `duckduckgo`.
 - `Document/BACKEND_CLEANUP_PLAN.md`'s tracks are now fully complete (see the doc's own status header) — don't go looking for unfinished items there.
