@@ -1,0 +1,93 @@
+name: Backend
+
+# DISABLED: automatic triggers are commented out; re-enable by uncommenting them. Manual runs only.
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  #   paths: ["docker/**", ".github/workflows/backend.yml"]
+  # pull_request:
+  #   paths: ["docker/**", ".github/workflows/backend.yml"]
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: docker
+
+jobs:
+  check:
+    name: Lint, test, smoke
+    runs-on: ubuntu-latest
+    env:
+      # src/ingestion builds an LLM client at import time and refuses to
+      # start without a key; a placeholder is enough since CI makes no calls.
+      OPENROUTER_API_KEY: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: docker/uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      # No secrets here: tests that need Supabase/Qdrant skip themselves.
+      # The full suite runs nightly (nightly.yml).
+      - name: Unit tests
+        run: uv run pytest -m "not slow"
+
+      - name: API smoke test
+        run: |
+          uv run python scripts/api.py > api.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS localhost:8000/health; then exit 0; fi
+            sleep 2
+          done
+          echo "API did not become healthy"; cat api.log; exit 1
+
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: docker
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to Fly.io
+    needs: [check, docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-backend
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: Post-deploy health check
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS https://fan-tianrui-fyp.fly.dev/health; then exit 0; fi
+            sleep 5
+          done
+          echo "Deployed app is not healthy"; exit 1

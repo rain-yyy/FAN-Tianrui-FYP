@@ -1,0 +1,38 @@
+name: Frontend
+
+# Deployment is handled by Vercel's Git integration; this only gates PRs.
+# DISABLED: automatic triggers are commented out; re-enable by uncommenting them. Manual runs only.
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  #   paths: ["frontend/**", ".github/workflows/frontend.yml"]
+  # pull_request:
+  #   paths: ["frontend/**", ".github/workflows/frontend.yml"]
+
+concurrency:
+  group: frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  check:
+    name: Lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+        env:
+          # Build-time public vars; dummy values are fine for compiling.
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
