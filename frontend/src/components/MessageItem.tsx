@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import { ChatMessage, ToolTrajectoryStep } from '@/lib/api';
 import { getToolDescription } from '@/lib/toolDescriptions';
 import CodeViewer from './CodeViewer';
-import SourcesPanel, { parseSource } from './SourcesPanel';
+import SourcesPanel, { parseSource, ParsedSource } from './SourcesPanel';
 
 export interface DisplayMessage extends ChatMessage {
   id: string;
@@ -152,27 +152,29 @@ export const MessageItem = React.memo(({ message, repoUrl }: MessageItemProps) =
   const isUser = message.role === 'user';
   const [isCodeViewerOpen, setIsCodeViewerOpen] = useState(false);
   const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
+  const parsedSources = useMemo(() => (message.sources || []).map(parseSource), [message.sources]);
 
-  const handleSourceClick = (source: any, index: number) => {
+  const handleSourceClick = (source: ParsedSource, index: number) => {
     setSelectedSourceIndex(index);
     setIsCodeViewerOpen(true);
   };
-  
+
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: "easeOut" }}
       className="mb-8"
     >
-      {/* Code Viewer Modal */}
-      <CodeViewer 
-        isOpen={isCodeViewerOpen} 
-        onClose={() => setIsCodeViewerOpen(false)} 
-        sources={(message.sources || []).map(parseSource)}
-        initialSourceIndex={selectedSourceIndex}
-        repoUrl={repoUrl}
-      />
+      {/* Code Viewer Modal: mounted only while open, so its internal state always starts correct */}
+      {isCodeViewerOpen && (
+        <CodeViewer
+          onClose={() => setIsCodeViewerOpen(false)}
+          sources={parsedSources}
+          initialSourceIndex={selectedSourceIndex}
+          repoUrl={repoUrl}
+        />
+      )}
 
       <div className={cn("flex gap-4 group", isUser ? "flex-row-reverse" : "flex-row")}>
       {!isUser && (

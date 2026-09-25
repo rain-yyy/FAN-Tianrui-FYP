@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, 
@@ -41,7 +42,6 @@ interface ParsedSource {
 }
 
 interface CodeViewerProps {
-  isOpen: boolean;
   onClose: () => void;
   sources: ParsedSource[];
   initialSourceIndex?: number;
@@ -73,7 +73,7 @@ const getExtensionColor = (extension: string) => {
   return colors[extension.toLowerCase()] || 'text-stone-600';
 };
 
-export default function CodeViewer({ isOpen, onClose, sources, initialSourceIndex = 0, repoUrl }: CodeViewerProps) {
+export default function CodeViewer({ onClose, sources, initialSourceIndex = 0, repoUrl }: CodeViewerProps) {
   const [selectedIndex, setSelectedIndex] = useState(initialSourceIndex);
   const [searchQuery, setSearchQuery] = useState('');
   const [copied, setCopied] = useState(false);
@@ -81,30 +81,37 @@ export default function CodeViewer({ isOpen, onClose, sources, initialSourceInde
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (isOpen) {
-      setSelectedIndex(initialSourceIndex);
+    if (!sources[selectedIndex]) {
+      return;
     }
-  }, [isOpen, initialSourceIndex]);
+    let cancelled = false;
+    const source = sources[selectedIndex];
 
-  useEffect(() => {
-    if (isOpen && sources[selectedIndex]) {
-      const source = sources[selectedIndex];
+    const load = async () => {
       setIsLoading(true);
-      setCodeContent(''); // Clear previous content
-
-      api.getFileContent(repoUrl, source.filePath)
-        .then(content => {
+      setCodeContent('');
+      try {
+        const content = await api.getFileContent(repoUrl, source.filePath);
+        if (!cancelled) {
           setCodeContent(content);
-        })
-        .catch(err => {
-          console.error(err);
-          setCodeContent(`// Failed to load file content\n// Error: ${err.message}\n// Path: ${source.filePath}`);
-        })
-        .finally(() => {
+        }
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) {
+          setCodeContent(`// Failed to load file content\n// Error: ${(err as Error).message}\n// Path: ${source.filePath}`);
+        }
+      } finally {
+        if (!cancelled) {
           setIsLoading(false);
-        });
-    }
-  }, [isOpen, selectedIndex, sources, repoUrl]);
+        }
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedIndex, sources, repoUrl]);
 
   // Filter file list by search query.
   const filteredSources = sources.filter(s => 
@@ -127,9 +134,7 @@ export default function CodeViewer({ isOpen, onClose, sources, initialSourceInde
     }
   };
 
-  if (!isOpen) return null;
-
-  return (
+  return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -297,6 +302,7 @@ export default function CodeViewer({ isOpen, onClose, sources, initialSourceInde
           </div>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 }
