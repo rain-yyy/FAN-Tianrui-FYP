@@ -460,13 +460,33 @@ async def _background_retry_rag_indexing(task_id: str, url_link: str, config_pat
     logger.error(f"[RAG 重试] task={task_id} 已达最大重试次数，embedding 仍为失败")
 
 
+def _local_repo_data_missing(url_link: str) -> bool:
+    """репo_information 的新鲜度只反映 Supabase/R2 里的记录，不代表这台机器的磁盘上真的有
+    对应的仓库克隆和向量库产物（例如换了持久卷、或该仓库当初是在另一台机器/本地开发环境
+    上索引的）。缓存命中前必须额外确认本地数据存在，否则会把 Wiki 页面和引用/工具调用
+    指向一个实际上不存在的本地目录，导致 /file/content 等接口返回 404。
+    """
+    repo_dir_name = repo_disk_dirname(url_link)
+    repo_dir = REPO_STORE_ROOT / repo_dir_name
+    if not repo_dir.is_dir() or not any(repo_dir.iterdir()):
+        return True
+    return False
+
+
 def _check_wiki_generation_cache(supabase_client: SupabaseClient, url_link: str) -> Optional[dict]:
     """
-    查询 repositories 表：若记录存在且距今不超过 WIKI_GENERATION_CACHE_MAX_AGE_DAYS 天，
-    返回可直接写入 tasks.result 的缓存 payload；否则返回 None（需要完整重新生成）。
+    查询 repositories 表：若记录存在、距今不超过 WIKI_GENERATION_CACHE_MAX_AGE_DAYS 天，
+    且本机磁盘上确实还有该仓库的克隆数据，则返回可直接写入 tasks.result 的缓存 payload；
+    否则返回 None（需要完整重新生成，含重新克隆仓库到本机）。
     """
     repo_info = supabase_client.get_repo_information(url_link)
     if not repo_info or wiki_generation_cache_is_stale(repo_info, WIKI_GENERATION_CACHE_MAX_AGE_DAYS):
+        return None
+    if _local_repo_data_missing(url_link):
+        logger.info(
+            "[Wiki 缓存] repositories 记录未过期，但本机缺少仓库克隆/向量库数据，强制重新生成: repo=%s",
+            url_link,
+        )
         return None
     return supabase_client.wiki_artifacts_from_row(repo_info, url_link)
 
