@@ -9,9 +9,6 @@
         "chat_title": "qwen/qwen3.7-flash",
         "chat_agent": "openai/gpt-5.1",
         "chat_session_compressor": "google/gemini-3.5-flash-lite",
-        "chat_planner": "google/gemini-3.1-flash-lite",
-        "chat_verifier": "google/gemini-3.1-flash-lite",
-        "chat_repo_memory_extractor": "google/gemini-3.1-flash-lite",
         "embedding": "qwen/qwen3-embedding-8b"
       }
     },
@@ -20,7 +17,6 @@
       "context_token_budget": 12000,
       "reserved_output_tokens": 2000,
       "history_summary_trigger_messages": 20,
-      "repo_memory_min_update_interval_hours": 6,
       "hybrid_dense_weight": 0.6,
       "hybrid_sparse_weight": 0.4,
       "mmr_lambda": 0.5,
