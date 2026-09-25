@@ -1,6 +1,4 @@
-//const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').trim() || 'http://localhost:8000';
-const API_BASE_URL = 'http://localhost:8000';
-// const API_BASE_URL = "https://fan-tianrui-fyp.fly.dev"
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').trim() || 'http://localhost:8000';
 
 /**
  * Normalize repo URL for consistent comparison with backend-stored URLs.
