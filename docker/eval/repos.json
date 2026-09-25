@@ -1,0 +1,26 @@
+{
+  "_comment": "Candidate repos for Stage 1, stratified by a rough LOC guess (tier_hint) -- review/edit this list before running: swap anything you don't want measured, and note the harness itself measures real LOC via common/loc_counter.py, so tier_hint is only a planning guide. run_generation_eval.py automatically skips any repo_url already present in the shared `repositories` table (isolation rule), so it's fine to leave extras here as backups.",
+  "repos": [
+    { "repo_url": "https://github.com/kennethreitz/records", "tier_hint": "tiny_lt2k", "language": "python" },
+    { "repo_url": "https://github.com/pallets/itsdangerous", "tier_hint": "tiny_lt2k", "language": "python" },
+    { "repo_url": "https://github.com/chalk/chalk", "tier_hint": "tiny_lt2k", "language": "javascript" },
+    { "repo_url": "https://github.com/sindresorhus/got", "tier_hint": "tiny_lt2k", "language": "typescript" },
+
+    { "repo_url": "https://github.com/pallets/flask", "tier_hint": "small_2to10k", "language": "python" },
+    { "repo_url": "https://github.com/expressjs/express", "tier_hint": "small_2to10k", "language": "javascript" },
+    { "repo_url": "https://github.com/rs/zerolog", "tier_hint": "small_2to10k", "language": "go" },
+    { "repo_url": "https://github.com/sinatra/sinatra", "tier_hint": "small_2to10k", "language": "ruby" },
+    { "repo_url": "https://github.com/redis/hiredis", "tier_hint": "small_2to10k", "language": "c" },
+    { "repo_url": "https://github.com/sharkdp/fd", "tier_hint": "small_2to10k", "language": "rust" },
+
+    { "repo_url": "https://github.com/psf/requests", "tier_hint": "medium_10to40k", "language": "python" },
+    { "repo_url": "https://github.com/spf13/cobra", "tier_hint": "medium_10to40k", "language": "go" },
+    { "repo_url": "https://github.com/gin-gonic/gin", "tier_hint": "medium_10to40k", "language": "go" },
+    { "repo_url": "https://github.com/httpie/cli", "tier_hint": "medium_10to40k", "language": "python" },
+    { "repo_url": "https://github.com/junit-team/junit4", "tier_hint": "medium_10to40k", "language": "java" },
+
+    { "repo_url": "https://github.com/psf/black", "tier_hint": "large_40to60k", "language": "python" },
+    { "repo_url": "https://github.com/sharkdp/bat", "tier_hint": "large_40to60k", "language": "rust" },
+    { "repo_url": "https://github.com/gohugoio/hugo", "tier_hint": "large_40to60k", "language": "go" }
+  ]
+}
