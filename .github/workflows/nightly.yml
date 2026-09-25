@@ -1,0 +1,38 @@
+name: Nightly full tests
+
+# DISABLED: automatic triggers are commented out; re-enable by uncommenting them. Manual runs only.
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "0 19 * * *" # 03:00 Asia/Shanghai
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: docker
+
+jobs:
+  full-suite:
+    name: Full pytest (real Supabase/Qdrant/embeddings)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: docker/uv.lock
+      - run: uv sync --frozen
+      - name: Run all tests including slow
+        run: uv run pytest
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GH_CLONE_TOKEN }}
+          TEST_USER_ID: ${{ secrets.TEST_USER_ID }}
