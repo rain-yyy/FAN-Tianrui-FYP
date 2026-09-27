@@ -1,8 +1,7 @@
-import sys
-import os
-from pathlib import Path
-import json
 import logging
+import os
+import sys
+from pathlib import Path
 
 # 获取项目根目录并添加到 sys.path
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
@@ -10,12 +9,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from dotenv import load_dotenv
+
 # 尝试加载 .env 文件，根据你的环境可能需要调整路径
 load_dotenv(PROJECT_ROOT / ".env")
 
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
 
 from src.chat.tools.rag_tool import RAGSearchEngine
 
@@ -25,20 +25,23 @@ logger = logging.getLogger("rag_debug_api")
 
 app = FastAPI(title="RAG Tool Debug API")
 
+
 class RAGRequest(BaseModel):
     query: str
     vector_store_path: str
     top_k: int = 20
 
+
 @app.post("/debug/rag")
 async def debug_rag(request: RAGRequest):
-    """
-    调试 RAG 工具的中间逻辑和最终输出
-    """
+    """调试 RAG 工具的中间逻辑和最终输出"""
     try:
         # 确保路径存在
         if not os.path.exists(request.vector_store_path):
-            raise HTTPException(status_code=404, detail=f"Vector store path not found: {request.vector_store_path}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Vector store path not found: {request.vector_store_path}",
+            )
 
         # 初始化工具
         engine = RAGSearchEngine(vector_store_path=request.vector_store_path)
@@ -53,12 +56,14 @@ async def debug_rag(request: RAGRequest):
             "result": {
                 "content": content,
                 "artifact": artifact,
-            }
+            },
         }
     except Exception as e:
         logger.exception("RAG debug failed")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8001)

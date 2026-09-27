@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Any
 
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -12,19 +11,21 @@ OUTPUT_LANGUAGE_EN = """
 - If the user writes in another language, **still respond in English**; keep code identifiers and string literals exactly as in the source.
 """
 
+
 @dataclass(frozen=True)
 class PromptDefinition:
-
     name: str
     system: str
     human: str
 
     def build(self) -> ChatPromptTemplate:
         """Return a LangChain ChatPromptTemplate for use in LCEL chains."""
-        return ChatPromptTemplate.from_messages([
-            ("system", self.system.strip()),
-            ("human", self.human.strip()),
-        ])
+        return ChatPromptTemplate.from_messages(
+            [
+                ("system", self.system.strip()),
+                ("human", self.human.strip()),
+            ]
+        )
 
 
 STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
@@ -118,7 +119,9 @@ STRUCTURE_PROMPT: PromptDefinition = PromptDefinition(
             - The main execution paths, data flow, and module boundaries.
             - The architectural pieces that explain how the system actually works.
 
-            """ + OUTPUT_LANGUAGE_EN.strip() + """
+            """
+    + OUTPUT_LANGUAGE_EN.strip()
+    + """
 
             Final quality filter before you answer:
             - Ask of every candidate node: "Would most engineers care about this when trying to understand the project?"
@@ -224,7 +227,7 @@ Return only the JSON string, with no extra commentary.
 """,
 )
 
-PROMPT_REGISTRY: Dict[str, PromptDefinition] = {
+PROMPT_REGISTRY: dict[str, PromptDefinition] = {
     STRUCTURE_PROMPT.name: STRUCTURE_PROMPT,
     WIKI_SECTION_PROMPT.name: WIKI_SECTION_PROMPT,
     HYDE_PROMPT.name: HYDE_PROMPT,
@@ -232,26 +235,17 @@ PROMPT_REGISTRY: Dict[str, PromptDefinition] = {
 
 
 def get_structure_prompt() -> ChatPromptTemplate:
-    """
-    获取多层级 wiki 目录生成提示词。
-    """
-
+    """获取多层级 wiki 目录生成提示词。"""
     return STRUCTURE_PROMPT.build()
 
 
 def get_wiki_section_prompt() -> ChatPromptTemplate:
-    """
-    获取用于 wiki 章节内容生成的提示词模板。
-    """
-
+    """获取用于 wiki 章节内容生成的提示词模板。"""
     return WIKI_SECTION_PROMPT.build()
 
 
 def get_hyde_prompt() -> ChatPromptTemplate:
-    """
-    获取用于 HyDE 假设文档生成的提示词模板。
-    """
-
+    """获取用于 HyDE 假设文档生成的提示词模板。"""
     return HYDE_PROMPT.build()
 
 
@@ -266,4 +260,3 @@ __all__ = [
     "get_wiki_section_prompt",
     "get_hyde_prompt",
 ]
-

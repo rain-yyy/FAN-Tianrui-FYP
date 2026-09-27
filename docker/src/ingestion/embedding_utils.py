@@ -1,6 +1,4 @@
-"""
-OpenRouter 嵌入模型工具，供 vector_store（写入）和 retrieval（查询）共用。
-
+"""OpenRouter 嵌入模型工具，供 vector_store（写入）和 retrieval（查询）共用。
 
 OpenAI-compatible APIs（非官方 api.openai.com 的网关，如 OpenRouter、自建 v1 代理）
 ---------------------------------------------------------------------------
@@ -14,18 +12,22 @@ OpenAI-compatible APIs（非官方 api.openai.com 的网关，如 OpenRouter、�
 
 官方 OpenAI ``https://api.openai.com/v1`` 仍走默认请求参数（与历史行为一致）。
 """
+
+import logging
 import os
 import time
-import logging
-from typing import List, Any
+from typing import Any
 from urllib.parse import urlparse
 
-from openai import OpenAI
-from langchain_core.embeddings import Embeddings
 from dotenv import load_dotenv
+from langchain_core.embeddings import Embeddings
+from openai import OpenAI
 
 from src.clients import get_model_name
-from src.config import get_embedding_inner_batch_size, get_embedding_inner_batch_sleep_sec
+from src.config import (
+    get_embedding_inner_batch_size,
+    get_embedding_inner_batch_sleep_sec,
+)
 
 load_dotenv()
 
@@ -38,9 +40,7 @@ _OPENAI_OFFICIAL_API_HOSTS = frozenset({"api.openai.com"})
 
 
 def is_third_party_openai_compatible_api(base_url: str) -> bool:
-    """
-    若 base_url 不是官方 OpenAI API，则为 True（需显式 ``encoding_format="float"`` 等兼容处理）。
-    """
+    """若 base_url 不是官方 OpenAI API，则为 True（需显式 ``encoding_format="float"`` 等兼容处理）。"""
     parsed = urlparse((base_url or "").strip())
     host = (parsed.hostname or "").lower()
     if not host:
@@ -62,8 +62,12 @@ def _actionable_third_party_no_data_error(base_url: str) -> ValueError:
     )
 
 
-def _raise_no_embedding_data(*, base_url: str, raw_response: Any, batch_label: str) -> None:
-    logger.error("Embeddings API returned empty data (%s): %s", batch_label, raw_response)
+def _raise_no_embedding_data(
+    *, base_url: str, raw_response: Any, batch_label: str
+) -> None:
+    logger.error(
+        "Embeddings API returned empty data (%s): %s", batch_label, raw_response
+    )
     if is_third_party_openai_compatible_api(base_url):
         raise _actionable_third_party_no_data_error(base_url)
     raise ValueError(
@@ -79,8 +83,7 @@ def _should_rewrap_no_embedding_error(exc: BaseException, base_url: str) -> bool
 
 
 class OpenRouterEmbeddings(Embeddings):
-    """
-    专为 OpenRouter 优化的 Embedding 实现。
+    """专为 OpenRouter 优化的 Embedding 实现。
     解决了 LangChain OpenAIEmbeddings 默认发送 Token IDs 导致 OpenRouter 报错的问题。
 
     OpenAI-compatible APIs
@@ -106,7 +109,7 @@ class OpenRouterEmbeddings(Embeddings):
     # 两次 API 请求之间的冷却时间（秒）
     INNER_BATCH_SLEEP_SEC = get_embedding_inner_batch_sleep_sec()
 
-    def _embeddings_create(self, input_payload: List[str], batch_label: str):
+    def _embeddings_create(self, input_payload: list[str], batch_label: str):
         kwargs: dict = {"model": self.model, "input": input_payload}
         if is_third_party_openai_compatible_api(self._base_url):
             kwargs["encoding_format"] = "float"
@@ -152,7 +155,7 @@ class OpenRouterEmbeddings(Embeddings):
                 raise _actionable_third_party_no_data_error(self._base_url) from e
             raise
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """将一批文档转换为向量（内层小批，每批 INNER_BATCH_SIZE 条）。"""
         if not texts:
             return []
@@ -164,10 +167,12 @@ class OpenRouterEmbeddings(Embeddings):
 
         logger.info(
             "[embed] embed_documents: total_texts=%d, inner_batch_size=%d, inner_batches=%d",
-            total_inner, inner_batch_size, total_inner_batches,
+            total_inner,
+            inner_batch_size,
+            total_inner_batches,
         )
 
-        embeddings: List[List[float]] = []
+        embeddings: list[list[float]] = []
         for inner_idx, i in enumerate(range(0, total_inner, inner_batch_size), start=1):
             batch = processed_texts[i : i + inner_batch_size]
             batch_label = f"inner {inner_idx}/{total_inner_batches} (offset={i}, size={len(batch)})"
@@ -188,7 +193,12 @@ class OpenRouterEmbeddings(Embeddings):
             # 向量维度健全性检查
             if vectors:
                 dim = len(vectors[0])
-                logger.debug("[embed] %s | vector_dim=%d | vectors_returned=%d", batch_label, dim, len(vectors))
+                logger.debug(
+                    "[embed] %s | vector_dim=%d | vectors_returned=%d",
+                    batch_label,
+                    dim,
+                    len(vectors),
+                )
 
             embeddings.extend(vectors)
 
@@ -198,7 +208,7 @@ class OpenRouterEmbeddings(Embeddings):
         logger.info("[embed] embed_documents done: total_vectors=%d", len(embeddings))
         return embeddings
 
-    def embed_query(self, text: str) -> List[float]:
+    def embed_query(self, text: str) -> list[float]:
         """将单个查询转换为向量。"""
         processed_text = text if text.strip() else " "
         batch_label = "embed_query single"

@@ -4,17 +4,18 @@ Keeps table-shape quirks (e.g. `tasks.progress` being a text column, or
 `tasks.result` sometimes coming back as a JSON string) as coercions in one
 place instead of ad hoc `.get(...)` parsing at every call site.
 """
+
 from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
 
-def coerce_str_list(value: Any) -> Optional[List[str]]:
+def coerce_str_list(value: Any) -> list[str] | None:
     """Normalize a Supabase column that may come back as a single string
     (legacy rows) or already as a list of strings.
     """
@@ -33,12 +34,12 @@ class TaskRecord(BaseModel):
     task_id: str
     repo_url: str
     status: str = "pending"
-    created_at: Optional[datetime] = None
-    last_updated: Optional[datetime] = None
+    created_at: datetime | None = None
+    last_updated: datetime | None = None
     progress: float = 0.0
-    current_step: Optional[str] = None
+    current_step: str | None = None
     result: dict = {}
-    error: Optional[str] = None
+    error: str | None = None
 
     @field_validator("progress", mode="before")
     @classmethod

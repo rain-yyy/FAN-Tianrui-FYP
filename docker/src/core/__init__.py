@@ -1,17 +1,15 @@
-"""
-Core module for retrieval and chat functionality.
-"""
+"""Core module for retrieval and chat functionality."""
 
 from src.core.retrieval import (
-    default_tokenizer,
-    compute_doc_key,
-    normalize_scores,
+    CommunityFirstRetriever,
+    CommunityInfo,
     RankedCandidate,
     SparseBM25Index,
-    mmr_select,
-    CommunityInfo,
-    CommunityFirstRetriever,
+    compute_doc_key,
     create_community_retriever,
+    default_tokenizer,
+    mmr_select,
+    normalize_scores,
 )
 
 __all__ = [

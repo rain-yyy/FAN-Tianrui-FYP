@@ -1,16 +1,16 @@
-"""
-Web search tool for external knowledge (package versions, API docs, CVEs)
+"""Web search tool for external knowledge (package versions, API docs, CVEs)
 not contained in the repository itself.
 
 Provider priority (config-driven): Tavily > SerpAPI > DuckDuckGo. DuckDuckGo
 requires no API key and no config, so with `duckduckgo-search` installed this
 tool always returns real results instead of the old silent no-op.
 """
+
 from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 from langchain_core.tools import StructuredTool
@@ -24,7 +24,7 @@ _DEFAULT_TIMEOUT = 10
 _MAX_SNIPPET_CHARS = 500
 
 
-def _domain_allowed(url: str, allowed_domains: Optional[List[str]]) -> bool:
+def _domain_allowed(url: str, allowed_domains: list[str] | None) -> bool:
     if not allowed_domains:
         return True
     try:
@@ -40,21 +40,31 @@ def _truncate(text: str, max_chars: int = _MAX_SNIPPET_CHARS) -> str:
     return text if len(text) <= max_chars else text[:max_chars].rstrip() + "…"
 
 
-def _search_duckduckgo(query: str, max_results: int, allowed_domains: Optional[List[str]]) -> List[Dict[str, str]]:
+def _search_duckduckgo(
+    query: str, max_results: int, allowed_domains: list[str] | None
+) -> list[dict[str, str]]:
     try:
         from duckduckgo_search import DDGS
     except ImportError:
-        logger.warning("duckduckgo_search not installed. Run: pip install duckduckgo-search")
+        logger.warning(
+            "duckduckgo_search not installed. Run: pip install duckduckgo-search"
+        )
         return []
 
-    results: List[Dict[str, str]] = []
+    results: list[dict[str, str]] = []
     try:
         with DDGS() as ddgs:
             for r in ddgs.text(query, max_results=max_results * 2):
                 url = r.get("href") or r.get("link") or ""
                 if allowed_domains and not _domain_allowed(url, allowed_domains):
                     continue
-                results.append({"title": r.get("title", ""), "url": url, "snippet": _truncate(r.get("body", "") or r.get("snippet", ""))})
+                results.append(
+                    {
+                        "title": r.get("title", ""),
+                        "url": url,
+                        "snippet": _truncate(r.get("body", "") or r.get("snippet", "")),
+                    }
+                )
                 if len(results) >= max_results:
                     break
     except Exception as e:
@@ -62,17 +72,28 @@ def _search_duckduckgo(query: str, max_results: int, allowed_domains: Optional[L
     return results
 
 
-def _search_tavily(query: str, max_results: int, allowed_domains: Optional[List[str]], api_key: str) -> List[Dict[str, str]]:
+def _search_tavily(
+    query: str, max_results: int, allowed_domains: list[str] | None, api_key: str
+) -> list[dict[str, str]]:
     try:
         from tavily import TavilyClient
+
         client = TavilyClient(api_key=api_key)
-        response = client.search(query=query, search_depth="basic", max_results=max_results * 2)
-        results: List[Dict[str, str]] = []
+        response = client.search(
+            query=query, search_depth="basic", max_results=max_results * 2
+        )
+        results: list[dict[str, str]] = []
         for r in response.get("results", []):
             url = r.get("url", "")
             if allowed_domains and not _domain_allowed(url, allowed_domains):
                 continue
-            results.append({"title": r.get("title", ""), "url": url, "snippet": _truncate(r.get("content", "") or r.get("snippet", ""))})
+            results.append(
+                {
+                    "title": r.get("title", ""),
+                    "url": url,
+                    "snippet": _truncate(r.get("content", "") or r.get("snippet", "")),
+                }
+            )
             if len(results) >= max_results:
                 break
         return results
@@ -84,17 +105,39 @@ def _search_tavily(query: str, max_results: int, allowed_domains: Optional[List[
         return []
 
 
-def _search_serpapi(query: str, max_results: int, timeout: int, allowed_domains: Optional[List[str]], api_key: str) -> List[Dict[str, str]]:
+def _search_serpapi(
+    query: str,
+    max_results: int,
+    timeout: int,
+    allowed_domains: list[str] | None,
+    api_key: str,
+) -> list[dict[str, str]]:
     try:
         import requests
-        resp = requests.get("https://serpapi.com/search", params={"q": query, "api_key": api_key, "num": max_results * 2, "engine": "google"}, timeout=timeout)
+
+        resp = requests.get(
+            "https://serpapi.com/search",
+            params={
+                "q": query,
+                "api_key": api_key,
+                "num": max_results * 2,
+                "engine": "google",
+            },
+            timeout=timeout,
+        )
         resp.raise_for_status()
-        results: List[Dict[str, str]] = []
+        results: list[dict[str, str]] = []
         for r in resp.json().get("organic_results", []):
             url = r.get("link", "")
             if allowed_domains and not _domain_allowed(url, allowed_domains):
                 continue
-            results.append({"title": r.get("title", ""), "url": url, "snippet": _truncate(r.get("snippet", ""))})
+            results.append(
+                {
+                    "title": r.get("title", ""),
+                    "url": url,
+                    "snippet": _truncate(r.get("snippet", "")),
+                }
+            )
             if len(results) >= max_results:
                 break
         return results
@@ -107,15 +150,21 @@ def _search_serpapi(query: str, max_results: int, timeout: int, allowed_domains:
 
 
 class WebSearchEngine:
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         cfg = config or {}
         self.tavily_api_key: str = cfg.get("tavily_api_key", "")
         self.serpapi_key: str = cfg.get("serpapi_key", "")
-        self.allowed_domains: Optional[List[str]] = cfg.get("allowed_domains") or None
+        self.allowed_domains: list[str] | None = cfg.get("allowed_domains") or None
         self.timeout: int = int(cfg.get("timeout", _DEFAULT_TIMEOUT))
         self.provider: str = cfg.get("provider", "auto")
 
-    def search(self, query: str, search_type: str = "general", max_results: int = 5, domain_filter: Optional[str] = None) -> Tuple[str, Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        search_type: str = "general",
+        max_results: int = 5,
+        domain_filter: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
         if not query or not query.strip():
             return "Empty search query provided.", {"error": "empty_query"}
 
@@ -124,15 +173,27 @@ class WebSearchEngine:
         effective_domains = [domain_filter] if domain_filter else self.allowed_domains
         enhanced_query = self._enhance_query(query, search_type)
 
-        results: List[Dict[str, str]] = []
+        results: list[dict[str, str]] = []
         provider_used = "none"
         t0 = time.perf_counter()
 
-        if self.provider == "tavily" or (self.provider == "auto" and self.tavily_api_key):
-            results = _search_tavily(enhanced_query, max_results, effective_domains, self.tavily_api_key)
+        if self.provider == "tavily" or (
+            self.provider == "auto" and self.tavily_api_key
+        ):
+            results = _search_tavily(
+                enhanced_query, max_results, effective_domains, self.tavily_api_key
+            )
             provider_used = "tavily"
-        if not results and (self.provider == "serpapi" or (self.provider == "auto" and self.serpapi_key)):
-            results = _search_serpapi(enhanced_query, max_results, self.timeout, effective_domains, self.serpapi_key)
+        if not results and (
+            self.provider == "serpapi" or (self.provider == "auto" and self.serpapi_key)
+        ):
+            results = _search_serpapi(
+                enhanced_query,
+                max_results,
+                self.timeout,
+                effective_domains,
+                self.serpapi_key,
+            )
             provider_used = "serpapi"
         if not results and self.provider in ("duckduckgo", "auto"):
             results = _search_duckduckgo(enhanced_query, max_results, effective_domains)
@@ -141,10 +202,17 @@ class WebSearchEngine:
         duration_ms = int((time.perf_counter() - t0) * 1000)
 
         if not results:
-            return f"No web results found for query: `{query}`", {"query": query, "provider": provider_used, "duration_ms": duration_ms, "error": "no_results"}
+            return f"No web results found for query: `{query}`", {
+                "query": query,
+                "provider": provider_used,
+                "duration_ms": duration_ms,
+                "error": "no_results",
+            }
 
-        lines = [f"Web search results for: `{query}` ({len(results)} result(s) via {provider_used})\n"]
-        urls: List[str] = []
+        lines = [
+            f"Web search results for: `{query}` ({len(results)} result(s) via {provider_used})\n"
+        ]
+        urls: list[str] = []
         for i, r in enumerate(results, 1):
             lines.append(f"{i}. {r.get('title', 'No title')}")
             if r.get("url"):
@@ -155,33 +223,54 @@ class WebSearchEngine:
             lines.append("")
 
         return "\n".join(lines).strip(), {
-            "query": query, "provider": provider_used, "results_count": len(results),
-            "urls": urls[:10], "duration_ms": duration_ms,
+            "query": query,
+            "provider": provider_used,
+            "results_count": len(results),
+            "urls": urls[:10],
+            "duration_ms": duration_ms,
         }
 
     @staticmethod
     def _enhance_query(query: str, search_type: str) -> str:
         lower = query.lower()
-        if search_type == "version" and "latest" not in lower and "version" not in lower:
+        if (
+            search_type == "version"
+            and "latest" not in lower
+            and "version" not in lower
+        ):
             return f"{query} latest stable version"
         if search_type == "cve" and "cve" not in lower and "vulnerability" not in lower:
             return f"{query} CVE security vulnerability"
-        if search_type == "code_docs" and "documentation" not in lower and "docs" not in lower:
+        if (
+            search_type == "code_docs"
+            and "documentation" not in lower
+            and "docs" not in lower
+        ):
             return f"{query} documentation API reference"
         return query
 
 
-def build_web_search_tool(config: Optional[Dict[str, Any]] = None) -> StructuredTool:
+def build_web_search_tool(config: dict[str, Any] | None = None) -> StructuredTool:
     engine = WebSearchEngine(config)
 
-    def _run(query: str, search_type: str = "general", max_results: int = 5, domain_filter: Optional[str] = None) -> Tuple[str, Dict[str, Any]]:
+    def _run(
+        query: str,
+        search_type: str = "general",
+        max_results: int = 5,
+        domain_filter: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
         try:
             return engine.search(query, search_type, max_results, domain_filter)
         except Exception as e:
             logger.exception("web_search failed")
             return f"Search failed: {e}", {"error": str(e)}
 
-    async def _arun(query: str, search_type: str = "general", max_results: int = 5, domain_filter: Optional[str] = None) -> Tuple[str, Dict[str, Any]]:
+    async def _arun(
+        query: str,
+        search_type: str = "general",
+        max_results: int = 5,
+        domain_filter: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
         return await run_sync(_run, query, search_type, max_results, domain_filter)
 
     return StructuredTool.from_function(

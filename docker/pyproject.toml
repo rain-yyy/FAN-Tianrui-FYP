@@ -46,6 +46,7 @@ dev = [
     "ruff>=0.6.0",
 ]
 
+
 [tool.uv]
 package = false
 
@@ -54,9 +55,5 @@ line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "N", "D", "UP", "B"]
-# Docstrings are optional; only lint the format of ones that exist.
-ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
+select = ["E", "W", "F", "I", "N", "UP", "B"]
+ignore = ["B904","E501"]

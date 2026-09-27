@@ -5,21 +5,21 @@
 「当前时刻」回退为应用进程 UTC（与 DB 有微小偏差可能）。
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 # /generate 短路缓存：超过该整天数则触发完整重新生成；窗口边界含边界当天仍可命中缓存。
 WIKI_GENERATION_CACHE_MAX_AGE_DAYS = 3
 
 
-def parse_supabase_timestamp(raw: Any) -> Optional[datetime]:
+def parse_supabase_timestamp(raw: Any) -> datetime | None:
     """将 Supabase 返回的时间戳解析为带 UTC 时区的 datetime。"""
     if raw is None:
         return None
     if isinstance(raw, datetime):
         dt = raw
         if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
+            return dt.replace(tzinfo=UTC)
         return dt
     if isinstance(raw, str):
         s = raw.strip()
@@ -30,7 +30,7 @@ def parse_supabase_timestamp(raw: Any) -> Optional[datetime]:
                 s = s[:-1] + "+00:00"
             dt = datetime.fromisoformat(s)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
             return dt
         except ValueError:
             return None
@@ -38,8 +38,7 @@ def parse_supabase_timestamp(raw: Any) -> Optional[datetime]:
 
 
 def wiki_generation_cache_is_stale(repo_info: dict, max_age_days: int) -> bool:
-    """
-    RPC 回退路径：仅使用行内 `last_updated`（Supabase 返回值），与进程 UTC 比较。
+    """RPC 回退路径：仅使用行内 `last_updated`（Supabase 返回值），与进程 UTC 比较。
     与 SQL 一致：过期当且仅当 last_updated < (now_utc - max_age_days)；
     last_updated >= 该阈值则视为未过期。
     """
@@ -48,5 +47,5 @@ def wiki_generation_cache_is_stale(repo_info: dict, max_age_days: int) -> bool:
     dt = parse_supabase_timestamp(repo_info.get("last_updated"))
     if dt is None:
         return True
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
     return dt < cutoff

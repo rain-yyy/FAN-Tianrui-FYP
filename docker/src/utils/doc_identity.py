@@ -1,5 +1,4 @@
-"""
-`ingestion` 与 `core` 两层共用的文档标识/还原工具。
+"""`ingestion` 与 `core` 两层共用的文档标识/还原工具。
 
 独立存放以打破一个真实的循环依赖：ingestion/vector_store.py 需要 compute_doc_key
 生成去重键，core/retrieval.py 需要 payload_to_document 把 Qdrant payload 还原成
@@ -7,8 +6,8 @@ Document —— 两边互相需要对方模块里的符号。此前双方都用�
 而不是让顶层导入直接失败。抽到这个不依赖 ingestion 或 core 任何内容的叶子模块后，
 两边都可以在模块顶层正常导入。
 """
+
 import hashlib
-from typing import Optional
 
 from langchain_core.documents import Document
 
@@ -22,7 +21,7 @@ def compute_doc_key(doc: Document) -> str:
     return f"{source}|{anchor}|{digest}"
 
 
-def payload_to_document(payload: Optional[dict], category: str) -> Document:
+def payload_to_document(payload: dict | None, category: str) -> Document:
     """将 Qdrant point payload 还原为 Document，供检索侧（retrieval.py/chat.py）共用。"""
     payload = payload or {}
     content = payload.get("content", "")

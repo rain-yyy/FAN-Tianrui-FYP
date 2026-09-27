@@ -1,5 +1,4 @@
-"""
-Canonical project path roots and repo-URL-to-disk-directory-name mapping.
+"""Canonical project path roots and repo-URL-to-disk-directory-name mapping.
 
 Single source of truth for PROJECT_ROOT (the `docker/` directory — the
 package root `src.*` imports resolve against) and the persistent data
@@ -12,6 +11,7 @@ Note: `scripts/api.py` still computes its own PROJECT_ROOT — it has to,
 since that computation exists solely to bootstrap `sys.path` before
 `src.*` (and therefore this module) can be imported at all.
 """
+
 import os
 from pathlib import Path
 
@@ -25,8 +25,7 @@ _DATA_ROOT_DEFAULT: Path = REPO_ROOT / "data"
 
 
 def _resolve_data_root(env_var: str, default: Path) -> Path:
-    """
-    Resolve a persistent-data directory root from an env var.
+    """Resolve a persistent-data directory root from an env var.
 
     A relative override is anchored to REPO_ROOT rather than left to resolve
     against the caller's current working directory, which otherwise differs
@@ -41,8 +40,12 @@ def _resolve_data_root(env_var: str, default: Path) -> Path:
     return resolved
 
 
-VECTOR_STORE_ROOT: Path = _resolve_data_root("VECTOR_STORE_PATH", _DATA_ROOT_DEFAULT / "vector_stores")
-REPO_STORE_ROOT: Path = _resolve_data_root("REPO_STORE_PATH", _DATA_ROOT_DEFAULT / "repos")
+VECTOR_STORE_ROOT: Path = _resolve_data_root(
+    "VECTOR_STORE_PATH", _DATA_ROOT_DEFAULT / "vector_stores"
+)
+REPO_STORE_ROOT: Path = _resolve_data_root(
+    "REPO_STORE_PATH", _DATA_ROOT_DEFAULT / "repos"
+)
 
 
 def repo_disk_dirname(repo_url: str) -> str:

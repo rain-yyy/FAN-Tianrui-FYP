@@ -4,25 +4,23 @@ import logging
 import math
 import re
 from collections import Counter, defaultdict
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from langchain_core.documents import Document
 
-from src.ingestion.vector_store import payload_to_document, query_dense, query_sparse
-from src.utils.doc_identity import compute_doc_key
+from src.ingestion.vector_store import query_dense, query_sparse
+from src.utils.doc_identity import compute_doc_key, payload_to_document
 
 logger = logging.getLogger("app.core.retrieval")
 
-Tokenizer = Callable[[str], List[str]]
+Tokenizer = Callable[[str], list[str]]
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_\u4e00-\u9fff]+", re.UNICODE)
 
 
-def default_tokenizer(text: str) -> List[str]:
-    """
-    轻量分词实现，提取匹配的（中文，英文，数字，下划线）
-    """
+def default_tokenizer(text: str) -> list[str]:
+    """轻量分词实现，提取匹配的（中文，英文，数字，下划线）"""
     if not text:
         return []
     return _TOKEN_PATTERN.findall(text.lower())
@@ -32,10 +30,8 @@ def _clone_document(doc: Document) -> Document:
     return Document(page_content=doc.page_content, metadata=dict(doc.metadata))
 
 
-def normalize_scores(values: Sequence[float]) -> List[float]:
-    """
-    归一化分数，将分数范围缩放到0-1之间。
-    """
+def normalize_scores(values: Sequence[float]) -> list[float]:
+    """归一化分数，将分数范围缩放到0-1之间。"""
     if not values:
         return []
     max_v = max(values)
@@ -57,16 +53,14 @@ class RankedCandidate:
 
 
 class SparseBM25Index:
-    """
-    只依赖轻量分词的 BM25 实现，避免额外依赖和构建流程。
-    """
+    """只依赖轻量分词的 BM25 实现，避免额外依赖和构建流程。"""
 
     def __init__(
         self,
-        documents: List[Document],
-        tokenized_docs: List[List[str]],
-        term_freqs: List[Counter[str]],
-        idf: Dict[str, float],
+        documents: list[Document],
+        tokenized_docs: list[list[str]],
+        term_freqs: list[Counter[str]],
+        idf: dict[str, float],
         avg_doc_len: float,
         tokenizer: Tokenizer,
     ) -> None:
@@ -82,12 +76,12 @@ class SparseBM25Index:
     @classmethod
     def build(
         cls, documents: Iterable[Document], tokenizer: Tokenizer | None = None
-    ) -> "SparseBM25Index":
+    ) -> SparseBM25Index:
         tokenizer = tokenizer or default_tokenizer
-        docs: List[Document] = []
-        tokenized_docs: List[List[str]] = []
-        term_freqs: List[Counter[str]] = []
-        doc_freqs: Dict[str, int] = defaultdict(int)
+        docs: list[Document] = []
+        tokenized_docs: list[list[str]] = []
+        term_freqs: list[Counter[str]] = []
+        doc_freqs: dict[str, int] = defaultdict(int)
 
         for doc in documents:
             cloned = _clone_document(doc)
@@ -105,20 +99,20 @@ class SparseBM25Index:
         total_len = sum(len(tokens) for tokens in tokenized_docs)
         avg_len = total_len / len(tokenized_docs) if tokenized_docs else 0.0
         doc_count = len(docs)
-        idf: Dict[str, float] = {}
+        idf: dict[str, float] = {}
         for term, df in doc_freqs.items():
             idf[term] = math.log(1 + (doc_count - df + 0.5) / (df + 0.5))
 
         return cls(docs, tokenized_docs, term_freqs, idf, avg_len, tokenizer)
 
-    def search(self, query: str, top_k: int = 20) -> List[Tuple[Document, float]]:
+    def search(self, query: str, top_k: int = 20) -> list[tuple[Document, float]]:
         if not self._documents or top_k <= 0:
             return []
         query_tokens = self._tokenizer(query)
         if not query_tokens:
             return []
 
-        scores: List[Tuple[int, float]] = []
+        scores: list[tuple[int, float]] = []
         for idx, freq in enumerate(self._term_freqs):
             if not freq:
                 continue
@@ -131,7 +125,9 @@ class SparseBM25Index:
                 if idf is None:
                     continue
                 tf = freq[term]
-                denom = tf + self._k1 * (1 - self._b + self._b * doc_len / (self._avg_doc_len or 1))
+                denom = tf + self._k1 * (
+                    1 - self._b + self._b * doc_len / (self._avg_doc_len or 1)
+                )
                 score += idf * (tf * (self._k1 + 1) / denom)
             if score > 0:
                 scores.append((idx, score))
@@ -164,10 +160,8 @@ def mmr_select(
     top_n: int,
     lambda_mult: float = 0.5,
     tokenizer: Tokenizer | None = None,
-) -> List[RankedCandidate]:
-    """
-    经典 MMR：兼顾单点相关性与候选间的互斥性。
-    """
+) -> list[RankedCandidate]:
+    """经典 MMR：兼顾单点相关性与候选间的互斥性。"""
     if not candidates or top_n <= 0:
         return []
 
@@ -178,9 +172,11 @@ def mmr_select(
     # 反超真正包含目标标识符、但被大量代码 token 稀释了信号的正确代码块，
     # 从而在 MMR 阶段把 final_score 已经排对的结果打乱。
     tokenizer = tokenizer or default_tokenizer
-    doc_counters = {cand.key: Counter(tokenizer(cand.doc.page_content)) for cand in candidates}
+    doc_counters = {
+        cand.key: Counter(tokenizer(cand.doc.page_content)) for cand in candidates
+    }
 
-    selected: List[RankedCandidate] = []
+    selected: list[RankedCandidate] = []
     remaining = list(candidates)
 
     while remaining and len(selected) < top_n:
@@ -209,16 +205,15 @@ def mmr_select(
 
 
 def _fuse_dense_sparse(
-    dense_items: Sequence[Tuple[Document, float]],
-    sparse_items: Sequence[Tuple[Document, float]],
+    dense_items: Sequence[tuple[Document, float]],
+    sparse_items: Sequence[tuple[Document, float]],
     *,
     dense_weight: float,
     sparse_weight: float,
-    key_fn: Optional[Callable[[Document], str]] = None,
-    category_fn: Optional[Callable[[Document], str]] = None,
-) -> List[RankedCandidate]:
-    """
-    对 dense/sparse 两路 (Document, score) 结果做归一化 + 加权融合，按 final_score
+    key_fn: Callable[[Document], str] | None = None,
+    category_fn: Callable[[Document], str] | None = None,
+) -> list[RankedCandidate]:
+    """对 dense/sparse 两路 (Document, score) 结果做归一化 + 加权融合，按 final_score
     降序排序返回（不做 top_k 截断，由调用方决定）。CommunityFirstRetriever.hybrid_retrieve
     与 qdrant_search_category 此前各自内联实现了这套完全相同的归一化+加权逻辑。
 
@@ -228,7 +223,7 @@ def _fuse_dense_sparse(
     """
     key_fn = key_fn or compute_doc_key
     category_fn = category_fn or (lambda doc: doc.metadata.get("category", "unknown"))
-    candidates: Dict[str, RankedCandidate] = {}
+    candidates: dict[str, RankedCandidate] = {}
 
     def _get_or_create(doc: Document) -> RankedCandidate:
         key = key_fn(doc)
@@ -251,39 +246,42 @@ def _fuse_dense_sparse(
         candidate.sparse_score = max(candidate.sparse_score, norm_score)
 
     for candidate in candidates.values():
-        candidate.final_score = dense_weight * candidate.dense_score + sparse_weight * candidate.sparse_score
+        candidate.final_score = (
+            dense_weight * candidate.dense_score
+            + sparse_weight * candidate.sparse_score
+        )
 
     return sorted(candidates.values(), key=lambda c: c.final_score, reverse=True)
 
 
 # ====================== 社区优先两阶段检索 ======================
 
+
 @dataclass
 class CommunityInfo:
     """社区信息数据类"""
+
     community_id: int
     summary: str
-    node_ids: List[str] = field(default_factory=list)
+    node_ids: list[str] = field(default_factory=list)
     relevance_score: float = 0.0
 
 
 class CommunityFirstRetriever:
-    """
-    社区优先的两阶段检索器。
-    
+    """社区优先的两阶段检索器。
+
     第一阶段：通过查询语义匹配定位相关业务社区
     第二阶段：在匹配的社区内部检索具体代码片段
     """
 
     def __init__(
         self,
-        communities: Dict[int, List[str]],
-        community_summaries: Dict[int, str],
-        documents: List[Document],
+        communities: dict[int, list[str]],
+        community_summaries: dict[int, str],
+        documents: list[Document],
         tokenizer: Tokenizer | None = None,
     ):
-        """
-        初始化社区优先检索器。
+        """初始化社区优先检索器。
 
         Args:
             communities: 社区ID到节点ID列表的映射 {community_id: [node_id1, node_id2, ...]}
@@ -297,19 +295,19 @@ class CommunityFirstRetriever:
         self._tokenizer = tokenizer or default_tokenizer
 
         # 为每个文档建立社区映射
-        self._doc_to_community: Dict[str, int] = {}
-        self._community_docs: Dict[int, List[Document]] = defaultdict(list)
+        self._doc_to_community: dict[str, int] = {}
+        self._community_docs: dict[int, list[Document]] = defaultdict(list)
         self._build_doc_community_mapping()
 
         # 为社区摘要构建 BM25 索引
-        self._community_bm25: Optional[SparseBM25Index] = None
-        self._community_info_list: List[CommunityInfo] = []
+        self._community_bm25: SparseBM25Index | None = None
+        self._community_info_list: list[CommunityInfo] = []
         self._build_community_index()
 
     def _build_doc_community_mapping(self) -> None:
         """构建文档到社区的映射关系"""
         # 创建节点ID到社区ID的映射
-        node_to_community: Dict[str, int] = {}
+        node_to_community: dict[str, int] = {}
         for comm_id, nodes in self._communities.items():
             for node in nodes:
                 node_to_community[node] = comm_id
@@ -351,31 +349,33 @@ class CommunityFirstRetriever:
         # 创建社区信息列表
         for comm_id, summary in self._summaries.items():
             nodes = self._communities.get(comm_id, [])
-            self._community_info_list.append(CommunityInfo(
-                community_id=comm_id,
-                summary=summary,
-                node_ids=nodes,
-            ))
+            self._community_info_list.append(
+                CommunityInfo(
+                    community_id=comm_id,
+                    summary=summary,
+                    node_ids=nodes,
+                )
+            )
 
         # 创建虚拟文档用于 BM25 检索
         community_docs = [
             Document(
-                page_content=info.summary,
-                metadata={"community_id": info.community_id}
+                page_content=info.summary, metadata={"community_id": info.community_id}
             )
             for info in self._community_info_list
         ]
 
         if community_docs:
-            self._community_bm25 = SparseBM25Index.build(community_docs, self._tokenizer)
+            self._community_bm25 = SparseBM25Index.build(
+                community_docs, self._tokenizer
+            )
 
     def retrieve_communities(
         self,
         query: str,
         top_k: int = 3,
-    ) -> List[CommunityInfo]:
-        """
-        第一阶段：检索与查询最相关的社区。
+    ) -> list[CommunityInfo]:
+        """第一阶段：检索与查询最相关的社区。
 
         Args:
             query: 用户查询
@@ -405,11 +405,10 @@ class CommunityFirstRetriever:
     def retrieve_from_communities(
         self,
         query: str,
-        community_ids: List[int],
+        community_ids: list[int],
         top_k_per_community: int = 5,
-    ) -> List[Tuple[Document, float]]:
-        """
-        第二阶段：从指定社区内检索文档。
+    ) -> list[tuple[Document, float]]:
+        """第二阶段：从指定社区内检索文档。
 
         Args:
             query: 用户查询
@@ -419,7 +418,7 @@ class CommunityFirstRetriever:
         Returns:
             (文档, 分数) 元组列表
         """
-        all_results: List[Tuple[Document, float]] = []
+        all_results: list[tuple[Document, float]] = []
 
         for comm_id in community_ids:
             comm_docs = self._community_docs.get(comm_id, [])
@@ -448,9 +447,8 @@ class CommunityFirstRetriever:
         top_k_communities: int = 3,
         top_k_docs_per_community: int = 5,
         top_k_total: int = 10,
-    ) -> List[Tuple[Document, float]]:
-        """
-        执行完整的两阶段检索。
+    ) -> list[tuple[Document, float]]:
+        """执行完整的两阶段检索。
 
         Args:
             query: 用户查询
@@ -482,14 +480,13 @@ class CommunityFirstRetriever:
     def hybrid_retrieve(
         self,
         query: str,
-        dense_results: List[Tuple[Document, float]],
+        dense_results: list[tuple[Document, float]],
         top_k_communities: int = 3,
         top_k_docs_per_community: int = 5,
         alpha: float = 0.6,
         top_k: int = 10,
-    ) -> List[RankedCandidate]:
-        """
-        混合检索：结合社区优先检索和稠密向量检索。
+    ) -> list[RankedCandidate]:
+        """混合检索：结合社区优先检索和稠密向量检索。
 
         Args:
             query: 用户查询
@@ -529,10 +526,9 @@ def qdrant_search_category(
     sparse_k: int,
     dense_weight: float = 0.6,
     sparse_weight: float = 0.4,
-    dense_query: Optional[str] = None,
-) -> List["RankedCandidate"]:
-    """
-    对指定 category 的 Qdrant collection 做一次 dense + sparse 召回并加权融合。
+    dense_query: str | None = None,
+) -> list[RankedCandidate]:
+    """对指定 category 的 Qdrant collection 做一次 dense + sparse 召回并加权融合。
 
     dense/sparse 两次独立请求（均按 repo_id 过滤）并行发起，避免依次等待两次网络往返；
     命中结果做客户端归一化加权，保留现有 dense/sparse 权重语义，替代旧的
@@ -545,13 +541,22 @@ def qdrant_search_category(
     from concurrent.futures import ThreadPoolExecutor
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        dense_future = pool.submit(query_dense, client, category, repo_id, dense_query or query, dense_k)
-        sparse_future = pool.submit(query_sparse, client, category, repo_id, query, sparse_k)
+        dense_future = pool.submit(
+            query_dense, client, category, repo_id, dense_query or query, dense_k
+        )
+        sparse_future = pool.submit(
+            query_sparse, client, category, repo_id, query, sparse_k
+        )
         dense_hits = dense_future.result()
         sparse_hits = sparse_future.result()
 
-    dense_items = [(payload_to_document(payload, category), score) for payload, score in dense_hits]
-    sparse_items = [(payload_to_document(payload, category), score) for payload, score in sparse_hits]
+    dense_items = [
+        (payload_to_document(payload, category), score) for payload, score in dense_hits
+    ]
+    sparse_items = [
+        (payload_to_document(payload, category), score)
+        for payload, score in sparse_hits
+    ]
 
     return _fuse_dense_sparse(
         dense_items,
@@ -564,13 +569,12 @@ def qdrant_search_category(
 
 
 def create_community_retriever(
-    communities: Dict[int, List[str]],
-    community_summaries: Dict[int, str],
-    documents: List[Document],
+    communities: dict[int, list[str]],
+    community_summaries: dict[int, str],
+    documents: list[Document],
     tokenizer: Tokenizer | None = None,
 ) -> CommunityFirstRetriever:
-    """
-    创建社区优先检索器的工厂函数。
+    """创建社区优先检索器的工厂函数。
 
     Args:
         communities: 社区ID到节点ID列表的映射
@@ -587,4 +591,3 @@ def create_community_retriever(
         documents=documents,
         tokenizer=tokenizer,
     )
-

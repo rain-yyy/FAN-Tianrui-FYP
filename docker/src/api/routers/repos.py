@@ -9,8 +9,7 @@ router = APIRouter()
 
 @router.post("/dashboard/repos")
 async def list_dashboard_repositories_api(request: Request):
-    """
-    工作台仓库卡片：以 `repositories` 表中已索引的仓库为准（含 R2 结构与内容 URL），
+    """工作台仓库卡片：以 `repositories` 表中已索引的仓库为准（含 R2 结构与内容 URL），
     仅展示当前用户曾成功生成/命中缓存的 repo；返回 task_id 供前端进入 /wiki/:taskId。
     """
     data = await request.json()
@@ -23,16 +22,16 @@ async def list_dashboard_repositories_api(request: Request):
         repos = supabase_client.get_user_dashboard_repositories(user_id)
     except Exception as e:
         logger.exception("列出工作台仓库失败")
-        raise HTTPException(status_code=503, detail=f"Failed to list dashboard repositories: {e}") from e
+        raise HTTPException(
+            status_code=503, detail=f"Failed to list dashboard repositories: {e}"
+        ) from e
 
     return {"repos": repos}
 
 
 @router.get("/repos/github-metadata")
 async def repos_github_metadata_api():
-    """
-    返回 repositories 表中所有仓库的 stargazers_count 与 github_short_description。
-    """
+    """返回 repositories 表中所有仓库的 stargazers_count 与 github_short_description。"""
     supabase_client = get_supabase_client()
     if not supabase_client.client:
         raise HTTPException(status_code=503, detail="Database not configured")
@@ -52,9 +51,7 @@ async def repos_github_metadata_api():
 
 @router.get("/chat/repos")
 async def list_available_repos_api():
-    """
-    列出所有可用于聊天的仓库
-    """
+    """列出所有可用于聊天的仓库"""
     logger.info("列出所有可用于聊天的仓库")
     supabase_client = get_supabase_client()
     try:

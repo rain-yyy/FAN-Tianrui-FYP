@@ -1,7 +1,7 @@
-"""
-Pure-function tests for `src/chat/memory.py`'s token-budget history
+"""Pure-function tests for `src/chat/memory.py`'s token-budget history
 reconstruction — no Supabase/network I/O needed.
 """
+
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src.chat.memory import count_message_tokens, row_to_message, truncate_to_budget
@@ -13,7 +13,12 @@ def _msg(role: str, n_chars: int):
 
 
 def test_truncate_to_budget_keeps_newest_first():
-    messages = [_msg("user", 40), _msg("assistant", 40), _msg("user", 40), _msg("assistant", 40)]
+    messages = [
+        _msg("user", 40),
+        _msg("assistant", 40),
+        _msg("user", 40),
+        _msg("assistant", 40),
+    ]
     # each message is ~10 tokens (40 chars // 4); a 15-token budget fits only the newest one
     kept = truncate_to_budget(messages, budget_tokens=15)
     assert kept == [messages[-1]]

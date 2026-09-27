@@ -2,30 +2,72 @@ import os
 import subprocess
 from pathlib import Path
 
-ALLOWED_SUFFIXES: frozenset[str] = frozenset({
-    ".py", ".js", ".ts", ".tsx", ".jsx",
-    ".java", ".go", ".rs", ".cpp", ".c", ".h",
-    ".rb",
-    ".json", ".yaml", ".yml", ".toml", ".md",
-})
+ALLOWED_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".py",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".java",
+        ".go",
+        ".rs",
+        ".cpp",
+        ".c",
+        ".h",
+        ".rb",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".md",
+    }
+)
 
-CODE_SUFFIXES: frozenset[str] = frozenset({
-    ".py", ".js", ".ts", ".tsx", ".jsx",
-    ".java", ".go", ".rs", ".cpp", ".c", ".h",
-    ".rb",
-})
+CODE_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".py",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".java",
+        ".go",
+        ".rs",
+        ".cpp",
+        ".c",
+        ".h",
+        ".rb",
+    }
+)
 
-TEXT_SUFFIXES: frozenset[str] = frozenset({
-    ".json", ".yaml", ".yml", ".toml", ".md",
-})
+TEXT_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".md",
+    }
+)
 
 
 def _git_tracked_paths(repo_path: str) -> list[str]:
     # 返回 repo_path 下 git 认为"有效"的文件（相对路径），忽略规则完全交给仓库自身的 .gitignore。
     result = subprocess.run(
         # --cached 已跟踪文件，--others --exclude-standard 补上未被忽略的新文件
-        ["git", "-C", repo_path, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        capture_output=True, check=True,
+        [
+            "git",
+            "-C",
+            repo_path,
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+        capture_output=True,
+        check=True,
     )
     return [p for p in result.stdout.decode("utf-8", "replace").split("\0") if p]
 
@@ -76,14 +118,14 @@ def generate_file_tree(repo_path: str) -> str:
                 current_level[part] = {}
             current_level = current_level[part]
 
-    def build_tree_string(d, indent=''):
-        s = ''
+    def build_tree_string(d, indent=""):
+        s = ""
         items = sorted(d.items())
         for i, (key, value) in enumerate(items):
-            connector = '└── ' if i == len(items) - 1 else '├── '
-            s += indent + connector + key + '\n'
+            connector = "└── " if i == len(items) - 1 else "├── "
+            s += indent + connector + key + "\n"
             if value:
-                new_indent = indent + ('    ' if i == len(items) - 1 else '│   ')
+                new_indent = indent + ("    " if i == len(items) - 1 else "│   ")
                 s += build_tree_string(value, new_indent)
         return s
 

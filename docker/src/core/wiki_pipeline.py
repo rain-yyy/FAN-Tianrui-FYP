@@ -1,31 +1,53 @@
-import os
-import json
 import asyncio
-import shutil
+import json
 import logging
-from pathlib import Path
+import os
+import shutil
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Tuple
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 # 导入必要的模块
 from scripts.setup_repository import setup_repository
-from src.config import CONFIG_PATH, get_rag_retry_delays_sec, should_save_rag_chunk_debug
+from src.config import (
+    CONFIG_PATH,
+    get_rag_retry_delays_sec,
+    should_save_rag_chunk_debug,
+)
 from src.core.task_manager import TaskStatus, register_task
-from src.ingestion.file_processor import generate_file_tree, get_files_to_process, split_code_and_text_files
 from src.ingestion.docu_splitter import load_and_split_docs
+from src.ingestion.file_processor import (
+    generate_file_tree,
+    get_files_to_process,
+    split_code_and_text_files,
+)
 from src.ingestion.vector_store import upsert_vector_store
-from src.wiki.struct_gen import generate_wiki_structure
-from src.wiki.content_gen import WikiContentGenerator
+from src.paths import (
+    PROJECT_ROOT,
+    REPO_STORE_ROOT,
+    VECTOR_STORE_ROOT,
+    repo_disk_dirname,
+)
 from src.storage.r2_client import upload_wiki_to_r2
-from src.storage.supabase_client import SupabaseClient, SupabaseStorageError, get_supabase_client
-from src.paths import PROJECT_ROOT, VECTOR_STORE_ROOT, REPO_STORE_ROOT, repo_disk_dirname
-from src.utils.wiki_cache_policy import wiki_generation_cache_is_stale, WIKI_GENERATION_CACHE_MAX_AGE_DAYS
+from src.storage.supabase_client import (
+    SupabaseClient,
+    SupabaseStorageError,
+    get_supabase_client,
+)
+from src.utils.wiki_cache_policy import (
+    WIKI_GENERATION_CACHE_MAX_AGE_DAYS,
+    wiki_generation_cache_is_stale,
+)
+from src.wiki.content_gen import WikiContentGenerator
+from src.wiki.struct_gen import generate_wiki_structure
 
 logger = logging.getLogger("api")
 
 # 任务级工作目录根路径
-TASK_WORK_ROOT: Path = Path(os.getenv("TASK_WORK_PATH", str(PROJECT_ROOT / "task_workdirs")))
+TASK_WORK_ROOT: Path = Path(
+    os.getenv("TASK_WORK_PATH", str(PROJECT_ROOT / "task_workdirs"))
+)
 
 
 def _task_output_dir(task_id: str) -> Path:
@@ -35,9 +57,10 @@ def _task_output_dir(task_id: str) -> Path:
     return d
 
 
-def _persist_graphrag_communities_to_vector_store(repo_url: str, source_json: Path) -> None:
-    """
-    在 Wiki 流水线早期把 GraphRAG 元数据复制到向量库根目录。
+def _persist_graphrag_communities_to_vector_store(
+    repo_url: str, source_json: Path
+) -> None:
+    """在 Wiki 流水线早期把 GraphRAG 元数据复制到向量库根目录。
 
     避免 run_rag_indexing 中途失败或 finally 清理任务目录时，仅存于 task_dir 的 JSON 丢失；
     后台 RAG 重试时也能在向量库路径下找到该文件（无需再传 communities_json_path）。
@@ -56,9 +79,8 @@ def _persist_graphrag_communities_to_vector_store(repo_url: str, source_json: Pa
         logger.warning("[GraphRAG] 结构阶段写入向量库失败: %s", exc)
 
 
-def _persist_code_graph_to_vector_store(repo_url: str, source_json: Path) -> Optional[str]:
-    """
-    在 Wiki 流水线早期把 code_graph.json 复制到向量库根目录。
+def _persist_code_graph_to_vector_store(repo_url: str, source_json: Path) -> str | None:
+    """在 Wiki 流水线早期把 code_graph.json 复制到向量库根目录。
 
     与 _persist_graphrag_communities_to_vector_store 策略相同：RAG 失败或任务目录被清理时，
     向量库目录下已有备份可供 Agent 的 CodeGraphTool 直接加载。
@@ -75,16 +97,19 @@ def _persist_code_graph_to_vector_store(repo_url: str, source_json: Path) -> Opt
         dest = dest_root / "code_graph.json"
         if source_json.resolve() != dest.resolve():
             shutil.copy2(source_json, dest)
-        logger.info("[CodeGraph] code_graph.json 已写入向量库目录（结构阶段）: %s", dest)
+        logger.info(
+            "[CodeGraph] code_graph.json 已写入向量库目录（结构阶段）: %s", dest
+        )
         return str(dest)
     except OSError as exc:
         logger.warning("[CodeGraph] 结构阶段写入向量库失败: %s", exc)
         return None
 
 
-def _task_marked_cancelled_by_user(supabase_client: SupabaseClient, task_id: str) -> bool:
-    """
-    用户已通过 /cancel 将任务标为 failed（含 Cancelled）时返回 True，
+def _task_marked_cancelled_by_user(
+    supabase_client: SupabaseClient, task_id: str
+) -> bool:
+    """用户已通过 /cancel 将任务标为 failed（含 Cancelled）时返回 True，
     避免后台在长时间 run_in_executor 结束后把状态写回 completed 覆盖取消结果。
     """
     try:
@@ -99,13 +124,17 @@ def _task_marked_cancelled_by_user(supabase_client: SupabaseClient, task_id: str
     return "cancel" in err
 
 
-def _update_progress(task_id: Optional[str], progress: float, step: str) -> None:
+def _update_progress(task_id: str | None, progress: float, step: str) -> None:
     """同步更新任务进度到 Supabase"""
     if task_id:
         try:
-            success = get_supabase_client().update_task_progress(task_id, progress, step)
+            success = get_supabase_client().update_task_progress(
+                task_id, progress, step
+            )
             if not success:
-                logger.warning(f"Task {task_id} not found (likely deleted), aborting...")
+                logger.warning(
+                    f"Task {task_id} not found (likely deleted), aborting..."
+                )
                 raise InterruptedError(f"Task {task_id} was deleted.")
         except Exception as e:
             if isinstance(e, InterruptedError):
@@ -114,12 +143,13 @@ def _update_progress(task_id: Optional[str], progress: float, step: str) -> None
 
 
 def run_structure_generation(
-    repo_url: str, config_path: Path, output_path: Path,
-    task_id: Optional[str] = None,
-    code_graph_persist_path: Optional[str] = None,
-) -> Tuple[str, Dict[str, Any]]:
-    """
-    根据仓库地址生成 wiki 目录结构，并保存到指定文件。
+    repo_url: str,
+    config_path: Path,
+    output_path: Path,
+    task_id: str | None = None,
+    code_graph_persist_path: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """根据仓库地址生成 wiki 目录结构，并保存到指定文件。
 
     code_graph_persist_path: 在构建代码图时同步将图保存为 NetworkX node-link JSON。
     """
@@ -131,7 +161,11 @@ def run_structure_generation(
 
     file_tree = generate_file_tree(repo_path)
 
-    _update_progress(task_id, 30, "Generating Wiki structure (including GraphRAG + code graph build)...")
+    _update_progress(
+        task_id,
+        30,
+        "Generating Wiki structure (including GraphRAG + code graph build)...",
+    )
 
     communities_path = str((output_path.parent / "graphrag_communities.json").resolve())
     wiki_structure = generate_wiki_structure(
@@ -152,13 +186,11 @@ def run_structure_generation(
 
 def run_wiki_content_generation(
     repo_path: str,
-    wiki_structure: Dict[str, Any],
+    wiki_structure: dict[str, Any],
     json_output_dir: Path,
-    task_id: Optional[str] = None
-) -> List[Path]:
-    """
-    调用 AI 客户端，根据 wiki 目录并发生成内容与 Mermaid 图，并写入 JSON。
-    """
+    task_id: str | None = None,
+) -> list[Path]:
+    """调用 AI 客户端，根据 wiki 目录并发生成内容与 Mermaid 图，并写入 JSON。"""
     _update_progress(task_id, 45, "Initializing AI chain...")
 
     def _progress_cb(progress: float, step: str):
@@ -184,21 +216,19 @@ def run_rag_indexing(
     repo_path: str,
     repo_url: str,
     config_path: Path,
-    task_id: Optional[str] = None,
-    communities_json_path: Optional[str] = None,
-    code_graph_json_path: Optional[str] = None,
+    task_id: str | None = None,
+    communities_json_path: str | None = None,
+    code_graph_json_path: str | None = None,
 ) -> str:
-    """
-    为仓库创建 RAG 向量索引（代码和文本分类）
-    """
+    """为仓库创建 RAG 向量索引（代码和文本分类）"""
     _update_progress(task_id, 88, "Building RAG vector index...")
-    
+
     repo_dir = repo_disk_dirname(repo_url)
     vector_store_path = VECTOR_STORE_ROOT / repo_dir
-    
+
     # 确保目录存在
     vector_store_path.mkdir(parents=True, exist_ok=True)
-    
+
     # 获取需要处理的文件
     all_files = get_files_to_process(repo_path)
 
@@ -208,11 +238,15 @@ def run_rag_indexing(
 
     # 分离代码和文本文件
     code_files, text_files = split_code_and_text_files(all_files)
-    
-    logger.info(f"[RAG] Found {len(code_files)} code files, {len(text_files)} text files")
-    
+
+    logger.info(
+        f"[RAG] Found {len(code_files)} code files, {len(text_files)} text files"
+    )
+
     # debug 输出目录放在向量库路径下，保证不同任务互相隔离；默认关闭，避免长期运行进程磁盘无限增长
-    chunk_debug_dir = vector_store_path / "chunk_debug" if should_save_rag_chunk_debug() else None
+    chunk_debug_dir = (
+        vector_store_path / "chunk_debug" if should_save_rag_chunk_debug() else None
+    )
 
     # 处理代码文件
     if code_files:
@@ -220,11 +254,15 @@ def run_rag_indexing(
 
         code_docs = load_and_split_docs(
             code_files,
-            debug_output_path=str(chunk_debug_dir / "code_chunks.jsonl") if chunk_debug_dir else None,
+            debug_output_path=str(chunk_debug_dir / "code_chunks.jsonl")
+            if chunk_debug_dir
+            else None,
         )
         if code_docs:
             upsert_vector_store(code_docs, repo_id=repo_dir, category="code")
-            logger.info(f"[RAG] Code chunks upserted to Qdrant: repo_id={repo_dir}, count={len(code_docs)}")
+            logger.info(
+                f"[RAG] Code chunks upserted to Qdrant: repo_id={repo_dir}, count={len(code_docs)}"
+            )
 
     # 处理文本文件
     if text_files:
@@ -232,19 +270,26 @@ def run_rag_indexing(
 
         text_docs = load_and_split_docs(
             text_files,
-            debug_output_path=str(chunk_debug_dir / "text_chunks.jsonl") if chunk_debug_dir else None,
+            debug_output_path=str(chunk_debug_dir / "text_chunks.jsonl")
+            if chunk_debug_dir
+            else None,
         )
         if text_docs:
             upsert_vector_store(text_docs, repo_id=repo_dir, category="text")
-            logger.info(f"[RAG] Text chunks upserted to Qdrant: repo_id={repo_dir}, count={len(text_docs)}")
-    
+            logger.info(
+                f"[RAG] Text chunks upserted to Qdrant: repo_id={repo_dir}, count={len(text_docs)}"
+            )
+
     if communities_json_path:
         src = Path(communities_json_path).expanduser().resolve()
         if src.is_file():
             dest = (vector_store_path / "graphrag_communities.json").resolve()
             try:
                 if src == dest:
-                    logger.info("[RAG] GraphRAG metadata already in vector store directory, skipping copy: %s", dest)
+                    logger.info(
+                        "[RAG] GraphRAG metadata already in vector store directory, skipping copy: %s",
+                        dest,
+                    )
                 else:
                     shutil.copy2(src, dest)
                     logger.info("[RAG] GraphRAG metadata copied to %s", dest)
@@ -257,28 +302,36 @@ def run_rag_indexing(
             dest_cg = (vector_store_path / "code_graph.json").resolve()
             try:
                 if src_cg == dest_cg:
-                    logger.info("[CodeGraph] Already in vector store directory, skipping copy: %s", dest_cg)
+                    logger.info(
+                        "[CodeGraph] Already in vector store directory, skipping copy: %s",
+                        dest_cg,
+                    )
                 else:
                     shutil.copy2(src_cg, dest_cg)
                     logger.info("[CodeGraph] code_graph.json copied to %s", dest_cg)
             except OSError as copy_exc:
-                logger.warning("[CodeGraph] Failed to copy code_graph.json: %s", copy_exc)
+                logger.warning(
+                    "[CodeGraph] Failed to copy code_graph.json: %s", copy_exc
+                )
 
     # 同步到 Supabase
     try:
         get_supabase_client().upsert_repo_wiki_data(
-            repo_url, r2_structure_url=None, r2_content_urls=None, vector_store_path=str(vector_store_path)
+            repo_url,
+            r2_structure_url=None,
+            r2_content_urls=None,
+            vector_store_path=str(vector_store_path),
         )
     except Exception as e:
         logger.error(f"[Supabase] Failed to sync vector path: {e}")
-    
+
     _update_progress(task_id, 91, "RAG vector index construction completed")
-    
+
     logger.info(f"[RAG] Vector store construction completed: {vector_store_path}")
     return str(vector_store_path)
 
 
-def _cleanup_repo_checkout(repo_path: Optional[str]) -> None:
+def _cleanup_repo_checkout(repo_path: str | None) -> None:
     """删除克隆的仓库工作目录；若该路径实际位于持久化仓库存储根（REPO_STORE_ROOT）之下则跳过。"""
     if not repo_path or not Path(repo_path).exists():
         return
@@ -302,8 +355,7 @@ def _cleanup_repo_checkout(repo_path: Optional[str]) -> None:
 
 
 def _cleanup_task_workdir(output_path: Path) -> bool:
-    """
-    若 output_path 位于 TASK_WORK_ROOT 下的任务工作目录内，直接整体删除该目录。
+    """若 output_path 位于 TASK_WORK_ROOT 下的任务工作目录内，直接整体删除该目录。
     返回 True 表示已处理（调用方无需再走逐文件回退清理）。
     """
     task_work_root = TASK_WORK_ROOT.resolve()
@@ -319,26 +371,33 @@ def _cleanup_task_workdir(output_path: Path) -> bool:
     return True
 
 
-def _cleanup_output_files_individually(output_path: Path, json_output_dir: Path) -> None:
+def _cleanup_output_files_individually(
+    output_path: Path, json_output_dir: Path
+) -> None:
     """回退路径：output_path 不在 TASK_WORK_ROOT 下时，分别清理 wiki_structure.json 与内容目录。"""
     if output_path.exists():
         try:
             output_path.unlink()
             logger.info(f"[清理] 已删除 wiki_structure.json: {output_path}")
         except Exception as e:
-            logger.warning(f"[清理警告] 删除 wiki_structure.json 失败: {output_path}, 错误: {e}")
+            logger.warning(
+                f"[清理警告] 删除 wiki_structure.json 失败: {output_path}, 错误: {e}"
+            )
 
     if json_output_dir.exists():
         try:
             shutil.rmtree(json_output_dir)
             logger.info(f"[清理] 已删除 wiki_section_json 目录: {json_output_dir}")
         except Exception as e:
-            logger.warning(f"[清理警告] 删除 wiki_section_json 目录失败: {json_output_dir}, 错误: {e}")
+            logger.warning(
+                f"[清理警告] 删除 wiki_section_json 目录失败: {json_output_dir}, 错误: {e}"
+            )
 
 
-def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output_dir: Path):
-    """
-    清理本地生成的临时文件，释放存储空间。
+def cleanup_local_files(
+    repo_path: str | None, output_path: Path, json_output_dir: Path
+):
+    """清理本地生成的临时文件，释放存储空间。
     如果 output_path 和 json_output_dir 位于同一个 task 工作目录，则直接清理整个工作目录。
     """
     _cleanup_repo_checkout(repo_path)
@@ -349,15 +408,16 @@ def cleanup_local_files(repo_path: Optional[str], output_path: Path, json_output
     _cleanup_output_files_individually(output_path, json_output_dir)
 
 
-async def _background_retry_rag_indexing(task_id: str, url_link: str, config_path: Path) -> None:
-    """
-    Wiki 已成功上传后，若 RAG 失败则在后台多次重试索引；成功后合并写回 tasks.result 与 repositories。
+async def _background_retry_rag_indexing(
+    task_id: str, url_link: str, config_path: Path
+) -> None:
+    """Wiki 已成功上传后，若 RAG 失败则在后台多次重试索引；成功后合并写回 tasks.result 与 repositories。
     每次重试单独克隆到持久目录，不依赖已清理的任务临时目录。
     """
     supabase_client = get_supabase_client()
     delays_before_attempt_sec = get_rag_retry_delays_sec()
     loop = asyncio.get_event_loop()
-    last_error: Optional[str] = None
+    last_error: str | None = None
 
     for attempt in range(1, len(delays_before_attempt_sec) + 1):
         if attempt > 1:
@@ -407,7 +467,7 @@ async def _background_retry_rag_indexing(task_id: str, url_link: str, config_pat
             return
 
         # Derive graph_path from vector_store_path
-        _retry_graph_path: Optional[str] = None
+        _retry_graph_path: str | None = None
         if vector_store_path:
             _cg = Path(vector_store_path) / "code_graph.json"
             if _cg.is_file():
@@ -422,7 +482,7 @@ async def _background_retry_rag_indexing(task_id: str, url_link: str, config_pat
         emb["status"] = "ready"
         emb["last_error"] = None
         emb["retry_attempts"] = attempt
-        emb["ready_at"] = datetime.now(timezone.utc).isoformat()
+        emb["ready_at"] = datetime.now(UTC).isoformat()
         prev["embedding"] = emb
 
         supabase_client.update_task_status(task_id, TaskStatus.COMPLETED, result=prev)
@@ -434,7 +494,9 @@ async def _background_retry_rag_indexing(task_id: str, url_link: str, config_pat
             vector_store_path,
             graph_path=_retry_graph_path,
         )
-        logger.info(f"[RAG 重试] 成功 task={task_id} vector_store_path={vector_store_path} graph_path={_retry_graph_path}")
+        logger.info(
+            f"[RAG 重试] 成功 task={task_id} vector_store_path={vector_store_path} graph_path={_retry_graph_path}"
+        )
         return
 
     try:
@@ -450,7 +512,7 @@ async def _background_retry_rag_indexing(task_id: str, url_link: str, config_pat
     emb["status"] = "failed"
     emb["last_error"] = last_error
     emb["retry_attempts"] = len(delays_before_attempt_sec)
-    emb["failed_at"] = datetime.now(timezone.utc).isoformat()
+    emb["failed_at"] = datetime.now(UTC).isoformat()
     prev["embedding"] = emb
     supabase_client.update_task_status(task_id, TaskStatus.COMPLETED, result=prev)
 
@@ -473,14 +535,17 @@ def _local_repo_data_missing(url_link: str) -> bool:
     return False
 
 
-def _check_wiki_generation_cache(supabase_client: SupabaseClient, url_link: str) -> Optional[dict]:
-    """
-    查询 repositories 表：若记录存在、距今不超过 WIKI_GENERATION_CACHE_MAX_AGE_DAYS 天，
+def _check_wiki_generation_cache(
+    supabase_client: SupabaseClient, url_link: str
+) -> dict | None:
+    """查询 repositories 表：若记录存在、距今不超过 WIKI_GENERATION_CACHE_MAX_AGE_DAYS 天，
     且本机磁盘上确实还有该仓库的克隆数据，则返回可直接写入 tasks.result 的缓存 payload；
     否则返回 None（需要完整重新生成，含重新克隆仓库到本机）。
     """
     repo_info = supabase_client.get_repo_information(url_link)
-    if not repo_info or wiki_generation_cache_is_stale(repo_info, WIKI_GENERATION_CACHE_MAX_AGE_DAYS):
+    if not repo_info or wiki_generation_cache_is_stale(
+        repo_info, WIKI_GENERATION_CACHE_MAX_AGE_DAYS
+    ):
         return None
     if _local_repo_data_missing(url_link):
         logger.info(
@@ -501,21 +566,22 @@ class _GenerationContext:
     output_path: Path
     json_output_dir: Path
     code_graph_path: Path
-    repo_path: Optional[str] = None
-    wiki_structure: Optional[Dict[str, Any]] = None
-    graphrag_json_path: Optional[Path] = None
-    graph_path: Optional[str] = None
-    r2_structure_url: Optional[str] = None
-    r2_content_urls: Optional[List[str]] = None
-    r2_graphrag_url: Optional[str] = None
-    r2_code_graph_url: Optional[str] = None
-    vector_store_path: Optional[str] = None
-    embedding_error: Optional[str] = None
+    repo_path: str | None = None
+    wiki_structure: dict[str, Any] | None = None
+    graphrag_json_path: Path | None = None
+    graph_path: str | None = None
+    r2_structure_url: str | None = None
+    r2_content_urls: list[str] | None = None
+    r2_graphrag_url: str | None = None
+    r2_code_graph_url: str | None = None
+    vector_store_path: str | None = None
+    embedding_error: str | None = None
 
 
 async def _run_in_executor(fn):
     """在线程池中运行一次同步调用，返回其结果。四个阶段函数共用，
-    避免每个阶段各自重新获取 `asyncio.get_event_loop()`。"""
+    避免每个阶段各自重新获取 `asyncio.get_event_loop()`。
+    """
     return await asyncio.get_event_loop().run_in_executor(None, fn)
 
 
@@ -532,12 +598,16 @@ async def _run_structure_and_graph_stage(ctx: _GenerationContext) -> None:
     )
     await asyncio.sleep(0)
 
-    ctx.graphrag_json_path = (ctx.output_path.parent / "graphrag_communities.json").resolve()
+    ctx.graphrag_json_path = (
+        ctx.output_path.parent / "graphrag_communities.json"
+    ).resolve()
 
     # 尽早将 graphrag_communities.json 和 code_graph.json 写入向量库目录，
     # 保证即使后续 RAG 或上传失败，本地副本依然存在供 Agent 使用。
     await _run_in_executor(
-        lambda: _persist_graphrag_communities_to_vector_store(ctx.url_link, ctx.graphrag_json_path),
+        lambda: _persist_graphrag_communities_to_vector_store(
+            ctx.url_link, ctx.graphrag_json_path
+        ),
     )
     ctx.graph_path = await _run_in_executor(
         lambda: _persist_code_graph_to_vector_store(ctx.url_link, ctx.code_graph_path),
@@ -589,7 +659,9 @@ async def _run_rag_stage(ctx: _GenerationContext) -> None:
                 config_path=ctx.config_path,
                 task_id=ctx.task_id,
                 communities_json_path=str(ctx.graphrag_json_path),
-                code_graph_json_path=str(ctx.code_graph_path) if ctx.code_graph_path.is_file() else None,
+                code_graph_json_path=str(ctx.code_graph_path)
+                if ctx.code_graph_path.is_file()
+                else None,
             )
         )
         # RAG 成功后从向量库目录确认 graph_path（优先以向量库副本为准）
@@ -607,9 +679,9 @@ async def _run_rag_stage(ctx: _GenerationContext) -> None:
     await asyncio.sleep(0)
 
 
-def _build_generation_result(ctx: _GenerationContext) -> Dict[str, Any]:
+def _build_generation_result(ctx: _GenerationContext) -> dict[str, Any]:
     """阶段 5：把各阶段产出汇总为写入 tasks.result 的最终 payload。"""
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "r2_structure_url": ctx.r2_structure_url,
         "r2_content_urls": ctx.r2_content_urls,
         "r2_graphrag_url": ctx.r2_graphrag_url,
@@ -632,11 +704,9 @@ def _build_generation_result(ctx: _GenerationContext) -> Dict[str, Any]:
 
 
 async def execute_generation_task(task_id: str, url_link: str):
-    """
-    后台异步执行 Wiki 生成任务
-    """
+    """后台异步执行 Wiki 生成任务"""
     supabase_client = get_supabase_client()
-    ctx: Optional[_GenerationContext] = None
+    ctx: _GenerationContext | None = None
 
     try:
         # 更新状态为处理中
@@ -646,11 +716,17 @@ async def execute_generation_task(task_id: str, url_link: str):
 
         cached_result = _check_wiki_generation_cache(supabase_client, url_link)
         if cached_result:
-            supabase_client.update_task_progress(task_id, 100.0, "Cache hit — loaded existing docs")
-            supabase_client.update_task_status(task_id, TaskStatus.CACHED, result=cached_result)
+            supabase_client.update_task_progress(
+                task_id, 100.0, "Cache hit — loaded existing docs"
+            )
+            supabase_client.update_task_status(
+                task_id, TaskStatus.CACHED, result=cached_result
+            )
             logger.info(
                 "缓存命中 (last_updated 在 %d 天内)，跳过重新生成: task=%s repo=%s",
-                WIKI_GENERATION_CACHE_MAX_AGE_DAYS, task_id, url_link,
+                WIKI_GENERATION_CACHE_MAX_AGE_DAYS,
+                task_id,
+                url_link,
             )
             return
 
@@ -716,6 +792,8 @@ async def execute_generation_task(task_id: str, url_link: str):
         if ctx is not None:
             await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: cleanup_local_files(ctx.repo_path, ctx.output_path, ctx.json_output_dir)
+                lambda: cleanup_local_files(
+                    ctx.repo_path, ctx.output_path, ctx.json_output_dir
+                ),
             )
         logger.info(f"[任务 {task_id}] 本地临时文件清理完成")

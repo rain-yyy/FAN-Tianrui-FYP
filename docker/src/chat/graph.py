@@ -1,5 +1,4 @@
-"""
-LangGraph definition for the chat agent: a two-node loop (agent <-> tools)
+"""LangGraph definition for the chat agent: a two-node loop (agent <-> tools)
 driven entirely by the model's own native tool-calling decisions.
 
 There is no intent classifier and no DIRECT/LIGHT/DEEP routing table like the
@@ -18,9 +17,10 @@ one) with an explicit "stop investigating, answer now" instruction. This
 guarantees the turn always ends on a real text answer instead of silently
 returning "" when a question needed more tool rounds than the cap allows.
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
@@ -44,15 +44,14 @@ _ITERATION_LIMIT_NOTICE = (
 
 def create_chat_graph(
     vector_store_path: str,
-    graph_path: Optional[str],
-    repo_root: Optional[str],
-    web_search_config: Optional[Dict[str, Any]] = None,
+    graph_path: str | None,
+    repo_root: str | None,
+    web_search_config: dict[str, Any] | None = None,
     *,
-    llm: Optional[BaseChatModel] = None,
-    tools: Optional[List[BaseTool]] = None,
+    llm: BaseChatModel | None = None,
+    tools: list[BaseTool] | None = None,
 ) -> CompiledStateGraph:
-    """
-    Build a fresh graph (fresh tools + fresh in-memory checkpointer) for one
+    """Build a fresh graph (fresh tools + fresh in-memory checkpointer) for one
     chat turn. Not reused across turns/requests — see the memory design in
     `docker/src/chat/memory.py` for why cross-turn state lives in Supabase,
     not in a persistent LangGraph checkpointer.
@@ -66,7 +65,9 @@ def create_chat_graph(
     see `docker/tests/test_chat_graph.py`.
     """
     if tools is None:
-        tools = build_tools_for_session(vector_store_path, graph_path, repo_root, web_search_config)
+        tools = build_tools_for_session(
+            vector_store_path, graph_path, repo_root, web_search_config
+        )
     if llm is None:
         # max_tokens must be set explicitly: some OpenRouter backends default an unset
         # max_tokens to "rest of the context window" for the *completion*, which then
@@ -75,19 +76,21 @@ def create_chat_graph(
     bound_llm = llm.bind_tools(tools) if tools else llm
     tool_node = ToolNode(tools) if tools else None
 
-    async def agent_node(state: ChatState) -> Dict[str, Any]:
+    async def agent_node(state: ChatState) -> dict[str, Any]:
         response = await bound_llm.ainvoke(state["messages"])
         return {"messages": [response]}
 
-    async def tools_node(state: ChatState) -> Dict[str, Any]:
+    async def tools_node(state: ChatState) -> dict[str, Any]:
         result = await tool_node.ainvoke(state)
         return {**result, "tool_call_count": state["tool_call_count"] + 1}
 
-    async def final_answer_node(state: ChatState) -> Dict[str, Any]:
+    async def final_answer_node(state: ChatState) -> dict[str, Any]:
         # Deliberately the unbound `llm`, not `bound_llm`: with no tools
         # available the model cannot emit another tool_calls-only message,
         # so this always produces a real text answer.
-        forced_messages = list(state["messages"]) + [SystemMessage(content=_ITERATION_LIMIT_NOTICE)]
+        forced_messages = list(state["messages"]) + [
+            SystemMessage(content=_ITERATION_LIMIT_NOTICE)
+        ]
         response = await llm.ainvoke(forced_messages)
         return {"messages": [response]}
 
@@ -107,8 +110,14 @@ def create_chat_graph(
     if tool_node is not None:
         builder.add_node("tools", tools_node)
         builder.add_node("final_answer", final_answer_node)
-        builder.add_conditional_edges("agent", route_after_agent, {"tools": "tools", END: END})
-        builder.add_conditional_edges("tools", route_after_tools, {"agent": "agent", "final_answer": "final_answer"})
+        builder.add_conditional_edges(
+            "agent", route_after_agent, {"tools": "tools", END: END}
+        )
+        builder.add_conditional_edges(
+            "tools",
+            route_after_tools,
+            {"agent": "agent", "final_answer": "final_answer"},
+        )
         builder.add_edge("final_answer", END)
     else:
         builder.add_conditional_edges("agent", route_after_agent, {END: END})
@@ -117,7 +126,7 @@ def create_chat_graph(
     return builder.compile(checkpointer=MemorySaver())
 
 
-def initial_state(messages: list, max_tool_iterations: Optional[int] = None) -> ChatState:
+def initial_state(messages: list, max_tool_iterations: int | None = None) -> ChatState:
     return ChatState(
         messages=messages,
         tool_call_count=0,

@@ -2,20 +2,21 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 import os
 import re
-import logging
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
+
 import dotenv
 import networkx as nx
-from src.config import CONFIG, should_save_wiki_structure_raw_responses
-from src.clients import get_llm, StrOutputParser
-from src.prompts import STRUCTURE_PROMPT
+
+from src.clients import StrOutputParser, get_llm
+from src.config import should_save_wiki_structure_raw_responses
 from src.ingestion.code_graph import CodeGraphBuilder, rank_important_symbols
 from src.ingestion.community_engine import CommunityEngine
 from src.ingestion.file_processor import get_files_to_process
+from src.prompts import STRUCTURE_PROMPT
 
 # 初始化日志
 logger = logging.getLogger("app.wiki.struct_gen")
@@ -23,10 +24,8 @@ logger = logging.getLogger("app.wiki.struct_gen")
 dotenv.load_dotenv()
 
 
-def _build_key_symbols_context(graph: Optional[nx.DiGraph], top_n: int = 60) -> str:
-    """
-    用 code graph 的 PageRank 排名结果，渲染成用于提示词的"关键符号"摘要。
-    """
+def _build_key_symbols_context(graph: nx.DiGraph | None, top_n: int = 60) -> str:
+    """用 code graph 的 PageRank 排名结果，渲染成用于提示词的"关键符号"摘要。"""
     if graph is None:
         return ""
 
@@ -48,33 +47,39 @@ def _build_key_symbols_context(graph: Optional[nx.DiGraph], top_n: int = 60) -> 
 
 
 def generate_wiki_structure(
-    repo_path: str, file_tree: str, communities_info: Optional[str] = None,
-    valid_file_list: Optional[str] = None,
-    communities_persist_path: Optional[str] = None,
-    code_graph_persist_path: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    生成分层 Wiki 目录并解析 JSON 响应。
-    """
+    repo_path: str,
+    file_tree: str,
+    communities_info: str | None = None,
+    valid_file_list: str | None = None,
+    communities_persist_path: str | None = None,
+    code_graph_persist_path: str | None = None,
+) -> dict[str, Any]:
+    """生成分层 Wiki 目录并解析 JSON 响应。"""
     logger.info("Generating wiki structure with AI...")
 
     # 1. 加载 README 内容
     readme_path = os.path.join(repo_path, "README.md")
     readme_content = ""
     if os.path.exists(readme_path):
-        with open(readme_path, "r", encoding="utf-8") as f:
+        with open(readme_path, encoding="utf-8") as f:
             readme_content = f.read()
     else:
         logger.warning("README.md not found. Context will be limited.")
 
     # 2. 初始化 LCEL chain
-    chain = STRUCTURE_PROMPT.build() | get_llm("wiki_structure", temperature=0.1) | StrOutputParser()
+    chain = (
+        STRUCTURE_PROMPT.build()
+        | get_llm("wiki_structure", temperature=0.1)
+        | StrOutputParser()
+    )
     current_date = datetime.utcnow().date().isoformat()
 
     # 2.1 准备有效文件列表（用于约束 LLM 输出，防止其虚构不存在的文件路径）
     filtered_file_paths = get_files_to_process(repo_path)
     if valid_file_list is None:
-        relative_paths = sorted(os.path.relpath(p, repo_path) for p in filtered_file_paths)
+        relative_paths = sorted(
+            os.path.relpath(p, repo_path) for p in filtered_file_paths
+        )
         valid_file_list = "\n".join(relative_paths)
 
     # 2.2 构建代码图（社区信息与关键符号排名共用同一份图，二者互不依赖对方是否成功）
@@ -112,16 +117,22 @@ def generate_wiki_structure(
                     nodes = communities.get(cid, [])
                     # 只列出前几个核心文件
                     core_files = [n for n in nodes if ":" not in n][:5]
-                    comm_list.append(f"Community {cid}:\n- Summary: {summary}\n- Key Files: {', '.join(core_files)}")
+                    comm_list.append(
+                        f"Community {cid}:\n- Summary: {summary}\n- Key Files: {', '.join(core_files)}"
+                    )
 
                 communities_info = "\n\n".join(comm_list)
                 logger.info(f"Community info built: {len(communities_info)} chars")
                 if communities_persist_path:
                     try:
                         engine.save_results(communities_persist_path)
-                        logger.info("GraphRAG communities saved to %s", communities_persist_path)
+                        logger.info(
+                            "GraphRAG communities saved to %s", communities_persist_path
+                        )
                     except OSError as persist_exc:
-                        logger.warning("Failed to persist GraphRAG communities: %s", persist_exc)
+                        logger.warning(
+                            "Failed to persist GraphRAG communities: %s", persist_exc
+                        )
             except Exception as e:
                 logger.error(f"Failed to build communities: {e}")
                 communities_info = "No community information available."
@@ -133,14 +144,16 @@ def generate_wiki_structure(
 
     # 4. 调用 AI
     logger.info("Invoking AI model...")
-    ai_message_content = chain.invoke({
-        "file_tree": file_tree,
-        "readme_content": readme_content,
-        "current_date": current_date,
-        "key_symbols": key_symbols or "",
-        "communities": communities_info or "",
-        "valid_file_list": valid_file_list or "",
-    })
+    ai_message_content = chain.invoke(
+        {
+            "file_tree": file_tree,
+            "readme_content": readme_content,
+            "current_date": current_date,
+            "key_symbols": key_symbols or "",
+            "communities": communities_info or "",
+            "valid_file_list": valid_file_list or "",
+        }
+    )
 
     logger.info("AI response received.")
 
@@ -163,18 +176,17 @@ def generate_wiki_structure(
 
 
 def _extract_balanced_braces(s: str) -> str:
-    """
-    从字符串中提取第一个大括号平衡的子串（{...}），
+    """从字符串中提取第一个大括号平衡的子串（{...}），
     忽略字符串内部的括号，用于将 Python 风格 dict 传给 ast.literal_eval。
     """
     depth = 0
     in_str = False
-    str_char = ''
+    str_char = ""
     i = 0
     while i < len(s):
         c = s[i]
         if in_str:
-            if c == '\\':
+            if c == "\\":
                 i += 2
                 continue
             if c == str_char:
@@ -183,12 +195,12 @@ def _extract_balanced_braces(s: str) -> str:
             if c in ('"', "'"):
                 in_str = True
                 str_char = c
-            elif c == '{':
+            elif c == "{":
                 depth += 1
-            elif c == '}':
+            elif c == "}":
                 depth -= 1
                 if depth == 0:
-                    return s[:i + 1]
+                    return s[: i + 1]
         i += 1
     return s
 
@@ -215,8 +227,7 @@ def _try_literal_eval(text: str) -> Any:
 
 
 def _parse_llm_json(candidate: str) -> Any:
-    """
-    多策略解析 LLM 输出的 JSON / 类 JSON 字符串：
+    """多策略解析 LLM 输出的 JSON / 类 JSON 字符串：
 
     1. json.JSONDecoder().raw_decode —— 标准 JSON，忽略尾随文字
     2. ast.literal_eval —— 处理 Python 风格单引号 dict
@@ -246,9 +257,8 @@ def _parse_llm_json(candidate: str) -> Any:
     raise json.JSONDecodeError("All JSON parsing strategies failed", candidate, 0)
 
 
-def parse_wiki_structure_json(raw_json: str, *, fallback_date: str) -> Dict[str, Any]:
-    """
-    解析 LLM 返回的 JSON 字符串，并规范化 toc 节点结构。
+def parse_wiki_structure_json(raw_json: str, *, fallback_date: str) -> dict[str, Any]:
+    """解析 LLM 返回的 JSON 字符串，并规范化 toc 节点结构。
 
     LLM 可能返回多种格式（按优先级依次尝试）：
     0. 整体是合法 JSON（直接解析）或双重编码字符串（解一层再解一层）
@@ -267,7 +277,9 @@ def parse_wiki_structure_json(raw_json: str, *, fallback_date: str) -> Dict[str,
     try:
         stripped = cleaned_json.lstrip()
         outer = _try_raw_decode(stripped)
-        if outer is _PARSE_FAILED and (stripped.startswith('"') or stripped.startswith("'")):
+        if outer is _PARSE_FAILED and (
+            stripped.startswith('"') or stripped.startswith("'")
+        ):
             # 兼容带有非法转义字符（如 \'）的双引号包裹字符串
             outer = _try_literal_eval(stripped)
 
@@ -287,7 +299,7 @@ def parse_wiki_structure_json(raw_json: str, *, fallback_date: str) -> Dict[str,
 
     # ── 策略 1–3：定位第一个 '{' 后多策略解析 ──────────────────────────────
     if data is None:
-        brace_idx = cleaned_json.find('{')
+        brace_idx = cleaned_json.find("{")
         if brace_idx == -1:
             raise ValueError("Invalid JSON response: 未找到 JSON 对象起始符 '{'。")
         candidate = cleaned_json[brace_idx:]
@@ -327,9 +339,7 @@ def parse_wiki_structure_json(raw_json: str, *, fallback_date: str) -> Dict[str,
 
 
 def _strip_code_fence(text: str) -> str:
-    """
-    去掉 ```json``` 等代码块包裹，返回纯文本。
-    """
+    """去掉 ```json``` 等代码块包裹，返回纯文本。"""
     stripped = text.strip()
     fence_match = re.match(r"^```[\w+-]*\s*", stripped)
     if fence_match:
@@ -339,14 +349,14 @@ def _strip_code_fence(text: str) -> str:
     return stripped.strip()
 
 
-def _normalize_toc_node(node: Any) -> Dict[str, Any]:
+def _normalize_toc_node(node: Any) -> dict[str, Any]:
     if not isinstance(node, dict):
         raise ValueError("Invalid JSON response: toc 节点必须是对象。")
 
     node_id = _require_str(node, "id")
     title = _require_str(node, "title")
 
-    normalized: Dict[str, Any] = {
+    normalized: dict[str, Any] = {
         "id": node_id.strip(),
         "title": title.strip(),
     }
@@ -366,7 +376,9 @@ def _normalize_toc_node(node: Any) -> Dict[str, Any]:
         files: list[str] = []
         for item in files_raw:
             if not isinstance(item, str):
-                raise ValueError("Invalid JSON response: 'files' 数组元素必须是字符串。")
+                raise ValueError(
+                    "Invalid JSON response: 'files' 数组元素必须是字符串。"
+                )
             cleaned = item.strip()
             if cleaned:
                 files.append(cleaned)
@@ -380,7 +392,7 @@ def _normalize_toc_node(node: Any) -> Dict[str, Any]:
     return normalized
 
 
-def _require_str(obj: Dict[str, Any], key: str) -> str:
+def _require_str(obj: dict[str, Any], key: str) -> str:
     value = obj.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Invalid JSON response: '{key}' 必须是非空字符串。")

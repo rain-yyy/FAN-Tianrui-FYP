@@ -1,5 +1,4 @@
-"""
-Routing-behavior tests for `src/chat/graph.py`'s `agent <-> tools` loop.
+"""Routing-behavior tests for `src/chat/graph.py`'s `agent <-> tools` loop.
 
 These exercise the graph's actual behavioral contract -- the fast path when
 the model asks for no tools, the iteration cap, and the "never drop a
@@ -8,7 +7,9 @@ pending tool call" guarantee -- via the `llm`/`tools` injection points on
 scripted fake model stands in for `get_llm("chat_agent", ...)` and a
 trivial `@tool`-decorated function stands in for a real per-session tool.
 """
-from typing import Any, Callable, List
+
+from collections.abc import Callable
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
@@ -31,7 +32,7 @@ class ScriptedChatModel:
     calls.
     """
 
-    def __init__(self, respond: Callable[[List[Any]], AIMessage]):
+    def __init__(self, respond: Callable[[list[Any]], AIMessage]):
         self._respond = respond
 
     def bind_tools(self, tools):
@@ -49,7 +50,9 @@ async def _run(llm: ScriptedChatModel, max_tool_iterations: int = 5):
         llm=llm,
         tools=[echo_tool],
     )
-    state = initial_state([HumanMessage(content="hi")], max_tool_iterations=max_tool_iterations)
+    state = initial_state(
+        [HumanMessage(content="hi")], max_tool_iterations=max_tool_iterations
+    )
     config = {"configurable": {"thread_id": "test"}}
     return await graph.ainvoke(state, config=config)
 
@@ -69,7 +72,12 @@ async def test_a_tool_call_is_executed_then_the_loop_ends_on_the_next_plain_answ
     def respond(messages):
         calls["n"] += 1
         if calls["n"] == 1:
-            return AIMessage(content="", tool_calls=[{"name": "echo_tool", "args": {"text": "hi"}, "id": "call_1"}])
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "echo_tool", "args": {"text": "hi"}, "id": "call_1"}
+                ],
+            )
         return AIMessage(content="final answer using tool result")
 
     final_state = await _run(ScriptedChatModel(respond))
@@ -85,12 +93,21 @@ async def test_iteration_cap_forces_a_real_answer_without_dropping_the_last_tool
     calls = {"n": 0}
 
     def respond(messages):
-        if any(isinstance(m, SystemMessage) and "maximum number of tool calls" in m.content for m in messages):
+        if any(
+            isinstance(m, SystemMessage) and "maximum number of tool calls" in m.content
+            for m in messages
+        ):
             return AIMessage(content="final answer after cap")
         calls["n"] += 1
         return AIMessage(
             content="",
-            tool_calls=[{"name": "echo_tool", "args": {"text": str(calls["n"])}, "id": f"call_{calls['n']}"}],
+            tool_calls=[
+                {
+                    "name": "echo_tool",
+                    "args": {"text": str(calls["n"])},
+                    "id": f"call_{calls['n']}",
+                }
+            ],
         )
 
     final_state = await _run(ScriptedChatModel(respond), max_tool_iterations=2)

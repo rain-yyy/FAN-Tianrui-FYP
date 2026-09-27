@@ -1,9 +1,9 @@
-"""
-Unified chat endpoint: a single agent-first entry point replacing the old
+"""Unified chat endpoint: a single agent-first entry point replacing the old
 `/chat` (plain RAG) + `/agent/chat` (tool-using agent) split. Simple questions
 take a fast path with no tool calls automatically — see
 `docker/src/chat/graph.py` — so there is no separate "RAG mode" any more.
 """
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -18,20 +18,19 @@ router = APIRouter()
 
 @router.post("/chat", response_model=ChatTurnResponse)
 async def chat_api(request: ChatTurnRequest) -> ChatTurnResponse:
-    """Non-streaming chat turn: runs the agent to completion and returns the final answer."""
+    """Non-streaming chat turn: runs the agent to completion and returns the final answer."""  # noqa: E501
     try:
         return await ChatTurnService().run(request)
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("Chat turn failed")
-        raise HTTPException(status_code=500, detail=f"Chat failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Chat failed: {e}")  # noqa: B904
 
 
 @router.post("/chat/stream")
 async def chat_stream_api(request: ChatTurnRequest) -> StreamingResponse:
-    """
-    Streaming chat turn (SSE). Event vocabulary: turn_start, iteration_start,
+    """Streaming chat turn (SSE). Event vocabulary: turn_start, iteration_start,
     tool_call_start, tool_call_result, answer_token, answer_done, complete, error.
     """
     return StreamingResponse(

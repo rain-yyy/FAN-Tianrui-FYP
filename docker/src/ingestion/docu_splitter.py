@@ -1,20 +1,25 @@
-import re
 import json
+import re
 from pathlib import Path
-from typing import Optional
+
 from langchain_community.document_loaders import TextLoader
 from langchain_core.documents import Document
-from src.config import get_chunk_max_size, get_chunk_overlap_size, get_code_chunk_min_size, get_code_chunk_max_size
-from src.ingestion.ts_parser import TreeSitterParser
 
+from src.config import (
+    get_chunk_max_size,
+    get_chunk_overlap_size,
+    get_code_chunk_max_size,
+    get_code_chunk_min_size,
+)
+from src.ingestion.ts_parser import TreeSitterParser
 
 # ---------------------------------------------------------------------------
 # 语义感知文档切分器
 # ---------------------------------------------------------------------------
 
+
 class SemanticDocumentSplitter:
-    """
-    语义感知文档切分器，针对文本/Markdown 文档。
+    """语义感知文档切分器，针对文本/Markdown 文档。
 
     策略（按优先级）：
     1. Markdown 标题 → 识别层级结构，按章节切块并携带 breadcrumb 元数据
@@ -28,9 +33,9 @@ class SemanticDocumentSplitter:
     MAX_CHUNK_SIZE: int = get_chunk_max_size()
     OVERLAP_SIZE: int = get_chunk_overlap_size()
 
-    _HEADING_RE = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
-    _CODE_FENCE_RE = re.compile(r'```[\s\S]*?```')
-    _SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?。！？])\s+')
+    _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+    _CODE_FENCE_RE = re.compile(r"```[\s\S]*?```")
+    _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?。！？])\s+")
 
     # ------------------------------------------------------------------ #
 
@@ -89,7 +94,7 @@ class SemanticDocumentSplitter:
         """将文本按 Markdown 标题分割，返回带层级和 breadcrumb 的 section 列表。"""
         lines = text.splitlines(keepends=True)
         sections: list[dict] = []
-        heading_stack: list[tuple[int, str]] = []   # (level, heading_text)
+        heading_stack: list[tuple[int, str]] = []  # (level, heading_text)
 
         current_heading = ""
         current_level = 0
@@ -98,16 +103,22 @@ class SemanticDocumentSplitter:
         def flush():
             content_raw = "".join(current_lines)
             breadcrumb = [h for _, h in heading_stack]
-            heading_prefix = f"{'#' * current_level} {current_heading}\n\n" if current_heading else ""
-            sections.append({
-                "heading": current_heading,
-                "level": current_level,
-                "content": heading_prefix + content_raw,
-                "breadcrumb": breadcrumb,
-            })
+            heading_prefix = (
+                f"{'#' * current_level} {current_heading}\n\n"
+                if current_heading
+                else ""
+            )
+            sections.append(
+                {
+                    "heading": current_heading,
+                    "level": current_level,
+                    "content": heading_prefix + content_raw,
+                    "breadcrumb": breadcrumb,
+                }
+            )
 
         for line in lines:
-            m = re.match(r'^(#{1,6})\s+(.+)$', line.rstrip())
+            m = re.match(r"^(#{1,6})\s+(.+)$", line.rstrip())
             if m:
                 flush()
                 level = len(m.group(1))
@@ -131,7 +142,7 @@ class SemanticDocumentSplitter:
 
     def _split_by_paragraph(self, text: str, base_meta: dict) -> list[Document]:
         """按空行段落边界切分，超长段落进一步按句子切。"""
-        paragraphs = re.split(r'\n\s*\n', text)
+        paragraphs = re.split(r"\n\s*\n", text)
         docs: list[Document] = []
         current_chunk = ""
         chunk_idx = 0
@@ -144,10 +155,12 @@ class SemanticDocumentSplitter:
             # 单个段落本身超长且不是代码块 → 按句子细切
             if len(para) > self.MAX_CHUNK_SIZE and not para.startswith("```"):
                 if current_chunk:
-                    docs.append(Document(
-                        page_content=current_chunk.strip(),
-                        metadata={**base_meta, "chunk_index": chunk_idx},
-                    ))
+                    docs.append(
+                        Document(
+                            page_content=current_chunk.strip(),
+                            metadata={**base_meta, "chunk_index": chunk_idx},
+                        )
+                    )
                     chunk_idx += 1
                     current_chunk = ""
                 sent_docs = self._split_by_sentence(para, base_meta, chunk_idx)
@@ -157,24 +170,34 @@ class SemanticDocumentSplitter:
 
             if len(current_chunk) + len(para) + 2 > self.MAX_CHUNK_SIZE:
                 if current_chunk:
-                    docs.append(Document(
-                        page_content=current_chunk.strip(),
-                        metadata={**base_meta, "chunk_index": chunk_idx},
-                    ))
+                    docs.append(
+                        Document(
+                            page_content=current_chunk.strip(),
+                            metadata={**base_meta, "chunk_index": chunk_idx},
+                        )
+                    )
                     chunk_idx += 1
                     # 尾部 overlap：保留上一块末尾内容，帮助上下文连续
-                    overlap = current_chunk[-self.OVERLAP_SIZE:] if len(current_chunk) > self.OVERLAP_SIZE else current_chunk
+                    overlap = (
+                        current_chunk[-self.OVERLAP_SIZE :]
+                        if len(current_chunk) > self.OVERLAP_SIZE
+                        else current_chunk
+                    )
                     current_chunk = overlap + "\n\n" + para
                 else:
                     current_chunk = para
             else:
-                current_chunk = (current_chunk + "\n\n" + para).strip() if current_chunk else para
+                current_chunk = (
+                    (current_chunk + "\n\n" + para).strip() if current_chunk else para
+                )
 
         if current_chunk.strip():
-            docs.append(Document(
-                page_content=current_chunk.strip(),
-                metadata={**base_meta, "chunk_index": chunk_idx},
-            ))
+            docs.append(
+                Document(
+                    page_content=current_chunk.strip(),
+                    metadata={**base_meta, "chunk_index": chunk_idx},
+                )
+            )
 
         return docs
 
@@ -182,7 +205,9 @@ class SemanticDocumentSplitter:
     # 句子级切分（最后手段）
     # ------------------------------------------------------------------ #
 
-    def _split_by_sentence(self, text: str, base_meta: dict, start_idx: int) -> list[Document]:
+    def _split_by_sentence(
+        self, text: str, base_meta: dict, start_idx: int
+    ) -> list[Document]:
         sentences = self._SENTENCE_SPLIT_RE.split(text)
         docs: list[Document] = []
         current = ""
@@ -194,20 +219,32 @@ class SemanticDocumentSplitter:
                 continue
             if len(current) + len(sent) + 1 > self.MAX_CHUNK_SIZE:
                 if current:
-                    docs.append(Document(
-                        page_content=current.strip(),
-                        metadata={**base_meta, "chunk_index": idx, "chunk_type": "sentence_fallback"},
-                    ))
+                    docs.append(
+                        Document(
+                            page_content=current.strip(),
+                            metadata={
+                                **base_meta,
+                                "chunk_index": idx,
+                                "chunk_type": "sentence_fallback",
+                            },
+                        )
+                    )
                     idx += 1
                 current = sent
             else:
                 current = (current + " " + sent).strip() if current else sent
 
         if current.strip():
-            docs.append(Document(
-                page_content=current.strip(),
-                metadata={**base_meta, "chunk_index": idx, "chunk_type": "sentence_fallback"},
-            ))
+            docs.append(
+                Document(
+                    page_content=current.strip(),
+                    metadata={
+                        **base_meta,
+                        "chunk_index": idx,
+                        "chunk_type": "sentence_fallback",
+                    },
+                )
+            )
 
         return docs
 
@@ -216,9 +253,9 @@ class SemanticDocumentSplitter:
 # 调试输出工具
 # ---------------------------------------------------------------------------
 
+
 def save_chunks_debug(docs: list[Document], output_path: str) -> None:
-    """
-    将 chunk 结果保存为 JSONL 文件，每行一个 JSON 对象，便于人工检查。
+    """将 chunk 结果保存为 JSONL 文件，每行一个 JSON 对象，便于人工检查。
     同时生成一份简明摘要 *_summary.txt。
     """
     out = Path(output_path)
@@ -261,7 +298,9 @@ def save_chunks_debug(docs: list[Document], output_path: str) -> None:
 # Code chunk 后处理（合并过短块 / 分割过长块）
 # ---------------------------------------------------------------------------
 
-MIN_CODE_CHUNK: int = get_code_chunk_min_size()   # 低于此字符数的 chunk 会与同文件相邻块合并
+MIN_CODE_CHUNK: int = (
+    get_code_chunk_min_size()
+)  # 低于此字符数的 chunk 会与同文件相邻块合并
 MAX_CODE_CHUNK: int = get_code_chunk_max_size()  # 超过此字符数的 chunk 会按行分割
 
 
@@ -275,10 +314,12 @@ def _split_code_by_lines(content: str, metadata: dict, max_size: int) -> list[Do
 
     for line in lines:
         if current_size + len(line) > max_size and current_lines:
-            docs.append(Document(
-                page_content="".join(current_lines).strip(),
-                metadata={**metadata, "chunk_part": part},
-            ))
+            docs.append(
+                Document(
+                    page_content="".join(current_lines).strip(),
+                    metadata={**metadata, "chunk_part": part},
+                )
+            )
             part += 1
             current_lines = [line]
             current_size = len(line)
@@ -287,16 +328,17 @@ def _split_code_by_lines(content: str, metadata: dict, max_size: int) -> list[Do
             current_size += len(line)
 
     if current_lines:
-        docs.append(Document(
-            page_content="".join(current_lines).strip(),
-            metadata={**metadata, "chunk_part": part},
-        ))
+        docs.append(
+            Document(
+                page_content="".join(current_lines).strip(),
+                metadata={**metadata, "chunk_part": part},
+            )
+        )
     return docs
 
 
 def _normalize_code_chunks(raw_docs: list[Document]) -> list[Document]:
-    """
-    对同一文件内的 AST code chunks 做后处理：
+    """对同一文件内的 AST code chunks 做后处理：
     1. 过短（< MIN_CODE_CHUNK）的相邻块合并到下一块，避免产生碎片化的单行 chunk。
     2. 过长（> MAX_CODE_CHUNK）的块按行分割，确保 embedding 有效性。
     """
@@ -307,7 +349,9 @@ def _normalize_code_chunks(raw_docs: list[Document]) -> list[Document]:
     def flush_pending():
         nonlocal pending_content, pending_meta
         if pending_content and pending_meta is not None:
-            result.append(Document(page_content=pending_content.strip(), metadata=pending_meta))
+            result.append(
+                Document(page_content=pending_content.strip(), metadata=pending_meta)
+            )
         pending_content = ""
         pending_meta = None
 
@@ -358,7 +402,9 @@ def _normalize_code_chunks(raw_docs: list[Document]) -> list[Document]:
                         merged_meta["start_line"] = pending_meta["start_line"]
                     pending_content = ""
                     pending_meta = None
-                    result.append(Document(page_content=combined.strip(), metadata=merged_meta))
+                    result.append(
+                        Document(page_content=combined.strip(), metadata=merged_meta)
+                    )
                     continue
             flush_pending()
 
@@ -372,12 +418,12 @@ def _normalize_code_chunks(raw_docs: list[Document]) -> list[Document]:
 # 主入口
 # ---------------------------------------------------------------------------
 
+
 def load_and_split_docs(
     file_paths: list[str],
-    debug_output_path: Optional[str] = None,
+    debug_output_path: str | None = None,
 ) -> list[Document]:
-    """
-    加载文件内容并切分为文本块。
+    """加载文件内容并切分为文本块。
 
     - 代码文件：Tree-sitter AST 感知切片
     - 文本/Markdown 文件：SemanticDocumentSplitter 语义感知切片
@@ -399,7 +445,7 @@ def load_and_split_docs(
 
             if extension in TreeSitterParser.EXTENSION_TO_LANGUAGE:
                 # 代码文件：AST 感知切片
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, encoding="utf-8") as f:
                     content = f.read()
 
                 chunks = ts_parser.parse_code(content, extension)
@@ -421,7 +467,7 @@ def load_and_split_docs(
             else:
                 # 文本文件：语义感知切片
                 loader = TextLoader(file_path, encoding="utf-8")
-                raw_docs = loader.load()   # 不切分，拿原始内容
+                raw_docs = loader.load()  # 不切分，拿原始内容
                 for raw_doc in raw_docs:
                     split = semantic_splitter.split_text(
                         raw_doc.page_content,
@@ -431,6 +477,7 @@ def load_and_split_docs(
 
         except Exception as e:
             import traceback
+
             error_details = traceback.format_exc().splitlines()[-1]
             print(f"Skipping file {file_path} due to error: {e} ({error_details})")
             continue

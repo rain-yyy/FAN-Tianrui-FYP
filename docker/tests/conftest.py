@@ -1,5 +1,4 @@
-"""
-Shared fixtures for the core-flow test suite: project input -> task creation,
+"""Shared fixtures for the core-flow test suite: project input -> task creation,
 task management (cancel/delete), vector knowledge base upload, and retrieval.
 
 These tests run against the *real* Supabase and Qdrant instances configured
@@ -10,14 +9,15 @@ registers it for cleanup so repeated runs don't pile up junk data.
 Run from `docker/` (same convention as the app itself):
 
     cd docker
-    pip install -r requirements.txt
-    pytest -m "not slow"   # fast subset: task lifecycle + synthetic vector store tests
-    pytest -m slow         # real git clone -> index -> search, against TEST_REPO_URL
-    pytest                 # everything
+    uv sync
+    uv run pytest -m "not slow"   # fast subset: task lifecycle + synthetic vector store tests
+    uv run pytest -m slow         # real git clone -> index -> search, against TEST_REPO_URL
+    uv run pytest                 # everything
 
 Set TEST_REPO_URL to a small public repo before running the `slow` tests;
 defaults to octocat/Hello-World (tiny, public, stable) if unset.
 """
+
 import os
 import sys
 from pathlib import Path
@@ -77,7 +77,9 @@ def supabase_client():
 
     client = get_supabase_client()
     if client.client is None:
-        pytest.skip("SUPABASE_URL/SUPABASE_KEY not configured; skipping tests that need Supabase")
+        pytest.skip(
+            "SUPABASE_URL/SUPABASE_KEY not configured; skipping tests that need Supabase"
+        )
     return client
 
 
@@ -101,7 +103,9 @@ def repo_row_cleanup(supabase_client):
     for repo_url in repo_urls:
         try:
             normalized = supabase_client._normalize_repo_url(repo_url)
-            supabase_client.client.table("repositories").delete().eq("repo_url", normalized).execute()
+            supabase_client.client.table("repositories").delete().eq(
+                "repo_url", normalized
+            ).execute()
         except Exception:
             pass
 
@@ -131,7 +135,9 @@ def vector_repo_cleanup(qdrant_client):
                 if qdrant_client.collection_exists(collection_name):
                     qdrant_client.delete(
                         collection_name=collection_name,
-                        points_selector=models.FilterSelector(filter=repo_filter(repo_id)),
+                        points_selector=models.FilterSelector(
+                            filter=repo_filter(repo_id)
+                        ),
                     )
             except Exception:
                 pass

@@ -1,13 +1,15 @@
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
-from typing import List, Optional
 
 from src.core.task_manager import CancelOutcome, cancel_task, start_generation_task
-from src.storage.supabase_client import SupabaseStorageError, DeleteTaskResult, get_supabase_client
-from src.utils.logger import setup_logger
-
 from src.storage.models import TaskRecord
+from src.storage.supabase_client import (
+    DeleteTaskResult,
+    SupabaseStorageError,
+    get_supabase_client,
+)
+from src.utils.logger import setup_logger
 
 logger = setup_logger("api.tasks")
 router = APIRouter()
@@ -15,9 +17,7 @@ router = APIRouter()
 
 @router.post("/generate")
 async def generate_wiki(request: Request):
-    """
-    创建 Wiki 生成任务（异步）
-    """
+    """创建 Wiki 生成任务（异步）"""
     try:
         data = await request.json()
         url_link = data.get("url_link")
@@ -40,7 +40,7 @@ async def generate_wiki(request: Request):
 
         return {
             "task_id": task_id,
-            "message": "Task created and processing in the background. Poll /task/{task_id} for progress."
+            "message": "Task created and processing in the background. Poll /task/{task_id} for progress.",
         }
 
     except HTTPException:
@@ -51,10 +51,8 @@ async def generate_wiki(request: Request):
 
 
 @router.post("/task/{task_id}")
-async def get_task_information_api(task_id: str) -> Optional[TaskRecord]:
-    """
-    查询任务信息
-    """
+async def get_task_information_api(task_id: str) -> TaskRecord | None:
+    """查询任务信息"""
     logger.debug(f"查询任务信息: {task_id}")
 
     supabase_client = get_supabase_client()
@@ -63,7 +61,9 @@ async def get_task_information_api(task_id: str) -> Optional[TaskRecord]:
         task_information = supabase_client.get_task(task_id)
     except SupabaseStorageError as e:
         logger.error("查询任务时 Supabase 不可用: %s", e)
-        raise HTTPException(status_code=503, detail=f"Supabase temporarily unavailable: {e}")
+        raise HTTPException(
+            status_code=503, detail=f"Supabase temporarily unavailable: {e}"
+        )
 
     if not task_information:
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
@@ -72,10 +72,8 @@ async def get_task_information_api(task_id: str) -> Optional[TaskRecord]:
 
 
 @router.post("/tasks")
-async def list_tasks_api(request: Request) -> Optional[List[TaskRecord]]:
-    """
-    List all the tasks associated with the userid
-    """
+async def list_tasks_api(request: Request) -> list[TaskRecord] | None:
+    """List all the tasks associated with the userid"""
     data = await request.json()
     user_id = data.get("user_id")
     if not user_id:
@@ -90,9 +88,7 @@ async def list_tasks_api(request: Request) -> Optional[List[TaskRecord]]:
 
 @router.post("/task/{task_id}/cancel")
 async def cancel_task_api(task_id: str) -> dict:
-    """
-    Termination task with task_id
-    """
+    """Termination task with task_id"""
     logger.info(f"Terminate: {task_id}")
     outcome, error_detail = cancel_task(task_id, get_supabase_client())
 
@@ -101,7 +97,9 @@ async def cancel_task_api(task_id: str) -> dict:
         return {"success": True, "message": "Task cancelled"}
 
     if outcome == CancelOutcome.MARKED_CANCELLED_IN_DB:
-        logger.info(f"The task was not found in the memory, but it has been marked as cancelled in the datbase: {task_id}")
+        logger.info(
+            f"The task was not found in the memory, but it has been marked as cancelled in the datbase: {task_id}"
+        )
         return {"success": True, "message": "Task marked as cancelled"}
 
     if outcome == CancelOutcome.NOT_YET_RUNNING:
@@ -116,11 +114,15 @@ async def cancel_task_api(task_id: str) -> dict:
 
     if outcome == CancelOutcome.PERSIST_FAILED_DB_ONLY:
         logger.error(f"仅 DB 标记取消时写入失败: {task_id}")
-        raise HTTPException(status_code=503, detail="Failed to update task status in database")
+        raise HTTPException(
+            status_code=503, detail="Failed to update task status in database"
+        )
 
     if outcome == CancelOutcome.QUERY_FAILED:
         logger.error("取消任务时无法查询 Supabase: %s", error_detail)
-        raise HTTPException(status_code=503, detail=f"Could not verify task status: {error_detail}")
+        raise HTTPException(
+            status_code=503, detail=f"Could not verify task status: {error_detail}"
+        )
 
     logger.warning(f"Task is not running or does not exist: {task_id}")
     raise HTTPException(
@@ -130,10 +132,8 @@ async def cancel_task_api(task_id: str) -> dict:
 
 
 @router.delete("/task/{task_id}")
-async def delete_task_api(task_id: str, user_id: str) -> dict[str,bool]:
-    """
-    Delete task record in supabase（包括进行中、已完成或失败的任务）
-    """
+async def delete_task_api(task_id: str, user_id: str) -> dict[str, bool]:
+    """Delete task record in supabase（包括进行中、已完成或失败的任务）"""
     if not task_id or not user_id:
         raise HTTPException(status_code=400, detail="Missing task_id or user_id")
     logger.info(f"Delete task record: {task_id}")

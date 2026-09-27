@@ -1,18 +1,16 @@
 """Cloudflare R2 storage client for uploading wiki data."""
 
+import json
 import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Tuple
-import json
 
 import boto3
-from botocore.exceptions import ClientError, BotoCoreError
-from botocore.config import Config
-
 import dotenv
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 
 dotenv.load_dotenv()
 
@@ -22,14 +20,13 @@ class R2Client:
 
     def __init__(
         self,
-        account_id: Optional[str] = None,
-        access_key_id: Optional[str] = None,
-        secret_access_key: Optional[str] = None,
-        bucket_name: Optional[str] = None,
-        custom_domain: Optional[str] = None,
+        account_id: str | None = None,
+        access_key_id: str | None = None,
+        secret_access_key: str | None = None,
+        bucket_name: str | None = None,
+        custom_domain: str | None = None,
     ):
-        """
-        Initialize R2 client with credentials.
+        """Initialize R2 client with credentials.
 
         Args:
             account_id: Cloudflare Account ID
@@ -44,7 +41,14 @@ class R2Client:
         self.bucket_name = bucket_name or os.getenv("R2_BUCKET_NAME")
         self.custom_domain = custom_domain or os.getenv("R2_CUSTOM_DOMAIN")
 
-        if not all([self.account_id, self.access_key_id, self.secret_access_key, self.bucket_name]):
+        if not all(
+            [
+                self.account_id,
+                self.access_key_id,
+                self.secret_access_key,
+                self.bucket_name,
+            ]
+        ):
             raise ValueError(
                 "Missing R2 credentials. Please set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, "
                 "R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME environment variables."
@@ -66,37 +70,37 @@ class R2Client:
         )
 
     def _extract_repo_name(self, repo_url: str) -> str:
-        """
-        Extract repository name from URL or path.
-        
+        """Extract repository name from URL or path.
+
         Args:
             repo_url: Repository URL or path
-            
+
         Returns:
             Repository name
         """
         # Remove .git suffix if present
-        repo_url = repo_url.rstrip('/').replace('.git', '')
-        
+        repo_url = repo_url.rstrip("/").replace(".git", "")
+
         # Extract the last part of the path
-        if '/' in repo_url:
-            repo_name = repo_url.split('/')[-1]
-        elif '\\' in repo_url:
-            repo_name = repo_url.split('\\')[-1]
+        if "/" in repo_url:
+            repo_name = repo_url.split("/")[-1]
+        elif "\\" in repo_url:
+            repo_name = repo_url.split("\\")[-1]
         else:
             repo_name = repo_url
-            
+
         # Clean up the name (remove invalid characters)
-        repo_name = repo_name.replace(' ', '-')
-        return repo_name or 'unknown-repo'
-    
+        repo_name = repo_name.replace(" ", "-")
+        return repo_name or "unknown-repo"
+
     def _generate_date(self) -> str:
         """Generate date string in format YYYYMMDD."""
         return datetime.now().strftime("%Y%m%d")
 
-    def _get_r2_path(self, repo_url: str, filename: str, task_id: str | None = None) -> str:
-        """
-        Generate R2 object path.
+    def _get_r2_path(
+        self, repo_url: str, filename: str, task_id: str | None = None
+    ) -> str:
+        """Generate R2 object path.
 
         Args:
             repo_url: Repository URL or path
@@ -120,8 +124,7 @@ class R2Client:
         max_retries: int,
         kind: str = "",
     ) -> bool:
-        """
-        Upload raw bytes to R2 with retry/exponential backoff.
+        """Upload raw bytes to R2 with retry/exponential backoff.
         Shared by upload_file and upload_json_data, which differ only in byte source.
 
         Args:
@@ -149,25 +152,33 @@ class R2Client:
                 error_code = e.response.get("Error", {}).get("Code", "Unknown")
                 error_message = e.response.get("Error", {}).get("Message", str(e))
                 if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt  # Exponential backoff
-                    print(f"[WARN] Upload failed (attempt {attempt + 1}/{max_retries}): {error_code} - {error_message}")
+                    wait_time = 2**attempt  # Exponential backoff
+                    print(
+                        f"[WARN] Upload failed (attempt {attempt + 1}/{max_retries}): {error_code} - {error_message}"
+                    )
                     print(f"[WARN] Retrying in {wait_time}s...")
                     time.sleep(wait_time)
                 else:
-                    print(f"[ERROR] Failed to upload {what}{r2_key} after {max_retries} attempts")
+                    print(
+                        f"[ERROR] Failed to upload {what}{r2_key} after {max_retries} attempts"
+                    )
                     print(f"[ERROR] Error Code: {error_code}, Message: {error_message}")
                     return False
             except BotoCoreError as e:
                 if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    print(f"[WARN] BotoCore error (attempt {attempt + 1}/{max_retries}): {e}")
+                    wait_time = 2**attempt
+                    print(
+                        f"[WARN] BotoCore error (attempt {attempt + 1}/{max_retries}): {e}"
+                    )
                     print(f"[WARN] Retrying in {wait_time}s...")
                     time.sleep(wait_time)
                 else:
                     print(f"[ERROR] BotoCore error uploading {what}{r2_key}: {e}")
                     return False
             except Exception as e:
-                print(f"[ERROR] Unexpected error uploading {what}{r2_key}: {type(e).__name__}: {e}")
+                print(
+                    f"[ERROR] Unexpected error uploading {what}{r2_key}: {type(e).__name__}: {e}"
+                )
                 return False
 
         return False
@@ -179,8 +190,7 @@ class R2Client:
         content_type: str = "application/json",
         max_retries: int = 3,
     ) -> bool:
-        """
-        Upload a single file to R2.
+        """Upload a single file to R2.
 
         Args:
             local_path: Local file path
@@ -206,8 +216,7 @@ class R2Client:
         r2_key: str,
         max_retries: int = 3,
     ) -> bool:
-        """
-        Upload JSON data directly to R2.
+        """Upload JSON data directly to R2.
 
         Args:
             data: Dictionary to upload as JSON
@@ -219,12 +228,15 @@ class R2Client:
         """
         json_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
         return self._upload_bytes(
-            json_bytes, r2_key, "application/json; charset=utf-8", max_retries, kind="JSON"
+            json_bytes,
+            r2_key,
+            "application/json; charset=utf-8",
+            max_retries,
+            kind="JSON",
         )
 
     def get_public_url(self, r2_key: str) -> str:
-        """
-        Generate public URL for an R2 object.
+        """Generate public URL for an R2 object.
 
         Args:
             r2_key: R2 object key (path in bucket)
@@ -250,9 +262,8 @@ class R2Client:
         local_dir: Path,
         r2_base_path: str,
         pattern: str = "*.json",
-    ) -> List[Tuple[str, bool]]:
-        """
-        Upload all files matching pattern from a directory to R2.
+    ) -> list[tuple[str, bool]]:
+        """Upload all files matching pattern from a directory to R2.
 
         Args:
             local_dir: Local directory path
@@ -281,25 +292,25 @@ class R2Client:
 @dataclass
 class WikiUploadResult:
     """Result of `upload_wiki_to_r2`. Trailing fields may be None when that
-    artifact wasn't provided, its upload failed, or R2 wasn't configured."""
+    artifact wasn't provided, its upload failed, or R2 wasn't configured.
+    """
 
-    structure_url: Optional[str] = None
-    content_urls: Optional[List[str]] = None
-    graphrag_url: Optional[str] = None
-    code_graph_url: Optional[str] = None
+    structure_url: str | None = None
+    content_urls: list[str] | None = None
+    graphrag_url: str | None = None
+    code_graph_url: str | None = None
 
 
 def upload_wiki_to_r2(
     repo_url: str,
     wiki_structure: dict,
-    structure_local_path: Optional[Path] = None,
-    content_dir: Optional[Path] = None,
-    task_id: Optional[str] = None,
-    graphrag_local_path: Optional[Path] = None,
-    code_graph_local_path: Optional[Path] = None,
+    structure_local_path: Path | None = None,
+    content_dir: Path | None = None,
+    task_id: str | None = None,
+    graphrag_local_path: Path | None = None,
+    code_graph_local_path: Path | None = None,
 ) -> WikiUploadResult:
-    """
-    Upload wiki structure and content files to R2.
+    """Upload wiki structure and content files to R2.
 
     Args:
         repo_url: Repository URL or path
@@ -333,16 +344,18 @@ def upload_wiki_to_r2(
 
     structure_url = client.get_public_url(structure_key)
 
-    graphrag_url: Optional[str] = None
+    graphrag_url: str | None = None
     if graphrag_local_path and graphrag_local_path.is_file():
-        graphrag_key = client._get_r2_path(repo_url, "graphrag_communities.json", task_id)
+        graphrag_key = client._get_r2_path(
+            repo_url, "graphrag_communities.json", task_id
+        )
         if client.upload_file(graphrag_local_path, graphrag_key):
             graphrag_url = client.get_public_url(graphrag_key)
             print(f"[INFO] Uploaded GraphRAG metadata to R2: {graphrag_key}")
         else:
             print("[WARN] Failed to upload graphrag_communities.json to R2")
 
-    code_graph_url: Optional[str] = None
+    code_graph_url: str | None = None
     if code_graph_local_path and code_graph_local_path.is_file():
         code_graph_key = client._get_r2_path(repo_url, "code_graph.json", task_id)
         if client.upload_file(code_graph_local_path, code_graph_key):
@@ -361,12 +374,14 @@ def upload_wiki_to_r2(
             for r2_key, success in results:
                 if success:
                     content_urls.append(client.get_public_url(r2_key))
-            
+
             if content_urls:
-                print(f"[INFO] Uploaded {len(content_urls)}/{len(results)} content files to R2")
+                print(
+                    f"[INFO] Uploaded {len(content_urls)}/{len(results)} content files to R2"
+                )
             else:
                 print("[WARN] Failed to upload any content files to R2")
-    
+
     return WikiUploadResult(
         structure_url=structure_url,
         content_urls=content_urls if content_urls else None,

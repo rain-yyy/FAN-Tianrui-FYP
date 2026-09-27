@@ -1,5 +1,4 @@
-"""
-code_graph.py — Language-agnostic, multi-granularity property graph builder.
+"""code_graph.py — Language-agnostic, multi-granularity property graph builder.
 
 Follows the Canonical Design Specification:
   Node types : file | class | function | variable | field | external_symbol
@@ -15,10 +14,10 @@ Key design decisions:
 """
 
 import hashlib
-import re
 import json
+import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 import networkx as nx
 from tree_sitter import Node, Parser
@@ -29,20 +28,22 @@ except (ImportError, ModuleNotFoundError):
     # Fallback for standalone execution: load ts_parser directly, bypassing the
     # package __init__.py which may pull in heavy/unavailable dependencies.
     import importlib.util as _ilu
+
     _spec = _ilu.spec_from_file_location(
         "ts_parser", Path(__file__).parent / "ts_parser.py"
     )
     _mod = _ilu.module_from_spec(_spec)  # type: ignore[arg-type]
-    _spec.loader.exec_module(_mod)       # type: ignore[union-attr]
+    _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
     TreeSitterParser = _mod.TreeSitterParser
 
 _MAX_AMBIGUOUS_CROSS_FILE_TARGETS = 2
-_JS_LANGS: Set[str] = {"javascript", "typescript", "tsx"}
+_JS_LANGS: set[str] = {"javascript", "typescript", "tsx"}
 
 
 # ---------------------------------------------------------------------------
 # Byte-safe code slice (core correctness fix)
 # ---------------------------------------------------------------------------
+
 
 def _bslice(code_bytes: bytes, start: int, end: int) -> str:
     """Return the UTF-8 string for code_bytes[start:end].
@@ -67,7 +68,7 @@ def _visibility_python(name: str) -> str:
     return "public"
 
 
-def _docstring_python(node: Node, code_bytes: bytes) -> Optional[str]:
+def _docstring_python(node: Node, code_bytes: bytes) -> str | None:
     """Return the first string literal inside a Python function/class body."""
     for child in node.children:
         if child.type == "block":
@@ -81,9 +82,8 @@ def _docstring_python(node: Node, code_bytes: bytes) -> Optional[str]:
     return None
 
 
-def rank_important_symbols(graph: nx.DiGraph, top_n: int = 60) -> List[Dict[str, Any]]:
-    """
-    对 code graph 的 function/class 节点跑 PageRank，返回按重要性降序排列的定义列表。
+def rank_important_symbols(graph: nx.DiGraph, top_n: int = 60) -> list[dict[str, Any]]:
+    """对 code graph 的 function/class 节点跑 PageRank，返回按重要性降序排列的定义列表。
 
     每个 function/class 节点在创建时都保证带有 file_path/start_line/qualified_name
     （见本文件各 `_upsert_node` 调用点），因此这里直接索引取值，不做防御性 `.get()`。
@@ -116,9 +116,9 @@ def rank_important_symbols(graph: nx.DiGraph, top_n: int = 60) -> List[Dict[str,
 # Main builder
 # ---------------------------------------------------------------------------
 
+
 class CodeGraphBuilder:
-    """
-    Build a code property graph using Tree-sitter AST parsing + NetworkX.
+    """Build a code property graph using Tree-sitter AST parsing + NetworkX.
 
     Nodes carry rich metadata; edges carry typed relationship labels.
     Compatible with CommunityEngine (uses node["type"] and node["file"]).
@@ -129,16 +129,16 @@ class CodeGraphBuilder:
     def __init__(self) -> None:
         self.graph: nx.DiGraph = nx.DiGraph()
         self.ts_parser = TreeSitterParser()
-        self._all_rel_paths: Set[str] = set()
+        self._all_rel_paths: set[str] = set()
         # Short name → [node_id, …] for call-edge resolution
-        self._name_to_nodes: Dict[str, List[str]] = {}
+        self._name_to_nodes: dict[str, list[str]] = {}
         self._call_context: str = ""
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def build_graph(self, repo_root: str, file_paths: List[str]) -> nx.DiGraph:
+    def build_graph(self, repo_root: str, file_paths: list[str]) -> nx.DiGraph:
         """Two-phase build: extract nodes first, then edges."""
         repo_root_path = Path(repo_root)
 
@@ -183,7 +183,7 @@ class CodeGraphBuilder:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
     def load_graph(self, input_path: str) -> None:
-        with open(input_path, "r", encoding="utf-8") as f:
+        with open(input_path, encoding="utf-8") as f:
             data = json.load(f)
         self.graph = nx.node_link_graph(data)
 
@@ -199,14 +199,14 @@ class CodeGraphBuilder:
             return fp.replace("\\", "/")
 
     @staticmethod
-    def _read_file(path: str) -> Optional[str]:
+    def _read_file(path: str) -> str | None:
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            with open(path, encoding="utf-8", errors="replace") as f:
                 return f.read()
         except OSError:
             return None
 
-    def _get_parser(self, lang: str) -> Optional[Parser]:
+    def _get_parser(self, lang: str) -> Parser | None:
         try:
             return self.ts_parser.get_parser(lang)
         except ValueError:
@@ -250,9 +250,15 @@ class CodeGraphBuilder:
             end_line=len(lines),
             line_count=len(lines),
             size_bytes=len(cb),
-            is_entry_point=Path(rel_path).name in {
-                "__init__.py", "main.py", "index.ts", "index.js",
-                "index.tsx", "main.go", "lib.rs",
+            is_entry_point=Path(rel_path).name
+            in {
+                "__init__.py",
+                "main.py",
+                "index.ts",
+                "index.js",
+                "index.tsx",
+                "main.go",
+                "lib.rs",
             },
         )
 
@@ -273,7 +279,7 @@ class CodeGraphBuilder:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _ident(node: Node, cb: bytes) -> Optional[str]:
+    def _ident(node: Node, cb: bytes) -> str | None:
         """Return the first direct `identifier` child (byte-safe)."""
         for child in node.children:
             if child.type == "identifier":
@@ -281,7 +287,7 @@ class CodeGraphBuilder:
         return None
 
     @staticmethod
-    def _js_name(node: Node, cb: bytes) -> Optional[str]:
+    def _js_name(node: Node, cb: bytes) -> str | None:
         """Return first `identifier` or `type_identifier` child."""
         for child in node.children:
             if child.type in ("identifier", "type_identifier"):
@@ -299,18 +305,20 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
-        decorator_names: Optional[List[str]] = None,
+        class_stack: list[str],
+        decorator_names: list[str] | None = None,
     ) -> None:
         if node.type == "decorated_definition":
-            decs: List[str] = []
-            inner: Optional[Node] = None
+            decs: list[str] = []
+            inner: Node | None = None
             for child in node.children:
                 if child.type == "decorator":
                     txt = _bslice(cb, child.start_byte, child.end_byte)
                     decs.append(txt.lstrip("@").split("(")[0].strip())
                 elif child.type in (
-                    "function_definition", "class_definition", "async_function_definition"
+                    "function_definition",
+                    "class_definition",
+                    "async_function_definition",
                 ):
                     inner = child
             if inner is not None:
@@ -318,18 +326,24 @@ class CodeGraphBuilder:
             return
 
         if node.type in ("function_definition", "async_function_definition"):
-            self._py_function(node, cb, rel_path, lang, parent_id, class_stack, decorator_names)
+            self._py_function(
+                node, cb, rel_path, lang, parent_id, class_stack, decorator_names
+            )
             return
 
         if node.type == "class_definition":
-            self._py_class(node, cb, rel_path, lang, parent_id, class_stack, decorator_names)
+            self._py_class(
+                node, cb, rel_path, lang, parent_id, class_stack, decorator_names
+            )
             return
 
         # Module-level or class-level constants / type aliases
         if node.type == "expression_statement" and len(class_stack) == 0:
             for child in node.children:
                 if child.type == "assignment":
-                    self._py_assignment(child, cb, rel_path, lang, parent_id, class_stack)
+                    self._py_assignment(
+                        child, cb, rel_path, lang, parent_id, class_stack
+                    )
             return
 
         for child in node.children:
@@ -342,8 +356,8 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
-        decorator_names: Optional[List[str]] = None,
+        class_stack: list[str],
+        decorator_names: list[str] | None = None,
     ) -> None:
         name = self._ident(node, cb)
         if not name:
@@ -352,7 +366,7 @@ class CodeGraphBuilder:
         nid = self._node_id(rel_path, qname)
         raw = _bslice(cb, node.start_byte, node.end_byte)
 
-        base_classes: List[str] = []
+        base_classes: list[str] = []
         for child in node.children:
             if child.type == "argument_list":
                 for arg in child.children:
@@ -377,7 +391,9 @@ class CodeGraphBuilder:
             raw_code=raw,
             code_hash=_sha256(raw),
             signature=(
-                f"class {name}({', '.join(base_classes)})" if base_classes else f"class {name}"
+                f"class {name}({', '.join(base_classes)})"
+                if base_classes
+                else f"class {name}"
             ),
             docstring=docstring,
             base_classes=base_classes,
@@ -403,8 +419,8 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
-        decorator_names: Optional[List[str]] = None,
+        class_stack: list[str],
+        decorator_names: list[str] | None = None,
     ) -> None:
         name = self._ident(node, cb)
         if not name:
@@ -423,13 +439,13 @@ class CodeGraphBuilder:
         elif name == "__del__":
             func_type = "destructor"
 
-        params: List[Dict[str, Any]] = []
-        return_type: Optional[str] = None
+        params: list[dict[str, Any]] = []
+        return_type: str | None = None
         for child in node.children:
             if child.type == "parameters":
                 for p in child.children:
-                    pname: Optional[str] = None
-                    ptype: Optional[str] = None
+                    pname: str | None = None
+                    ptype: str | None = None
                     if p.type == "identifier":
                         pname = _bslice(cb, p.start_byte, p.end_byte)
                     elif p.type in ("typed_parameter", "typed_default_parameter"):
@@ -444,12 +460,15 @@ class CodeGraphBuilder:
                                 pname = _bslice(cb, pc.start_byte, pc.end_byte)
                                 break
                     if pname and pname not in ("self", "cls"):
-                        params.append({"name": pname, "type": ptype, "default_value": None})
+                        params.append(
+                            {"name": pname, "type": ptype, "default_value": None}
+                        )
             elif child.type == "type":
                 return_type = _bslice(cb, child.start_byte, child.end_byte)
 
         param_str = ", ".join(
-            (f"{p['name']}: {p['type']}" if p.get("type") else p["name"]) for p in params
+            (f"{p['name']}: {p['type']}" if p.get("type") else p["name"])
+            for p in params
         )
         sig = f"def {name}({param_str})"
         if return_type:
@@ -503,10 +522,10 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
+        class_stack: list[str],
     ) -> None:
         """Extract module-level constants (ALL_CAPS) and CapWords type aliases."""
-        lhs: Optional[str] = None
+        lhs: str | None = None
         for i, child in enumerate(node.children):
             if i == 0 and child.type == "identifier":
                 lhs = _bslice(cb, child.start_byte, child.end_byte)
@@ -554,7 +573,7 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
+        class_stack: list[str],
     ) -> None:
         t = node.type
 
@@ -598,7 +617,7 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
+        class_stack: list[str],
     ) -> None:
         name = self._js_name(node, cb)
         if not name:
@@ -607,8 +626,8 @@ class CodeGraphBuilder:
         nid = self._node_id(rel_path, qname)
         raw = _bslice(cb, node.start_byte, node.end_byte)
 
-        base_classes: List[str] = []
-        implements_list: List[str] = []
+        base_classes: list[str] = []
+        implements_list: list[str] = []
         for child in node.children:
             if child.type == "extends_clause":
                 for ec in child.children:
@@ -658,7 +677,7 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
+        class_stack: list[str],
     ) -> None:
         name = self._js_name(node, cb)
         if not name:
@@ -696,7 +715,7 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
+        class_stack: list[str],
     ) -> None:
         name = self._js_name(node, cb)
         if not name:
@@ -732,7 +751,7 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
+        class_stack: list[str],
     ) -> None:
         name = self._ident(node, cb)
         if not name:
@@ -780,9 +799,9 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
+        class_stack: list[str],
     ) -> None:
-        name: Optional[str] = None
+        name: str | None = None
         is_static = False
         func_type = "method"
         for child in node.children:
@@ -837,13 +856,13 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
+        class_stack: list[str],
     ) -> None:
         for child in node.children:
             if child.type != "variable_declarator":
                 continue
-            var_name: Optional[str] = None
-            value_node: Optional[Node] = None
+            var_name: str | None = None
+            value_node: Node | None = None
             for vc in child.children:
                 if vc.type == "identifier" and var_name is None:
                     var_name = _bslice(cb, vc.start_byte, vc.end_byte)
@@ -871,16 +890,22 @@ class CodeGraphBuilder:
                     end_line=child.end_point[0] + 1,
                     raw_code=raw,
                     code_hash=_sha256(raw),
-                    signature=_bslice(cb, child.start_byte, child.end_byte).split("\n")[0],
+                    signature=_bslice(cb, child.start_byte, child.end_byte).split("\n")[
+                        0
+                    ],
                     function_type=(
-                        "arrow_function" if value_node.type == "arrow_function" else "function"
+                        "arrow_function"
+                        if value_node.type == "arrow_function"
+                        else "function"
                     ),
                     is_async=is_async,
                     visibility="public",
                     is_exported=True,
                     line_count=child.end_point[0] - child.start_point[0] + 1,
                 )
-                self.graph.add_edge(parent_id, nid, type="contains", edge_type="CONTAINS")
+                self.graph.add_edge(
+                    parent_id, nid, type="contains", edge_type="CONTAINS"
+                )
             elif not class_stack and (var_name.isupper() or var_name[0].isupper()):
                 qname = var_name
                 nid = self._node_id(rel_path, qname)
@@ -905,22 +930,28 @@ class CodeGraphBuilder:
                     visibility="public",
                     is_exported=True,
                 )
-                self.graph.add_edge(parent_id, nid, type="contains", edge_type="CONTAINS")
+                self.graph.add_edge(
+                    parent_id, nid, type="contains", edge_type="CONTAINS"
+                )
 
     # ------------------------------------------------------------------
     # Generic node extraction (Go, Java, Rust, C/C++, Ruby …)
     # ------------------------------------------------------------------
 
-    _GENERIC_CLASS_TYPES: Set[str] = {
-        "class_declaration", "class_definition",
-        "struct_item", "impl_item",
+    _GENERIC_CLASS_TYPES: set[str] = {
+        "class_declaration",
+        "class_definition",
+        "struct_item",
+        "impl_item",
         "type_declaration",
         "enum_declaration",
         "interface_declaration",
     }
-    _GENERIC_FUNC_TYPES: Set[str] = {
-        "function_definition", "function_declaration",
-        "method_declaration", "method_definition",
+    _GENERIC_FUNC_TYPES: set[str] = {
+        "function_definition",
+        "function_declaration",
+        "method_declaration",
+        "method_definition",
         "fn_item",
         "func_literal",
         "constructor_declaration",
@@ -933,7 +964,7 @@ class CodeGraphBuilder:
         rel_path: str,
         lang: str,
         parent_id: str,
-        class_stack: List[str],
+        class_stack: list[str],
     ) -> None:
         if node.type in self._GENERIC_CLASS_TYPES:
             name = self._ident(node, cb) or self._js_name(node, cb)
@@ -961,7 +992,9 @@ class CodeGraphBuilder:
                     is_exported=True,
                     line_count=node.end_point[0] - node.start_point[0] + 1,
                 )
-                self.graph.add_edge(parent_id, nid, type="contains", edge_type="CONTAINS")
+                self.graph.add_edge(
+                    parent_id, nid, type="contains", edge_type="CONTAINS"
+                )
                 new_stack = class_stack + [name]
                 for child in node.children:
                     self._generic_nodes(child, cb, rel_path, lang, nid, new_stack)
@@ -998,7 +1031,9 @@ class CodeGraphBuilder:
                     is_exported=True,
                     line_count=node.end_point[0] - node.start_point[0] + 1,
                 )
-                self.graph.add_edge(parent_id, nid, type="contains", edge_type="CONTAINS")
+                self.graph.add_edge(
+                    parent_id, nid, type="contains", edge_type="CONTAINS"
+                )
                 new_stack = class_stack + [name]
                 for child in node.children:
                     self._generic_nodes(child, cb, rel_path, lang, nid, new_stack)
@@ -1018,7 +1053,9 @@ class CodeGraphBuilder:
 
     # ── Imports ────────────────────────────────────────────────────────
 
-    def _resolve_python_module(self, module: str, base_dir: str, dots: int) -> Optional[str]:
+    def _resolve_python_module(
+        self, module: str, base_dir: str, dots: int
+    ) -> str | None:
         mod_path = module.replace(".", "/")
         if dots > 0:
             parent = Path(base_dir) if base_dir else Path(".")
@@ -1034,7 +1071,7 @@ class CodeGraphBuilder:
             return init
         return None
 
-    def _resolve_js_module(self, mod: str, base_dir: str) -> Optional[str]:
+    def _resolve_js_module(self, mod: str, base_dir: str) -> str | None:
         if not mod.startswith("."):
             return None
         base = Path(base_dir) if base_dir else Path(".")
@@ -1053,7 +1090,7 @@ class CodeGraphBuilder:
         base_dir = str(Path(rel_path).parent).replace("\\", "/")
         if base_dir == ".":
             base_dir = ""
-        targets: List[str] = []
+        targets: list[str] = []
 
         if lang == "python":
             for m in re.finditer(r"from\s+(\.*)(\w[\w.]*)\s+import", code):
@@ -1083,7 +1120,9 @@ class CodeGraphBuilder:
             if target != rel_path and target in self._all_rel_paths:
                 if not self.graph.has_node(target):
                     self.graph.add_node(target, type="file", file=target, label=target)
-                self.graph.add_edge(rel_path, target, type="imports", edge_type="IMPORTS")
+                self.graph.add_edge(
+                    rel_path, target, type="imports", edge_type="IMPORTS"
+                )
 
     # ── Semantic edges (inherits / implements) ─────────────────────────
 
@@ -1099,13 +1138,15 @@ class CodeGraphBuilder:
             self._js_semantic(tree.root_node, cb, rel_path, [])
 
     def _py_semantic(
-        self, node: Node, cb: bytes, rel_path: str, class_stack: List[str]
+        self, node: Node, cb: bytes, rel_path: str, class_stack: list[str]
     ) -> None:
         if node.type == "decorated_definition":
-            inner: Optional[Node] = None
+            inner: Node | None = None
             for child in node.children:
                 if child.type in (
-                    "class_definition", "function_definition", "async_function_definition"
+                    "class_definition",
+                    "function_definition",
+                    "async_function_definition",
                 ):
                     inner = child
             if inner is not None:
@@ -1121,12 +1162,15 @@ class CodeGraphBuilder:
                     if child.type == "argument_list":
                         for arg in child.children:
                             if arg.type in ("identifier", "attribute"):
-                                base = _bslice(cb, arg.start_byte, arg.end_byte).split(".")[-1]
+                                base = _bslice(cb, arg.start_byte, arg.end_byte).split(
+                                    "."
+                                )[-1]
                                 for cid in self._name_to_nodes.get(base, []):
                                     if self.graph.nodes[cid].get("type") == "class":
                                         if self.graph.has_node(src_id):
                                             self.graph.add_edge(
-                                                src_id, cid,
+                                                src_id,
+                                                cid,
                                                 type="inherits",
                                                 edge_type="INHERITS",
                                             )
@@ -1142,7 +1186,7 @@ class CodeGraphBuilder:
             self._py_semantic(child, cb, rel_path, class_stack)
 
     def _js_semantic(
-        self, node: Node, cb: bytes, rel_path: str, class_stack: List[str]
+        self, node: Node, cb: bytes, rel_path: str, class_stack: list[str]
     ) -> None:
         if node.type == "export_statement":
             for child in node.children:
@@ -1158,12 +1202,15 @@ class CodeGraphBuilder:
                     if child.type == "extends_clause":
                         for ec in child.children:
                             if ec.type in ("identifier", "member_expression"):
-                                base = _bslice(cb, ec.start_byte, ec.end_byte).split(".")[-1]
+                                base = _bslice(cb, ec.start_byte, ec.end_byte).split(
+                                    "."
+                                )[-1]
                                 for cid in self._name_to_nodes.get(base, []):
                                     if self.graph.nodes[cid].get("type") == "class":
                                         if self.graph.has_node(src_id):
                                             self.graph.add_edge(
-                                                src_id, cid,
+                                                src_id,
+                                                cid,
                                                 type="inherits",
                                                 edge_type="INHERITS",
                                             )
@@ -1176,7 +1223,8 @@ class CodeGraphBuilder:
                                     if self.graph.nodes[cid].get("type") == "class":
                                         if self.graph.has_node(src_id):
                                             self.graph.add_edge(
-                                                src_id, cid,
+                                                src_id,
+                                                cid,
                                                 type="implements",
                                                 edge_type="IMPLEMENTS",
                                             )
@@ -1194,7 +1242,7 @@ class CodeGraphBuilder:
     # ── Call edges ─────────────────────────────────────────────────────
 
     def _extract_call_edges(self, code: str, rel_path: str, lang: str) -> None:
-        imported_files: Set[str] = {
+        imported_files: set[str] = {
             v
             for _, v, d in self.graph.out_edges(rel_path, data=True)
             if d.get("type") == "imports"
@@ -1211,10 +1259,14 @@ class CodeGraphBuilder:
             old_ctx = self._call_context
 
             if node.type in (
-                "function_definition", "async_function_definition",
+                "function_definition",
+                "async_function_definition",
                 "class_definition",
-                "function_declaration", "class_declaration",
-                "method_definition", "fn_item", "method_declaration",
+                "function_declaration",
+                "class_declaration",
+                "method_definition",
+                "fn_item",
+                "method_declaration",
                 "generator_function_declaration",
             ):
                 name = self._ident(node, cb)
@@ -1227,7 +1279,8 @@ class CodeGraphBuilder:
                     sl = node.start_point[0] + 1
                     # Match by file prefix + name + start_line to resolve qualified name
                     candidates = [
-                        nid for nid in self.graph.nodes
+                        nid
+                        for nid in self.graph.nodes
                         if nid.startswith(f"{rel_path}:")
                         and self.graph.nodes[nid].get("name") == name
                         and self.graph.nodes[nid].get("start_line") == sl
@@ -1236,7 +1289,7 @@ class CodeGraphBuilder:
                         self._call_context = candidates[0]
 
             if node.type in ("call", "call_expression"):
-                call_name: Optional[str] = None
+                call_name: str | None = None
                 for child in node.children:
                     if child.type in ("identifier", "attribute", "member_expression"):
                         full = _bslice(cb, child.start_byte, child.end_byte)
@@ -1258,10 +1311,10 @@ class CodeGraphBuilder:
         self,
         rel_path: str,
         cur_dir: str,
-        imported_files: Set[str],
-        potential_targets: List[str],
+        imported_files: set[str],
+        potential_targets: list[str],
     ) -> None:
-        by_file: Dict[str, List[str]] = {}
+        by_file: dict[str, list[str]] = {}
         for t in potential_targets:
             f = t.split(":")[0] if ":" in t else t
             by_file.setdefault(f, []).append(t)
@@ -1289,7 +1342,7 @@ class CodeGraphBuilder:
         # Priority 3 — ambiguous cross-file (limit fan-out, same dir preferred)
         other_files = [f for f in by_file if f != rel_path]
 
-        def sort_key(f: str) -> Tuple[int, str]:
+        def sort_key(f: str) -> tuple[int, str]:
             return (0 if str(Path(f).parent) == cur_dir else 1, f)
 
         for f in sorted(other_files, key=sort_key)[:_MAX_AMBIGUOUS_CROSS_FILE_TARGETS]:
@@ -1298,4 +1351,3 @@ class CodeGraphBuilder:
                     self.graph.add_edge(
                         self._call_context, target, type="calls", edge_type="CALLS"
                     )
-

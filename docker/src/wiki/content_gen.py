@@ -1,43 +1,42 @@
 from __future__ import annotations
 
 import json
-import re
 import logging
+import re
 import threading
 import time
 import unicodedata
+from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from src.clients import get_llm, StrOutputParser
+from src.clients import StrOutputParser, get_llm
 from src.config import get_wiki_content_concurrency
 from src.prompts import WIKI_SECTION_PROMPT
 
 # 初始化日志
 logger = logging.getLogger("app.wiki.content_gen")
 
+
 @dataclass(slots=True)
 class WikiSection:
-    """
-    表示 wiki 目录树中的一个节点，同时保存其祖先标题路径，便于提示词构造。
-    """
+    """表示 wiki 目录树中的一个节点，同时保存其祖先标题路径，便于提示词构造。"""
 
     id: str
     title: str
-    files: List[str]
-    breadcrumbs: List[str] = field(default_factory=list)
+    files: list[str]
+    breadcrumbs: list[str] = field(default_factory=list)
 
     def display_path(self) -> str:
         return " / ".join(self.breadcrumbs + [self.title])
 
 
 class WikiContentGenerator:
-    """
-    将 wiki 目录树与仓库文件上下文交给 AI 模型，生成每个节点对应的内容与 Mermaid 架构图。
+    """将 wiki 目录树与仓库文件上下文交给 AI 模型，生成每个节点对应的内容与 Mermaid 架构图。
     使用 LCEL chain（prompt | llm | StrOutputParser），支持受控并发（线程池）。
     LangChain chain 是无状态且线程安全的，所有 worker 共享同一个 chain 实例。
     """
@@ -69,10 +68,8 @@ class WikiContentGenerator:
         self.progress_callback = progress_callback
         self.task_id = task_id or "unknown"
 
-    def generate(self, structure: Dict[str, Any]) -> List[Path]:
-        """
-        根据 wiki 目录结构并发生成内容，返回所有成功写入的 JSON 文件路径。
-        """
+    def generate(self, structure: dict[str, Any]) -> list[Path]:
+        """根据 wiki 目录结构并发生成内容，返回所有成功写入的 JSON 文件路径。"""
         toc = structure.get("toc") or []
         sections = list(self._flatten_sections(toc))
         if not sections:
@@ -86,10 +83,10 @@ class WikiContentGenerator:
 
     def _run_sections_concurrently(
         self,
-        structure: Dict[str, Any],
-        sections: List[WikiSection],
-        filename_map: Dict[str, str],
-    ) -> List[Path]:
+        structure: dict[str, Any],
+        sections: list[WikiSection],
+        filename_map: dict[str, str],
+    ) -> list[Path]:
         """用线程池并发运行每个章节的生成 worker，收集成功写入的文件路径。"""
         total = len(sections)
         concurrency = min(self.max_concurrency, total)
@@ -101,14 +98,18 @@ class WikiContentGenerator:
         # 线程安全的进度计数器
         lock = threading.Lock()
         counters = {"completed": 0, "failed": 0, "active": 0}
-        generated_files: List[Path] = []
+        generated_files: list[Path] = []
 
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures = {
                 pool.submit(
                     self._generate_section_worker,
-                    structure, section,
-                    filename_map=filename_map, total=total, counters=counters, lock=lock,
+                    structure,
+                    section,
+                    filename_map=filename_map,
+                    total=total,
+                    counters=counters,
+                    lock=lock,
                 ): section
                 for section in sections
             }
@@ -125,14 +126,14 @@ class WikiContentGenerator:
 
     def _generate_section_worker(
         self,
-        structure: Dict[str, Any],
+        structure: dict[str, Any],
         section: WikiSection,
         *,
-        filename_map: Dict[str, str],
+        filename_map: dict[str, str],
         total: int,
-        counters: Dict[str, int],
+        counters: dict[str, int],
         lock: threading.Lock,
-    ) -> Tuple[WikiSection, Optional[Path]]:
+    ) -> tuple[WikiSection, Path | None]:
         """单个章节的生成 worker，共享线程安全的 LCEL chain。"""
         with lock:
             counters["active"] += 1
@@ -146,7 +147,8 @@ class WikiContentGenerator:
         t0 = time.monotonic()
         try:
             file_path = self._generate_section(
-                structure, section,
+                structure,
+                section,
                 filename_override=filename_map.get(section.id),
             )
             elapsed = time.monotonic() - t0
@@ -180,39 +182,38 @@ class WikiContentGenerator:
         if self.progress_callback:
             progress = 50.0 + (completed_now / total) * 35.0
             self.progress_callback(
-                progress,
-                f"Generating Wiki content ({completed_now}/{total})..."
+                progress, f"Generating Wiki content ({completed_now}/{total})..."
             )
 
     def _generate_section(
         self,
-        structure: Dict[str, Any],
+        structure: dict[str, Any],
         section: WikiSection,
         *,
         filename_override: str | None = None,
     ) -> Path | None:
-        """
-        为单个章节构建上下文、调用 LCEL chain，并将结果写入 JSON。
-        """
+        """为单个章节构建上下文、调用 LCEL chain，并将结果写入 JSON。"""
         context = self._collect_file_context(section.files)
         if not context:
             context = "未能找到关联文件，请基于章节标题进行合理推断。"
 
-        raw_response = self._chain.invoke({
-            "doc_title": structure.get("title", "Wiki"),
-            "doc_description": structure.get("description", ""),
-            "breadcrumb": section.display_path(),
-            "section_id": section.id,
-            "context": context,
-        })
+        raw_response = self._chain.invoke(
+            {
+                "doc_title": structure.get("title", "Wiki"),
+                "doc_description": structure.get("description", ""),
+                "breadcrumb": section.display_path(),
+                "section_id": section.id,
+                "context": context,
+            }
+        )
         parsed = self._parse_llm_response(raw_response)
-        return self._write_section_json(section, parsed, filename_override=filename_override)
+        return self._write_section_json(
+            section, parsed, filename_override=filename_override
+        )
 
     def _collect_file_context(self, files: Iterable[str]) -> str:
-        """
-        读取文件内容片段。
-        """
-        snippets: List[str] = []
+        """读取文件内容片段。"""
+        snippets: list[str] = []
         accumulated = 0
 
         rel_files = list(files)
@@ -230,9 +231,7 @@ class WikiContentGenerator:
         return "\n\n".join(snippets)
 
     def _read_single_file(self, rel_path: str) -> str:
-        """
-        读取单个文件的文本内容，并裁剪超长文本。
-        """
+        """读取单个文件的文本内容，并裁剪超长文本。"""
         safe_rel = rel_path.strip().lstrip("./")
         abs_path = (self.repo_root / safe_rel).resolve()
 
@@ -259,10 +258,14 @@ class WikiContentGenerator:
 
         return snippet
 
-    def _write_section_json(self, section: WikiSection, data: Dict[str, Any], *, filename_override: str | None = None) -> Path:
-        """
-        将 LLM 输出和章节元数据写入独立 JSON，便于离线调试提示词。
-        """
+    def _write_section_json(
+        self,
+        section: WikiSection,
+        data: dict[str, Any],
+        *,
+        filename_override: str | None = None,
+    ) -> Path:
+        """将 LLM 输出和章节元数据写入独立 JSON，便于离线调试提示词。"""
         payload = {
             "section_id": section.id,
             "title": section.title,
@@ -279,10 +282,8 @@ class WikiContentGenerator:
         logger.info(f"已写入章节 JSON：{section.id} -> {target_path}")
         return target_path
 
-    def _parse_llm_response(self, response: str) -> Dict[str, Any]:
-        """
-        尝试解析模型返回的 JSON；若失败则回退为单段文本与空 Mermaid。
-        """
+    def _parse_llm_response(self, response: str) -> dict[str, Any]:
+        """尝试解析模型返回的 JSON；若失败则回退为单段文本与空 Mermaid。"""
         candidate = self._extract_json_block(response)
         if candidate:
             try:
@@ -297,9 +298,7 @@ class WikiContentGenerator:
 
     @staticmethod
     def _extract_json_block(text: str) -> str | None:
-        """
-        从模型回复中提取首个 JSON 对象字符串。
-        """
+        """从模型回复中提取首个 JSON 对象字符串。"""
         start = text.find("{")
         end = text.rfind("}")
         if start == -1 or end == -1 or end <= start:
@@ -313,9 +312,7 @@ class WikiContentGenerator:
 
     @staticmethod
     def _safe_filename(name: str) -> str:
-        """
-        将章节 ID 转换为文件系统安全的文件名。
-        """
+        """将章节 ID 转换为文件系统安全的文件名。"""
         sanitized = re.sub(r"[^a-zA-Z0-9._-]+", "-", name.strip().lower())
         # 去除首尾连字符
         sanitized = sanitized.strip("-")
@@ -323,8 +320,7 @@ class WikiContentGenerator:
 
     @staticmethod
     def _normalize_for_collision(name: str) -> str:
-        """
-        将文件名进一步规范化用于冲突检测：
+        """将文件名进一步规范化用于冲突检测：
         - Unicode NFKD 标准化
         - 大小写折叠
         - 连续分隔符合并
@@ -333,19 +329,18 @@ class WikiContentGenerator:
         normalized = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
         return normalized or "section"
 
-    def _build_filename_map(self, sections: List[WikiSection]) -> Dict[str, str]:
-        """
-        在主线程中一次性为所有章节分配不冲突的文件名。
+    def _build_filename_map(self, sections: list[WikiSection]) -> dict[str, str]:
+        """在主线程中一次性为所有章节分配不冲突的文件名。
         返回 {section.id: safe_filename_without_extension} 映射。
         """
         # 第一轮：生成基础名称
-        base_names: List[Tuple[str, str]] = []  # (section_id, base_name)
+        base_names: list[tuple[str, str]] = []  # (section_id, base_name)
         for sec in sections:
             base_names.append((sec.id, self._safe_filename(sec.id)))
 
         # 第二轮：检测规范化后的冲突并追加后缀
-        seen: Dict[str, int] = {}  # normalized_name -> 已分配的次数
-        result: Dict[str, str] = {}
+        seen: dict[str, int] = {}  # normalized_name -> 已分配的次数
+        result: dict[str, str] = {}
 
         for section_id, base_name in base_names:
             norm = self._normalize_for_collision(base_name)
@@ -359,10 +354,10 @@ class WikiContentGenerator:
 
         return result
 
-    def _flatten_sections(self, toc: Sequence[Dict[str, Any]], ancestors: List[str] | None = None) -> Iterable[WikiSection]:
-        """
-        深度优先遍历 toc，产出包含面包屑信息的章节对象。
-        """
+    def _flatten_sections(
+        self, toc: Sequence[dict[str, Any]], ancestors: list[str] | None = None
+    ) -> Iterable[WikiSection]:
+        """深度优先遍历 toc，产出包含面包屑信息的章节对象。"""
         ancestors = ancestors or []
         for node in toc:
             section = WikiSection(
@@ -374,8 +369,9 @@ class WikiContentGenerator:
             yield section
             children = node.get("children") or []
             if children:
-                yield from self._flatten_sections(children, ancestors=ancestors + [section.title])
+                yield from self._flatten_sections(
+                    children, ancestors=ancestors + [section.title]
+                )
 
 
 __all__ = ["WikiContentGenerator", "WikiSection"]
-

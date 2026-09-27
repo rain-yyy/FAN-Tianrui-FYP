@@ -1,17 +1,19 @@
-"""
-RAG semantic search tool: hybrid (dense + sparse) retrieval over the repo's
+"""RAG semantic search tool: hybrid (dense + sparse) retrieval over the repo's
 Qdrant index, with optional HyDE query expansion. Wraps `core/retrieval.py`'s
 fusion primitives — this module owns only the tool-facing shape.
 """
+
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Tuple
+from typing import Any
 
 from langchain_core.tools import StructuredTool
 
+from src.chat.tools.schemas import RagSearchArgs
 from src.clients import StrOutputParser, get_llm
 from src.config import (
     get_category_top_k,
@@ -22,10 +24,14 @@ from src.config import (
     get_retrieval_k_multipliers,
     should_use_hyde,
 )
-from src.core.retrieval import RankedCandidate, mmr_select, normalize_scores, qdrant_search_category
+from src.core.retrieval import (
+    RankedCandidate,
+    mmr_select,
+    normalize_scores,
+    qdrant_search_category,
+)
 from src.ingestion.vector_store import get_qdrant_client
 from src.prompts import HYDE_PROMPT
-from src.chat.tools.schemas import RagSearchArgs
 from src.utils.async_utils import run_sync
 
 logger = logging.getLogger("app.chat.tools.rag")
@@ -57,23 +63,36 @@ class RAGSearchEngine:
 
     def _generate_hyde_document(self, question: str) -> str:
         try:
-            chain = HYDE_PROMPT.build() | get_llm("hyde_generation", temperature=0.3, max_tokens=400) | StrOutputParser()
+            chain = (
+                HYDE_PROMPT.build()
+                | get_llm("hyde_generation", temperature=0.3, max_tokens=400)
+                | StrOutputParser()
+            )
             hyde_doc = chain.invoke({"question": question})
-            return hyde_doc.strip() if isinstance(hyde_doc, str) else str(hyde_doc).strip()
+            return (
+                hyde_doc.strip() if isinstance(hyde_doc, str) else str(hyde_doc).strip()
+            )
         except Exception as e:
             logger.error("[HyDE] Failed to generate: %s", e)
             return question
 
-    def search(self, query: str, top_k: int = 20) -> Tuple[str, Dict[str, Any]]:
+    def search(self, query: str, top_k: int = 20) -> tuple[str, dict[str, Any]]:
         """Returns (content_for_model, artifact_for_service_layer)."""
         self._ensure_loaded()
 
         if not self.repo_id:
-            return "No vector store path configured for this repository.", {"error": "no_stores"}
+            return "No vector store path configured for this repository.", {
+                "error": "no_stores"
+            }
 
-        candidates = self._gather_hybrid_candidates(query, category_top_k=get_category_top_k())
+        candidates = self._gather_hybrid_candidates(
+            query, category_top_k=get_category_top_k()
+        )
         if not candidates:
-            return "No relevant documents found for the query.", {"query": query, "results": []}
+            return "No relevant documents found for the query.", {
+                "query": query,
+                "results": [],
+            }
 
         mmr_pick = mmr_select(
             candidates,
@@ -83,10 +102,15 @@ class RAGSearchEngine:
         chosen = mmr_pick or candidates[: min(top_k, len(candidates))]
 
         result_lines = [f"Found {len(chosen)} relevant document(s):\n"]
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for idx, cand in enumerate(chosen, 1):
             doc = cand.doc
-            source = doc.metadata.get("source") or doc.metadata.get("file_path") or doc.metadata.get("id") or f"doc_{idx}"
+            source = (
+                doc.metadata.get("source")
+                or doc.metadata.get("file_path")
+                or doc.metadata.get("id")
+                or f"doc_{idx}"
+            )
             category = doc.metadata.get("kb_category", "")
 
             result_lines.append(f"[{idx}] Source: {source} | Type: {category}")
@@ -97,11 +121,13 @@ class RAGSearchEngine:
             result_lines.append(content)
             result_lines.append("")
 
-            results.append({
-                "source": f"{category}:{source}" if category else source,
-                "category": category,
-                "score": cand.final_score,
-            })
+            results.append(
+                {
+                    "source": f"{category}:{source}" if category else source,
+                    "category": category,
+                    "score": cand.final_score,
+                }
+            )
 
         artifact = {
             "query": query,
@@ -111,11 +137,15 @@ class RAGSearchEngine:
         }
         return "\n".join(result_lines), artifact
 
-    def _gather_hybrid_candidates(self, question: str, category_top_k: Mapping[str, int]) -> List[RankedCandidate]:
-        final_candidates: List[RankedCandidate] = []
-        dense_multiplier, sparse_multiplier, max_method_k = get_retrieval_k_multipliers()
+    def _gather_hybrid_candidates(
+        self, question: str, category_top_k: Mapping[str, int]
+    ) -> list[RankedCandidate]:
+        final_candidates: list[RankedCandidate] = []
+        dense_multiplier, sparse_multiplier, max_method_k = (
+            get_retrieval_k_multipliers()
+        )
 
-        def _fetch_category(category: str) -> List[RankedCandidate]:
+        def _fetch_category(category: str) -> list[RankedCandidate]:
             base_k = max(int(category_top_k.get(category, 3)), 1)
             dense_k = min(base_k * dense_multiplier, max_method_k)
             sparse_k = min(base_k * sparse_multiplier, max_method_k)
@@ -152,7 +182,7 @@ class RAGSearchEngine:
             return []
 
         normalized = normalize_scores([c.final_score for c in final_candidates])
-        for cand, score in zip(final_candidates, normalized):
+        for cand, score in zip(final_candidates, normalized, strict=True):
             cand.final_score = score
 
         final_candidates.sort(key=lambda c: c.final_score, reverse=True)
@@ -162,14 +192,14 @@ class RAGSearchEngine:
 def build_rag_search_tool(vector_store_path: str) -> StructuredTool:
     engine = RAGSearchEngine(vector_store_path)
 
-    def _run(query: str, top_k: int = 20) -> Tuple[str, Dict[str, Any]]:
+    def _run(query: str, top_k: int = 20) -> tuple[str, dict[str, Any]]:
         try:
             return engine.search(query, top_k)
         except Exception as e:
             logger.exception("RAG search failed")
             return f"Search failed: {e}", {"error": str(e)}
 
-    async def _arun(query: str, top_k: int = 20) -> Tuple[str, Dict[str, Any]]:
+    async def _arun(query: str, top_k: int = 20) -> tuple[str, dict[str, Any]]:
         return await run_sync(_run, query, top_k)
 
     return StructuredTool.from_function(

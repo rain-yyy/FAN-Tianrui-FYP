@@ -1,5 +1,4 @@
-"""
-Core "project input -> create task" and "task management" (list/get/cancel/
+"""Core "project input -> create task" and "task management" (list/get/cancel/
 delete) flows.
 
 Two layers:
@@ -14,6 +13,7 @@ None of this runs the Wiki content generation to completion — that involves
 LLM calls out of scope for "core flow" testing per the task at hand. Tasks
 are stopped via /cancel immediately after creation instead.
 """
+
 import asyncio
 import uuid
 
@@ -28,6 +28,7 @@ FAKE_REPO_URL = "https://github.com/octocat/Hello-World"
 # API-level: POST /generate, POST /task/{id}, POST /tasks
 # ---------------------------------------------------------------------------
 
+
 async def test_generate_missing_url_link_returns_400(api_client, unique_user_id):
     resp = await api_client.post("/generate", json={"user_id": unique_user_id})
     assert resp.status_code == 400
@@ -38,8 +39,12 @@ async def test_generate_missing_user_id_returns_400(api_client, test_repo_url):
     assert resp.status_code == 400
 
 
-async def test_generate_creates_task_record(api_client, test_repo_url, unique_user_id, task_cleanup):
-    resp = await api_client.post("/generate", json={"url_link": test_repo_url, "user_id": unique_user_id})
+async def test_generate_creates_task_record(
+    api_client, test_repo_url, unique_user_id, task_cleanup
+):
+    resp = await api_client.post(
+        "/generate", json={"url_link": test_repo_url, "user_id": unique_user_id}
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert "task_id" in body and body["task_id"]
@@ -67,8 +72,12 @@ async def test_list_tasks_missing_user_id_returns_400(api_client):
     assert resp.status_code == 400
 
 
-async def test_list_tasks_includes_created_task(api_client, test_repo_url, unique_user_id, task_cleanup):
-    create_resp = await api_client.post("/generate", json={"url_link": test_repo_url, "user_id": unique_user_id})
+async def test_list_tasks_includes_created_task(
+    api_client, test_repo_url, unique_user_id, task_cleanup
+):
+    create_resp = await api_client.post(
+        "/generate", json={"url_link": test_repo_url, "user_id": unique_user_id}
+    )
     task_id = create_resp.json()["task_id"]
     task_cleanup.append((task_id, unique_user_id))
     await api_client.post(f"/task/{task_id}/cancel")
@@ -83,6 +92,7 @@ async def test_list_tasks_includes_created_task(api_client, test_repo_url, uniqu
 # API-level: POST /task/{id}/cancel
 # ---------------------------------------------------------------------------
 
+
 async def test_cancel_immediately_after_create_marks_task_failed_cancelled(
     api_client, test_repo_url, unique_user_id, task_cleanup
 ):
@@ -91,8 +101,11 @@ async def test_cancel_immediately_after_create_marks_task_failed_cancelled(
     execute_generation_task finish (status "cached") before this cancel call
     lands, which would make cancel 404 instead of succeeding. If this repo
     was already fully generated recently through the real app, pick a
-    different repo or clear its `repositories` row first."""
-    create_resp = await api_client.post("/generate", json={"url_link": test_repo_url, "user_id": unique_user_id})
+    different repo or clear its `repositories` row first.
+    """
+    create_resp = await api_client.post(
+        "/generate", json={"url_link": test_repo_url, "user_id": unique_user_id}
+    )
     task_id = create_resp.json()["task_id"]
     task_cleanup.append((task_id, unique_user_id))
 
@@ -120,12 +133,17 @@ async def test_cancel_unknown_task_returns_404(api_client):
 # API-level: DELETE /task/{id}
 # ---------------------------------------------------------------------------
 
+
 async def test_delete_task_removes_record(api_client, test_repo_url, unique_user_id):
-    create_resp = await api_client.post("/generate", json={"url_link": test_repo_url, "user_id": unique_user_id})
+    create_resp = await api_client.post(
+        "/generate", json={"url_link": test_repo_url, "user_id": unique_user_id}
+    )
     task_id = create_resp.json()["task_id"]
     await api_client.post(f"/task/{task_id}/cancel")
 
-    delete_resp = await api_client.delete(f"/task/{task_id}", params={"user_id": unique_user_id})
+    delete_resp = await api_client.delete(
+        f"/task/{task_id}", params={"user_id": unique_user_id}
+    )
     assert delete_resp.status_code == 200
     assert delete_resp.json()["success"] is True
 
@@ -134,18 +152,26 @@ async def test_delete_task_removes_record(api_client, test_repo_url, unique_user
 
 
 async def test_delete_task_not_found_returns_404(api_client, unique_user_id):
-    resp = await api_client.delete(f"/task/does-not-exist-{uuid.uuid4()}", params={"user_id": unique_user_id})
+    resp = await api_client.delete(
+        f"/task/does-not-exist-{uuid.uuid4()}", params={"user_id": unique_user_id}
+    )
     assert resp.status_code == 404
 
 
-async def test_delete_task_wrong_user_returns_404(api_client, test_repo_url, unique_user_id, task_cleanup):
-    create_resp = await api_client.post("/generate", json={"url_link": test_repo_url, "user_id": unique_user_id})
+async def test_delete_task_wrong_user_returns_404(
+    api_client, test_repo_url, unique_user_id, task_cleanup
+):
+    create_resp = await api_client.post(
+        "/generate", json={"url_link": test_repo_url, "user_id": unique_user_id}
+    )
     task_id = create_resp.json()["task_id"]
     task_cleanup.append((task_id, unique_user_id))
     await api_client.post(f"/task/{task_id}/cancel")
 
     other_user_id = str(uuid.uuid4())
-    resp = await api_client.delete(f"/task/{task_id}", params={"user_id": other_user_id})
+    resp = await api_client.delete(
+        f"/task/{task_id}", params={"user_id": other_user_id}
+    )
     assert resp.status_code == 404
 
 
@@ -158,6 +184,7 @@ async def test_delete_task_missing_user_id_is_rejected(api_client, unique_user_i
 # State-machine level: src.core.task_manager.cancel_task branches
 # ---------------------------------------------------------------------------
 
+
 def test_cancel_task_not_yet_running(supabase_client, unique_user_id, task_cleanup):
     task_id = f"pytest-{uuid.uuid4()}"
     assert supabase_client.create_task(unique_user_id, task_id, FAKE_REPO_URL)
@@ -168,7 +195,9 @@ def test_cancel_task_not_yet_running(supabase_client, unique_user_id, task_clean
     assert error is None
 
 
-async def test_cancel_task_cancels_registered_in_process_task(supabase_client, unique_user_id, task_cleanup):
+async def test_cancel_task_cancels_registered_in_process_task(
+    supabase_client, unique_user_id, task_cleanup
+):
     task_id = f"pytest-{uuid.uuid4()}"
     supabase_client.create_task(unique_user_id, task_id, FAKE_REPO_URL)
     task_cleanup.append((task_id, unique_user_id))
@@ -181,7 +210,9 @@ async def test_cancel_task_cancels_registered_in_process_task(supabase_client, u
     assert outcome == CancelOutcome.CANCELLED
     assert error is None
 
-    await asyncio.wait([fake_task])  # let the cancellation actually propagate into fake_task
+    await asyncio.wait(
+        [fake_task]
+    )  # let the cancellation actually propagate into fake_task
     assert fake_task.cancelled()
 
     row = supabase_client.get_task(task_id)
@@ -193,7 +224,8 @@ def test_cancel_task_marked_cancelled_in_db_without_in_process_registration(
     supabase_client, unique_user_id, task_cleanup
 ):
     """Simulates a server restart: DB still says `processing`, but nothing
-    is registered in this process's in-memory _running_tasks table."""
+    is registered in this process's in-memory _running_tasks table.
+    """
     task_id = f"pytest-{uuid.uuid4()}"
     supabase_client.create_task(unique_user_id, task_id, FAKE_REPO_URL)
     task_cleanup.append((task_id, unique_user_id))
@@ -217,5 +249,7 @@ def test_cancel_task_not_found(supabase_client):
 def test_delete_task_not_found_result(supabase_client, unique_user_id):
     from src.storage.supabase_client import DeleteTaskResult
 
-    result = supabase_client.delete_task(f"does-not-exist-{uuid.uuid4()}", unique_user_id)
+    result = supabase_client.delete_task(
+        f"does-not-exist-{uuid.uuid4()}", unique_user_id
+    )
     assert result == DeleteTaskResult.NOT_FOUND

@@ -1,14 +1,14 @@
-"""
-Per-session tool registry assembly for the chat agent.
+"""Per-session tool registry assembly for the chat agent.
 
 Adding a new tool means adding one `build_x_tool()` factory in this package
 and one line in `build_tools_for_session` — not touching a dispatch table,
 an anchor-extraction pass, and an intent-routing table as the old
 `docker/src/agent/graph.py` required.
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.tools import BaseTool
 
@@ -23,19 +23,18 @@ __all__ = ["build_tools_for_session"]
 
 def build_tools_for_session(
     vector_store_path: str,
-    graph_path: Optional[str],
-    repo_root: Optional[str],
-    web_search_config: Optional[Dict[str, Any]] = None,
-) -> List[BaseTool]:
-    """
-    Build the tool set available to the agent for one chat turn.
+    graph_path: str | None,
+    repo_root: str | None,
+    web_search_config: dict[str, Any] | None = None,
+) -> list[BaseTool]:
+    """Build the tool set available to the agent for one chat turn.
 
     rag_search is always available (it's the only tool that doesn't need a
     checked-out repo, just the vector index); code_graph/file_read/repo_map/
     grep_search require the physical repo checkout (`repo_root`)/code graph
     (`graph_path`) to exist; web_search is opt-in via config.
     """
-    tools: List[BaseTool] = [build_rag_search_tool(vector_store_path)]
+    tools: list[BaseTool] = [build_rag_search_tool(vector_store_path)]
 
     if graph_path:
         tools.append(build_code_graph_tool(graph_path))

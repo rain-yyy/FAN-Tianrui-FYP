@@ -1,5 +1,4 @@
-"""
-LangGraph state for the chat agent.
+"""LangGraph state for the chat agent.
 
 Deliberately small: native tool-calling means the model itself tracks intent,
 what evidence it has, and when it's confident enough to stop — there is no
@@ -14,9 +13,10 @@ them directly when building the tools/LLM, exactly as the design called for
 ("passed through tools/LLM construction, not baked into serializable state").
 Putting them in state would just be dead weight nothing consumes.
 """
+
 from __future__ import annotations
 
-from typing import Annotated, List
+from typing import Annotated
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
@@ -24,6 +24,6 @@ from typing_extensions import TypedDict
 
 
 class ChatState(TypedDict):
-    messages: Annotated[List[AnyMessage], add_messages]
+    messages: Annotated[list[AnyMessage], add_messages]
     tool_call_count: int
     max_tool_iterations: int

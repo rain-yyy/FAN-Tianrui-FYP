@@ -1,5 +1,4 @@
-"""
-AI 客户端模块 — 基于 LangChain ChatOpenRouter。
+"""AI 客户端模块 — 基于 LangChain ChatOpenRouter。
 
 使用方式:
     from src.clients import get_llm, ChatOpenRouter
@@ -9,7 +8,7 @@ AI 客户端模块 — 基于 LangChain ChatOpenRouter。
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
@@ -24,9 +23,10 @@ _DEFAULT_MODEL = "google/gemini-2.5-flash"
 __all__ = ["ChatOpenRouter", "StrOutputParser", "get_llm", "get_model_name"]
 
 
-def get_model_name(config: Dict[str, Any] | None = None, model_key: str = "rag_answer") -> str:
-    """
-    从配置中获取指定用途的模型名称。
+def get_model_name(
+    config: dict[str, Any] | None = None, model_key: str = "rag_answer"
+) -> str:
+    """从配置中获取指定用途的模型名称。
 
     Args:
         config: 配置字典（None 时使用全局 CONFIG）
@@ -51,11 +51,10 @@ def get_model_name(config: Dict[str, Any] | None = None, model_key: str = "rag_a
 
 def get_llm(
     model_key: str,
-    config: Dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> ChatOpenRouter:
-    """
-    根据配置键名返回配置好的 ChatOpenRouter 实例。
+    """根据配置键名返回配置好的 ChatOpenRouter 实例。
 
     Args:
         model_key: 配置文件中 ai_models.models 下的键名
@@ -74,5 +73,7 @@ def get_llm(
             print(chunk.content, end="")
     """
     model_name = get_model_name(config, model_key)
-    logger.debug("Creating ChatOpenRouter for key='%s' model='%s'", model_key, model_name)
+    logger.debug(
+        "Creating ChatOpenRouter for key='%s' model='%s'", model_key, model_name
+    )
     return ChatOpenRouter(model=model_name, **kwargs)

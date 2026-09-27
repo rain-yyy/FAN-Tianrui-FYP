@@ -2,41 +2,42 @@ import json
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 import igraph as ig
 import leidenalg
 import networkx as nx
 from langchain_core.prompts import ChatPromptTemplate
 
-from src.clients import get_llm, StrOutputParser
+from src.clients import StrOutputParser, get_llm
 from src.config import CONFIG
 
 logger = logging.getLogger("app.ingestion.community_engine")
 
 # LCEL chain for community business-summary generation
-_COMMUNITY_SUMMARY_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", "You are a senior software architect."),
-    ("human", (
-        "The following list groups code entities belonging to one logical business community "
-        "in the repository.\n\n"
-        "Write a brief summary (at most ~100 words) of what this community is responsible for "
-        "and how it fits into the overall project.\n\n"
-        "Entity list:\n{entity_list}\n\n"
-        "Return only the summary text, in English."
-    )),
-])
+_COMMUNITY_SUMMARY_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", "You are a senior software architect."),
+        (
+            "human",
+            (
+                "The following list groups code entities belonging to one logical business community "
+                "in the repository.\n\n"
+                "Write a brief summary (at most ~100 words) of what this community is responsible for "
+                "and how it fits into the overall project.\n\n"
+                "Entity list:\n{entity_list}\n\n"
+                "Return only the summary text, in English."
+            ),
+        ),
+    ]
+)
 _community_summary_chain = (
-    _COMMUNITY_SUMMARY_PROMPT
-    | get_llm("community_summary")
-    | StrOutputParser()
+    _COMMUNITY_SUMMARY_PROMPT | get_llm("community_summary") | StrOutputParser()
 )
 
 
 class CommunityEngine:
-    """
-    负责对代码图谱进行社区发现并生成业务摘要。
-    """
+    """负责对代码图谱进行社区发现并生成业务摘要。"""
 
     def __init__(self, graph: nx.DiGraph):
         self.nx_graph = graph
@@ -44,14 +45,14 @@ class CommunityEngine:
         self.community_summaries = {}
 
     @staticmethod
-    def _community_detection_config() -> Dict[str, Any]:
+    def _community_detection_config() -> dict[str, Any]:
         raw = CONFIG.get("community_detection") or {}
         if not isinstance(raw, dict):
             return {}
         return raw
 
     @staticmethod
-    def _resolve_file_for_node(node_id: str, data: Dict[str, Any]) -> str:
+    def _resolve_file_for_node(node_id: str, data: dict[str, Any]) -> str:
         if data.get("type") == "file":
             return node_id
         file_attr = data.get("file")
@@ -61,8 +62,8 @@ class CommunityEngine:
             return node_id.rsplit(":", 1)[0]
         return node_id
 
-    def _expand_files_to_all_nodes(self, files: Set[str]) -> List[str]:
-        members: List[str] = []
+    def _expand_files_to_all_nodes(self, files: set[str]) -> list[str]:
+        members: list[str] = []
         for n, d in self.nx_graph.nodes(data=True):
             if self._resolve_file_for_node(n, d) in files:
                 members.append(n)
@@ -74,13 +75,12 @@ class CommunityEngine:
         resolution_parameter: float,
         *,
         weighted: bool,
-        seed: Optional[int] = None,
+        seed: int | None = None,
     ) -> Any:
-        """
-        ModularityVertexPartition 不支持 resolution_parameter。
+        """ModularityVertexPartition 不支持 resolution_parameter。
         带权文件级图使用 RBConfigurationVertexPartition，以便用 resolution 控制社区规模。
         """
-        opts: Dict[str, Any] = {}
+        opts: dict[str, Any] = {}
         if seed is not None:
             opts["seed"] = seed
         if weighted and g.ecount() > 0 and "weight" in g.es.attributes():
@@ -97,7 +97,9 @@ class CommunityEngine:
             **opts,
         )
 
-    def _run_leiden_full_graph(self, resolution_parameter: float) -> Dict[int, List[str]]:
+    def _run_leiden_full_graph(
+        self, resolution_parameter: float
+    ) -> dict[int, list[str]]:
         undirected_nx = self.nx_graph.to_undirected()
         nodes = list(undirected_nx.nodes())
         if not nodes:
@@ -124,9 +126,9 @@ class CommunityEngine:
 
     def _compute_file_edge_weights(
         self, und: nx.Graph, call_weight: float
-    ) -> DefaultDict[Tuple[str, str], float]:
+    ) -> defaultdict[tuple[str, str], float]:
         """按跨文件调用/引用边，为文件级图累加基础权重（同一文件内部的边忽略）。"""
-        edge_weights: DefaultDict[Tuple[str, str], float] = defaultdict(float)
+        edge_weights: defaultdict[tuple[str, str], float] = defaultdict(float)
         for u, v in und.edges():
             du = self.nx_graph.nodes[u]
             dv = self.nx_graph.nodes[v]
@@ -138,9 +140,10 @@ class CommunityEngine:
             edge_weights[(a, b)] += call_weight
         return edge_weights
 
-    def _apply_hub_dampening(self, edge_weights: DefaultDict[Tuple[str, str], float]) -> None:
-        """
-        Hub dampening（原地修改 edge_weights）。
+    def _apply_hub_dampening(
+        self, edge_weights: defaultdict[tuple[str, str], float]
+    ) -> None:
+        """Hub dampening（原地修改 edge_weights）。
 
         Files like utils / helpers / logger accumulate very high cross-file
         degree and act as super-nodes that pull semantically unrelated
@@ -150,8 +153,8 @@ class CommunityEngine:
         """
         if not edge_weights:
             return
-        file_degree: Dict[str, int] = {}
-        for (fa, fb) in edge_weights:
+        file_degree: dict[str, int] = {}
+        for fa, fb in edge_weights:
             file_degree[fa] = file_degree.get(fa, 0) + 1
             file_degree[fb] = file_degree.get(fb, 0) + 1
 
@@ -167,12 +170,11 @@ class CommunityEngine:
 
     def _augment_with_directory_chains(
         self,
-        edge_weights: DefaultDict[Tuple[str, str], float],
-        all_files: Set[str],
+        edge_weights: defaultdict[tuple[str, str], float],
+        all_files: set[str],
         dir_chain_weight: float,
     ) -> None:
-        """
-        Directory chain（原地修改 edge_weights）.
+        """Directory chain（原地修改 edge_weights）.
 
         The chain only helps isolate files that have no call/import
         connections; for files that already participate in the semantic
@@ -180,12 +182,12 @@ class CommunityEngine:
         So: only add a chain edge between a consecutive pair when at
         least one of the two files is otherwise unconnected.
         """
-        connected_files: Set[str] = set()
-        for (fa, fb) in edge_weights:
+        connected_files: set[str] = set()
+        for fa, fb in edge_weights:
             connected_files.add(fa)
             connected_files.add(fb)
 
-        by_dir: DefaultDict[str, List[str]] = defaultdict(list)
+        by_dir: defaultdict[str, list[str]] = defaultdict(list)
         for fpath in all_files:
             parent = str(Path(fpath).parent)
             by_dir[parent].append(fpath)
@@ -202,7 +204,7 @@ class CommunityEngine:
                 edge_weights[key] += dir_chain_weight
 
     def _build_file_level_igraph(
-        self, all_files: Set[str], edge_weights: DefaultDict[Tuple[str, str], float]
+        self, all_files: set[str], edge_weights: defaultdict[tuple[str, str], float]
     ) -> ig.Graph:
         """按文件名建顶点，正权重的 (a, b) 对建边，得到文件级 igraph。"""
         names = sorted(all_files)
@@ -216,14 +218,18 @@ class CommunityEngine:
             g.add_edge(name_to_idx[a], name_to_idx[b], weight=w)
         return g
 
-    def _expand_partition_to_communities(self, g: ig.Graph, partition: Any) -> Dict[int, List[str]]:
+    def _expand_partition_to_communities(
+        self, g: ig.Graph, partition: Any
+    ) -> dict[int, list[str]]:
         """把文件级 partition 按文件分组，再展开回原始（文件+符号）节点，重新编号社区 id。"""
-        comm_to_files: DefaultDict[int, Set[str]] = defaultdict(set)
+        comm_to_files: defaultdict[int, set[str]] = defaultdict(set)
         for vi, comm_id in enumerate(partition.membership):
             comm_to_files[comm_id].add(g.vs[vi]["name"])
 
-        communities_expanded: Dict[int, List[str]] = {}
-        for new_id, (_, files) in enumerate(sorted(comm_to_files.items(), key=lambda x: x[0])):
+        communities_expanded: dict[int, list[str]] = {}
+        for new_id, (_, files) in enumerate(
+            sorted(comm_to_files.items(), key=lambda x: x[0])
+        ):
             communities_expanded[new_id] = self._expand_files_to_all_nodes(set(files))
         return communities_expanded
 
@@ -232,15 +238,14 @@ class CommunityEngine:
         resolution_parameter: float,
         call_weight: float,
         dir_chain_weight: float,
-    ) -> Dict[int, List[str]]:
-        """
-        在「文件级」图上做 Leiden，再把社区展开回原始（文件 + 符号）节点。
+    ) -> dict[int, list[str]]:
+        """在「文件级」图上做 Leiden，再把社区展开回原始（文件 + 符号）节点。
 
         缓解混合粒度图上的模块度碎片化，并与 Microsoft GraphRAG 文档中「提高主连通分量/
         调整 resolution」的思路一致：用跨文件调用为强边、同目录链式弱边补足连通性。
         """
         und = self.nx_graph.to_undirected()
-        all_files: Set[str] = set()
+        all_files: set[str] = set()
         for n, d in self.nx_graph.nodes(data=True):
             all_files.add(self._resolve_file_for_node(n, d))
 
@@ -271,8 +276,8 @@ class CommunityEngine:
         self.communities = self._expand_partition_to_communities(g, partition)
         return self.communities
 
-    def _distinct_files_in_community(self, nodes: List[str]) -> Set[str]:
-        files: Set[str] = set()
+    def _distinct_files_in_community(self, nodes: list[str]) -> set[str]:
+        files: set[str] = set()
         for node in nodes:
             d = self.nx_graph.nodes[node]
             files.add(self._resolve_file_for_node(node, d))
@@ -287,7 +292,7 @@ class CommunityEngine:
     def _merge_target_score(
         self,
         seed_file: str,
-        target_nodes: List[str],
+        target_nodes: list[str],
         prefix_parts: int,
     ) -> int:
         target_files = self._distinct_files_in_community(target_nodes)
@@ -297,13 +302,16 @@ class CommunityEngine:
         for tf in target_files:
             op = tf.split("/")
             k = 0
-            for a, b in zip(sp, op):
+            for a, b in zip(sp, op, strict=True):
                 if a == b:
                     k += 1
                 else:
                     break
             score = max(score, k)
-        if any(self._prefix_key_for_file(tf, prefix_parts) == seed_pref for tf in target_files):
+        if any(
+            self._prefix_key_for_file(tf, prefix_parts) == seed_pref
+            for tf in target_files
+        ):
             score += 5
         return score
 
@@ -312,15 +320,13 @@ class CommunityEngine:
         min_distinct_files: int,
         prefix_parts: int,
     ) -> None:
-        """
-        将「只有一个可区分文件」的社区并入与之路径前缀最相近的社区，减少无检索意义的单文件社区数量。
-        """
+        """将「只有一个可区分文件」的社区并入与之路径前缀最相近的社区，减少无检索意义的单文件社区数量。"""
         if min_distinct_files <= 1 or not self.communities:
             return
 
         by_id = dict(self.communities)
-        tiny: List[int] = []
-        robust: List[int] = []
+        tiny: list[int] = []
+        robust: list[int] = []
         for cid, nodes in by_id.items():
             df = self._distinct_files_in_community(nodes)
             if len(df) < min_distinct_files:
@@ -331,13 +337,13 @@ class CommunityEngine:
         if not tiny or not robust:
             return
 
-        redirect: Dict[int, int] = {}
+        redirect: dict[int, int] = {}
         for cid in tiny:
             files = self._distinct_files_in_community(by_id[cid])
             if not files:
                 continue
             seed_file = sorted(files)[0]
-            best_rid: Optional[int] = None
+            best_rid: int | None = None
             best_score = -1
             best_size = -1
             for rid in robust:
@@ -355,15 +361,15 @@ class CommunityEngine:
         if not redirect:
             return
 
-        merged: DefaultDict[int, List[str]] = defaultdict(list)
+        merged: defaultdict[int, list[str]] = defaultdict(list)
         for cid, nodes in by_id.items():
             target = redirect.get(cid, cid)
             merged[target].extend(nodes)
 
-        reindexed: Dict[int, List[str]] = {}
+        reindexed: dict[int, list[str]] = {}
         for new_id, (_, nodes) in enumerate(sorted(merged.items(), key=lambda x: x[0])):
-            seen: Set[str] = set()
-            deduped: List[str] = []
+            seen: set[str] = set()
+            deduped: list[str] = []
             for n in nodes:
                 if n not in seen:
                     seen.add(n)
@@ -373,10 +379,8 @@ class CommunityEngine:
         self.communities = reindexed
         self.community_summaries = {}
 
-    def run_leiden(self) -> Dict[int, List[str]]:
-        """
-        运行 Leiden 算法进行社区划分。
-        """
+    def run_leiden(self) -> dict[int, list[str]]:
+        """运行 Leiden 算法进行社区划分。"""
         cfg = self._community_detection_config()
         resolution = float(cfg.get("resolution_parameter", 0.55))
         use_collapse = bool(cfg.get("file_level_collapse", True))
@@ -408,9 +412,7 @@ class CommunityEngine:
         return self.communities
 
     def generate_summaries(self):
-        """
-        为每个社区生成业务摘要。
-        """
+        """为每个社区生成业务摘要。"""
         for comm_id, nodes in self.communities.items():
             node_details = []
             for node in nodes:
@@ -427,9 +429,9 @@ class CommunityEngine:
                 continue
 
             try:
-                summary = _community_summary_chain.invoke({
-                    "entity_list": "\n".join(node_details[:40])
-                })
+                summary = _community_summary_chain.invoke(
+                    {"entity_list": "\n".join(node_details[:40])}
+                )
                 self.community_summaries[comm_id] = summary
             except Exception as e:
                 logger.error(f"Error generating summary for community {comm_id}: {e}")

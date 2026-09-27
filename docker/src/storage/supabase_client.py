@@ -1,12 +1,15 @@
 import logging
 import os
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Optional, cast
 from urllib.parse import urlsplit
-from supabase import create_client, Client
+
 import dotenv
+from supabase import create_client
 
 from src.storage.models import TaskRecord, coerce_str_list
+
+Row = dict[str, Any]
 
 logger = logging.getLogger(__name__)
 
@@ -19,17 +22,19 @@ class SupabaseStorageError(Exception):
 
 class DeleteTaskResult(Enum):
     """Outcome of `SupabaseClient.delete_task`, so callers don't need to
-    re-query just to tell "no such task for this user" apart from "delete failed"."""
+    re-query just to tell "no such task for this user" apart from "delete failed".
+    """
 
     DELETED = "deleted"
     NOT_FOUND = "not_found"
     ERROR = "error"
 
+
 class SupabaseClient:
     def __init__(
         self,
-        supabase_url: Optional[str] = None,
-        supabase_key: Optional[str] = None,
+        supabase_url: str | None = None,
+        supabase_key: str | None = None,
     ):
         self.url = supabase_url or os.getenv("SUPABASE_URL")
         self.key = supabase_key or os.getenv("SUPABASE_KEY")
@@ -51,13 +56,11 @@ class SupabaseClient:
 
         return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}/{owner}/{repo}"
 
-    def _repo_owner_slug(self,repo_url: str) -> str:
+    def _repo_owner_slug(self, repo_url: str) -> str:
         return ("/").join(repo_url.split("/")[-2:])
 
     def create_task(self, user_id: str, task_id: str, repo_url: str):
-        """
-        Create a new task in Supabase.
-        """
+        """Create a new task in Supabase."""
         if not self.client:
             print("[Supabase] Client not initialized. Skipping create task.")
             return False
@@ -65,64 +68,82 @@ class SupabaseClient:
         repo_url = self._normalize_repo_url(repo_url)
         repo_name = self._repo_owner_slug(repo_url)
         try:
-            self.client.table("tasks").insert({
-                "user_id": user_id,
-                "task_id": task_id,
-                "repo_name": repo_name,
-                "repo_url": repo_url,
-                "status": "pending",
-                "progress": 0.0,
-                "current_step": "Waiting for execution",
-                "created_at": "now()",
-                "last_updated": "now()"
-            }).execute()
+            self.client.table("tasks").insert(
+                {
+                    "user_id": user_id,
+                    "task_id": task_id,
+                    "repo_name": repo_name,
+                    "repo_url": repo_url,
+                    "status": "pending",
+                    "progress": 0.0,
+                    "current_step": "Waiting for execution",
+                    "created_at": "now()",
+                    "last_updated": "now()",
+                }
+            ).execute()
             print(f"[Supabase] Created new task record for {task_id}")
             return True
         except Exception as e:
             print(f"[Supabase] Error creating task: {e}")
             return False
 
-    def update_task_progress(self, task_id: str, progress: float, current_step: str) -> bool:
-        """
-        Update task progress in Supabase.
-        """
+    def update_task_progress(
+        self, task_id: str, progress: float, current_step: str
+    ) -> bool:
+        """Update task progress in Supabase."""
         if not self.client:
             return False
         try:
-            response = self.client.table("tasks").update({
-                "progress": progress,
-                "current_step": current_step,
-                "last_updated": "now()"
-            }).eq("task_id", task_id).execute()
-            
+            response = (
+                self.client.table("tasks")
+                .update(
+                    {
+                        "progress": progress,
+                        "current_step": current_step,
+                        "last_updated": "now()",
+                    }
+                )
+                .eq("task_id", task_id)
+                .execute()
+            )
+
             # If no data returned, it means no rows were updated (task likely deleted)
             if not response.data:
                 return False
-                
+
             return True
         except Exception as e:
             print(f"[Supabase] Error updating task progress: {e}")
             return False
 
-    def update_task_status(self, task_id: str, status: str, result: Optional[dict] = None, error: Optional[str] = None) -> bool:
-        """
-        Update task status and result/error in Supabase.
-        """
+    def update_task_status(
+        self,
+        task_id: str,
+        status: str,
+        result: dict | None = None,
+        error: str | None = None,
+    ) -> bool:
+        """Update task status and result/error in Supabase."""
         if not self.client:
             return False
         try:
-            update_data = {
+            update_data: dict[str, str | float | dict] = {
                 "status": status,
-                "last_updated": "now()"
+                "last_updated": "now()",
             }
             if result is not None:
                 update_data["result"] = result
                 update_data["progress"] = 100.0
             if error is not None:
                 update_data["error"] = error
-            
-            response = self.client.table("tasks").update(update_data).eq("task_id", task_id).execute()
-            
+
+            response = (
+                self.client.table("tasks")
+                .update(update_data)
+                .eq("task_id", task_id)
+                .execute()
+            )
+
             # If no data returned, it means no rows were updated (task likely deleted)
             if not response.data:
                 return False
@@ -133,8 +154,7 @@ class SupabaseClient:
             return False
 
     def delete_task(self, task_id: str, user_id: str) -> DeleteTaskResult:
-        """
-        Delete a task from Supabase. Only deletes if task belongs to the given user.
+        """Delete a task from Supabase. Only deletes if task belongs to the given user.
         Returns NOT_FOUND when no matching task exists for this user (whether absent
         entirely or owned by someone else), ERROR on a query/delete failure, DELETED
         on success.
@@ -153,46 +173,48 @@ class SupabaseClient:
             if not task.data or len(task.data) == 0:
                 return DeleteTaskResult.NOT_FOUND
 
-            self.client.table("tasks").delete().eq("task_id", task_id).eq("user_id", user_id).execute()
+            self.client.table("tasks").delete().eq("task_id", task_id).eq(
+                "user_id", user_id
+            ).execute()
             return DeleteTaskResult.DELETED
         except Exception as e:
             print(f"[Supabase] Error deleting task: {e}")
             return DeleteTaskResult.ERROR
 
-    def get_task(self, task_id: str) -> Optional[TaskRecord]:
-        """
-        Get a task from Supabase.
+    def get_task(self, task_id: str) -> TaskRecord | None:
+        """Get a task from Supabase.
         成功且无行时返回 None；客户端未配置、查询异常或行数据不符合 TaskRecord 时抛出 SupabaseStorageError。
         """
         if not self.client:
             raise SupabaseStorageError("Supabase client is not configured")
 
         try:
-            response = self.client.table("tasks").select("*").eq("task_id", task_id).execute()
+            response = (
+                self.client.table("tasks").select("*").eq("task_id", task_id).execute()
+            )
             if response.data:
                 return TaskRecord.model_validate(response.data[0])
             return None
         except Exception as e:
             raise SupabaseStorageError(f"Failed to fetch task: {e}") from e
 
-    def get_all_tasks(self, user_id: str) -> Optional[List[TaskRecord]]:
-        """
-        Get all users' tasks from Supabase.
-        """
+    def get_all_tasks(self, user_id: str) -> list[TaskRecord] | None:
+        """Get all users' tasks from Supabase."""
         if not self.client:
             print("[Supabase] Client not initialized. Skipping get all tasks.")
             return None
 
         try:
-            response = self.client.table("tasks").select("*").eq("user_id", user_id).execute()
+            response = (
+                self.client.table("tasks").select("*").eq("user_id", user_id).execute()
+            )
             return [TaskRecord.model_validate(row) for row in (response.data or [])]
         except Exception as e:
             print(f"[Supabase] Error getting all tasks: {e}")
             return None
 
-    def get_all_indexed_repos(self) -> List[dict]:
-        """
-        返回 `repositories` 表的全部行（含所有列），不做用户/完整性过滤。
+    def get_all_indexed_repos(self) -> list[dict]:
+        """返回 `repositories` 表的全部行（含所有列），不做用户/完整性过滤。
         供 `/chat/repos` 使用：聊天页的仓库选择器需要展示每一个曾经被处理过的仓库，
         不区分是否属于当前用户、wiki 是否生成完整。与 `get_user_dashboard_repositories`
         （按用户 + wiki 完整性过滤）和 `get_all_repositories_metadata`（仅取 3 个展示列）
@@ -210,9 +232,8 @@ class SupabaseClient:
         except Exception as e:
             raise SupabaseStorageError(f"Failed to fetch repositories: {e}") from e
 
-    def get_all_repositories_metadata(self) -> List[dict]:
-        """
-        返回 repositories 表中所有行的 repo_url / stargazers_count / github_short_description。
+    def get_all_repositories_metadata(self) -> list[dict]:
+        """返回 repositories 表中所有行的 repo_url / stargazers_count / github_short_description。
         供 `/repos/github-metadata` 使用：仅为展示 GitHub 元数据（star 数、简介）而取的窄列查询，
         比 `get_all_indexed_repos` 的 `select("*")` 更省带宽，两者服务不同端点，不是重复代码。
         """
@@ -224,48 +245,49 @@ class SupabaseClient:
                 .select("repo_url, stargazers_count, github_short_description")
                 .execute()
             )
-            return resp.data or []
+            return cast(list[dict], resp.data) or []
         except Exception as e:
             print(f"[Supabase] Error fetching all repositories metadata: {e}")
             return []
 
     ## TODO: change the search key from repo_url to repo_name
-    def get_repo_information(self, repo_url: str):
-        """
-        Get a repo information from Supabase.
-        """
+    def get_repo_information(self, repo_url: str) -> Row | None:
+        """Get a repo information from Supabase."""
         if not self.client:
             print("[Supabase] Client not initialized. Skipping get repo information.")
             return None
-        
+
         repo_url = self._normalize_repo_url(repo_url)
         try:
-            response = self.client.table("repositories").select("*").eq("repo_url", repo_url).execute()
+            response = (
+                self.client.table("repositories")
+                .select("*")
+                .eq("repo_url", repo_url)
+                .execute()
+            )
             if response.data:
-                return response.data[0]
+                return cast(Row, response.data[0])
 
             # Fallback: match by owner/repo suffix in case historical data used non-canonical URL format
             repo_name = self._repo_owner_slug(repo_url)
             if repo_name:
                 fuzzy_response = (
-                    self.client
-                    .table("repositories")
+                    self.client.table("repositories")
                     .select("*")
                     .ilike("repo_url", f"%{repo_name}%")
                     .limit(1)
                     .execute()
                 )
                 if fuzzy_response.data:
-                    return fuzzy_response.data[0]
+                    return cast(Row, fuzzy_response.data[0])
 
             return None
         except Exception as e:
             print(f"[Supabase] Error getting repo information: {e}")
             return None
-        
+
     def get_repo_wiki_artifacts(self, repo_url: str):
-        """
-        Check whether a repository has complete wiki artifacts (r2_structure_url + r2_content_urls).
+        """Check whether a repository has complete wiki artifacts (r2_structure_url + r2_content_urls).
         Returns the artifact payload dict if complete, or None if any artifact is missing.
         TTL/staleness check is handled separately in wiki_pipeline.execute_generation_task.
 
@@ -278,9 +300,8 @@ class SupabaseClient:
             return None
         return self.wiki_artifacts_from_row(repo_info, repo_url)
 
-    def wiki_artifacts_from_row(self, repo_info: dict, repo_url: str) -> Optional[dict]:
-        """
-        Same completeness check/payload shape as `get_repo_wiki_artifacts`, but takes an
+    def wiki_artifacts_from_row(self, repo_info: dict, repo_url: str) -> dict | None:
+        """Same completeness check/payload shape as `get_repo_wiki_artifacts`, but takes an
         already-fetched `repositories` row instead of querying again. Used by
         `get_repo_wiki_artifacts` itself, and by wiki_pipeline's cache-hit check, which already
         has the row in hand for the staleness check and would otherwise re-implement this
@@ -298,9 +319,8 @@ class SupabaseClient:
             "repo_url": self._normalize_repo_url(repo_url),
         }
 
-    def get_user_dashboard_repositories(self, user_id: str) -> List[dict]:
-        """
-        工作台展示用：仅包含 `repositories` 表中已具备完整 wiki 产物的仓库（与缓存命中条件一致），
+    def get_user_dashboard_repositories(self, user_id: str) -> list[dict]:
+        """工作台展示用：仅包含 `repositories` 表中已具备完整 wiki 产物的仓库（与缓存命中条件一致），
         且该用户存在已完成/缓存任务。卡片数据以 repositories 行为准；task_id 用于跳转 Wiki。
 
         与 `get_all_indexed_repos` 的区别：后者不按用户或完整性过滤，返回 `repositories` 表
@@ -314,7 +334,7 @@ class SupabaseClient:
         if not tasks:
             return []
 
-        per_repo: Dict[str, dict] = {}
+        per_repo: dict[str, dict] = {}
         for t in tasks:
             if t.status not in ("completed", "cached"):
                 continue
@@ -329,33 +349,39 @@ class SupabaseClient:
             if not prev or (created and created > (prev.get("created_at") or "")):
                 per_repo[norm] = {"task_id": task_id, "created_at": created}
 
-        result: List[dict] = []
+        result: list[dict] = []
         for norm, meta in per_repo.items():
             if not self.get_repo_wiki_artifacts(norm):
                 continue
             row = self.get_repo_information(norm) or {}
-            result.append({
-                "repo_url": norm,
-                "task_id": meta["task_id"],
-                "github_short_description": row.get("github_short_description"),
-                "description": row.get("description"),
-                "stargazers_count": row.get("stargazers_count"),
-                "vector_store_path": row.get("vector_store_path"),
-                "last_updated": row.get("last_updated"),
-            })
+            result.append(
+                {
+                    "repo_url": norm,
+                    "task_id": meta["task_id"],
+                    "github_short_description": row.get("github_short_description"),
+                    "description": row.get("description"),
+                    "stargazers_count": row.get("stargazers_count"),
+                    "vector_store_path": row.get("vector_store_path"),
+                    "last_updated": row.get("last_updated"),
+                }
+            )
 
         result.sort(key=lambda item: item.get("last_updated") or "", reverse=True)
         return result
 
     # ============ Chat Related Methods ============
 
-    def create_chat_session(self, user_id: str, repo_url: str, title: Optional[str] = None, preview_text: Optional[str] = None):
-        """
-        Create a new chat session record in chat_history table.
-        """
+    def create_chat_session(
+        self,
+        user_id: str,
+        repo_url: str,
+        title: str | None = None,
+        preview_text: str | None = None,
+    ) -> Row | None:
+        """Create a new chat session record in chat_history table."""
         if not self.client:
             return None
-        
+
         repo_url = self._normalize_repo_url(repo_url)
         try:
             data = {
@@ -366,51 +392,65 @@ class SupabaseClient:
             }
             response = self.client.table("chat_history").insert(data).execute()
             if response.data:
-                return response.data[0]
+                return cast(Row, response.data[0])
             return None
         except Exception as e:
             print(f"[Supabase] Error creating chat history: {e}")
             return None
 
     def get_user_chat_sessions(self, user_id: str):
-        """
-        Return all chat sessions for a user, ordered by most recently updated.
+        """Return all chat sessions for a user, ordered by most recently updated.
         Each row includes a chat_id alias (chat_history.id) for frontend compatibility.
         """
         if not self.client:
             return []
         try:
-            response = self.client.table("chat_history")\
-                .select("*")\
-                .eq("user_id", user_id)\
-                .order("updated_at", desc=True)\
+            response = (
+                self.client.table("chat_history")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("updated_at", desc=True)
                 .execute()
+            )
             # Ensure chat_id is present for frontend compatibility (id === chat_id)
-            return [
-                {**row, "chat_id": row.get("id")} if "chat_id" not in row else row
-                for row in (response.data or [])
-            ]
+            result = []
+            for row in response.data or []:
+                if not isinstance(row, dict):
+                    continue
+
+                if "chat_id" not in row:
+                    result.append({**row, "chat_id": row.get("id")})
+                else:
+                    result.append(row)
+
+            return result
         except Exception as e:
             print(f"[Supabase] Error getting user chat history: {e}")
             return []
 
-    def get_chat_session(self, chat_id: str) -> Optional[dict]:
-        """
-        Fetch a single `chat_history` row by id (session_summary/summary_up_to_created_at
+    def get_chat_session(self, chat_id: str) -> Row | None:
+        """Fetch a single `chat_history` row by id (session_summary/summary_up_to_created_at
         included). Returns None if not found or the client isn't configured.
         """
         if not self.client:
             return None
         try:
-            response = self.client.table("chat_history").select("*").eq("id", chat_id).limit(1).execute()
-            return response.data[0] if response.data else None
+            response = (
+                self.client.table("chat_history")
+                .select("*")
+                .eq("id", chat_id)
+                .limit(1)
+                .execute()
+            )
+            return cast(Row, response.data[0]) if response.data else None
         except Exception as e:
             print(f"[Supabase] Error getting chat session: {e}")
             return None
 
-    def update_chat_session_summary(self, chat_id: str, summary: str, summary_up_to_created_at: str) -> bool:
-        """
-        Persist a rolling conversation summary so history reconstruction (see
+    def update_chat_session_summary(
+        self, chat_id: str, summary: str, summary_up_to_created_at: str
+    ) -> bool:
+        """Persist a rolling conversation summary so history reconstruction (see
         `src/chat/memory.py`) doesn't have to re-read/re-summarize the whole
         session on every turn once it grows long. `summary_up_to_created_at` is
         the `created_at` of the last message folded into `summary` (not a message
@@ -419,36 +459,38 @@ class SupabaseClient:
         if not self.client:
             return False
         try:
-            self.client.table("chat_history").update({
-                "session_summary": summary,
-                "summary_up_to_created_at": summary_up_to_created_at,
-            }).eq("id", chat_id).execute()
+            self.client.table("chat_history").update(
+                {
+                    "session_summary": summary,
+                    "summary_up_to_created_at": summary_up_to_created_at,
+                }
+            ).eq("id", chat_id).execute()
             return True
         except Exception as e:
             print(f"[Supabase] Error updating chat session summary: {e}")
             return False
 
     def get_chat_messages(self, chat_id: str):
-        """
-        Get all messages for a specific chat session.
-        """
+        """Get all messages for a specific chat session."""
         if not self.client:
             return []
         try:
-            response = self.client.table("chat_messages")\
-                .select("*")\
-                .eq("chat_id", chat_id)\
-                .order("created_at", desc=False)\
+            response = (
+                self.client.table("chat_messages")
+                .select("*")
+                .eq("chat_id", chat_id)
+                .order("created_at", desc=False)
                 .execute()
+            )
             return response.data
         except Exception as e:
             print(f"[Supabase] Error getting chat messages: {e}")
             return []
 
-    def add_chat_message(self, chat_id: str, role: str, content: str, metadata: Optional[dict] = None):
-        """
-        Add a message to a chat session.
-        """
+    def add_chat_message(
+        self, chat_id: str, role: str, content: str, metadata: dict | None = None
+    ):
+        """Add a message to a chat session."""
         if not self.client:
             return None
         try:
@@ -457,15 +499,15 @@ class SupabaseClient:
                 "role": role,
                 "content": content,
                 "metadata": metadata or {},
-                "created_at": "now()"
+                "created_at": "now()",
             }
             response = self.client.table("chat_messages").insert(data).execute()
-            
+
             # Update chat_history updated_at
-            self.client.table("chat_history").update({
-                "updated_at": "now()"
-            }).eq("id", chat_id).execute()
-            
+            self.client.table("chat_history").update({"updated_at": "now()"}).eq(
+                "id", chat_id
+            ).execute()
+
             if response.data:
                 return response.data[0]
             return None
@@ -474,8 +516,7 @@ class SupabaseClient:
             return None
 
     def delete_chat_session(self, chat_id: str, user_id: str) -> bool:
-        """
-        Delete a chat session and all its messages.
+        """Delete a chat session and all its messages.
         Only deletes if the session belongs to the given user.
         Deletes chat_messages (child) before chat_history (parent) to respect FK constraints.
         """
@@ -505,27 +546,26 @@ class SupabaseClient:
     def upsert_repo_wiki_data(
         self,
         repo_url: str,
-        r2_structure_url: Optional[str],
-        r2_content_urls: Optional[List[str]],
-        vector_store_path: Optional[str],
-        description: Optional[str] = None,
-        graph_path: Optional[str] = None,
+        r2_structure_url: str | None,
+        r2_content_urls: list[str] | None,
+        vector_store_path: str | None,
+        description: str | None = None,
+        graph_path: str | None = None,
     ):
-        """
-        Upsert wiki artifact data for a repository (r2 URLs, vector store path, description).
+        """Upsert wiki artifact data for a repository (r2 URLs, vector store path, description).
         Only non-None fields are written; repo_url and last_updated are always set.
         """
         if not self.client:
             return False
-        
+
         repo_url = self._normalize_repo_url(repo_url)
         try:
-            data = {
+            data: dict[str, str | list[str]] = {
                 "repo_url": repo_url,
                 "repo_name": self._repo_owner_slug(repo_url),
-                "last_updated": "now()"
+                "last_updated": "now()",
             }
-            
+
             # Only update fields if they are not None
             if r2_structure_url is not None:
                 data["r2_structure_url"] = r2_structure_url
@@ -550,8 +590,7 @@ _default_client: Optional["SupabaseClient"] = None
 
 
 def get_supabase_client() -> "SupabaseClient":
-    """
-    进程级共享单例，避免每个路由 handler / wiki_pipeline 函数各自 `SupabaseClient()`
+    """进程级共享单例，避免每个路由 handler / wiki_pipeline 函数各自 `SupabaseClient()`
     重新构造一次客户端。环境变量在进程启动时通过 dotenv 读入一次，不会在运行期变化，
     因此复用同一个客户端（含"未配置"的失败状态）是安全的。
     """
@@ -559,4 +598,3 @@ def get_supabase_client() -> "SupabaseClient":
     if _default_client is None:
         _default_client = SupabaseClient()
     return _default_client
-
