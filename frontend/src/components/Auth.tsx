@@ -1,62 +1,48 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Loader2 } from 'lucide-react';
-import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { Loader2 } from "lucide-react";
+import { useState } from "react";
+import { t } from "@/lib/i18n";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 export default function Auth() {
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleGoogleLogin = async () => {
+    setError(null);
     if (!isSupabaseConfigured) {
-      alert('Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+      setError(t("loginNotConfigured"));
       return;
     }
 
     setGoogleLoading(true);
     try {
       const redirectTo = `${window.location.origin}/auth/callback`;
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo,
-        },
+      const { error: signInError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo },
       });
-
-      if (error) {
-        throw error;
-      }
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        alert(`Google sign-in failed: ${error.message}`);
-      } else {
-        alert('Google sign-in failed. Please try again.');
-      }
-    } finally {
+      if (signInError) throw signInError;
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t("loginFailed"));
       setGoogleLoading(false);
     }
   };
 
   return (
-    <div className="w-full max-w-md mx-auto p-6 space-y-8 bg-white border border-stone-200 rounded-2xl shadow-sm shadow-stone-900/5">
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-stone-900">Welcome Back</h2>
-        <p className="text-muted-foreground text-sm">
-          Sign in with Google to generate and view wikis
-        </p>
-      </div>
-
+    <div className="space-y-4">
       <button
+        type="button"
         onClick={handleGoogleLogin}
         disabled={googleLoading}
-        aria-label="Continue with Google"
-        className="w-full bg-white hover:bg-stone-50 text-stone-800 font-medium py-3 rounded-xl transition-all border border-stone-200 shadow-sm flex items-center justify-center gap-2"
+        className="mx-auto flex h-12 w-full max-w-xs items-center justify-center gap-3 rounded-full bg-fg font-medium text-bg transition-colors hover:opacity-90 disabled:opacity-60"
       >
         {googleLoading ? (
-          <Loader2 className="w-5 h-5 animate-spin text-sky-600" />
+          <Loader2 aria-hidden className="h-5 w-5 animate-spin" />
         ) : (
           <>
-            <svg className="w-5 h-5" viewBox="0 0 24 24">
+            <svg aria-hidden className="h-5 w-5" viewBox="0 0 24 24">
               <path
                 d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
                 fill="#4285F4"
@@ -74,10 +60,15 @@ export default function Auth() {
                 fill="#EA4335"
               />
             </svg>
-            Google
+            {t("loginGoogle")}
           </>
         )}
       </button>
+      {error ? (
+        <p role="alert" className="text-danger text-sm">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

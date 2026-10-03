@@ -176,7 +176,7 @@ function AnswerNotesList({ notes, filePages, onOpen, onEvidence }: NotesProps) {
   );
 }
 
-export interface MessageItemProps {
+interface MessageItemProps {
   message: DisplayMessage;
   repoUrl: string;
   /** Repo-relative path → wiki pages listing it (`toc.byFile`). */

@@ -30,7 +30,7 @@ export function AuthGuard() {
 
   if (isLoading) {
     return (
-      <div className="min-h-[40vh] flex items-center justify-center text-stone-600">
+      <div className="flex min-h-[40vh] items-center justify-center text-fg-muted">
         Checking session...
       </div>
     );
@@ -58,7 +58,7 @@ export function RoutePermissionGuard({
   if (requiredRole === "admin" && role !== "admin") {
     return (
       <div className="h-full min-h-[40vh] flex items-center justify-center">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900">
+        <div className="rounded-2xl border border-warn/40 bg-panel px-5 py-4 text-fg">
           Your account does not have permission to access this route.
         </div>
       </div>

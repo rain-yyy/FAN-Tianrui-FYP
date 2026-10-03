@@ -26,7 +26,7 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 /** Status label: a coloured pill. States are always shown, never hidden. */
-function StatusStamp({ status }: { status: string }) {
+export function StatusStamp({ status }: { status: string }) {
   return (
     <span
       className={cn(
@@ -163,7 +163,7 @@ export function TaskStatePanel({
 
 export const primaryActionClass =
   "inline-flex h-9 items-center gap-2 rounded-full bg-accent-strong px-4 text-sm font-medium text-accent-fg hover:bg-accent disabled:opacity-60";
-const secondaryActionClass =
+export const secondaryActionClass =
   "inline-flex h-9 items-center gap-2 rounded-full border border-line px-4 text-sm text-fg hover:border-line-strong";
 
 export function BackToReposLink() {

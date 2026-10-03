@@ -59,7 +59,7 @@ function RegenerateButton({ repoUrl }: { repoUrl: string }) {
         {busy ? t("taskRegenerating") : t("taskRegenerate")}
       </button>
       {error ? (
-        <p role="alert" className="basis-full font-mono text-sm text-ink">
+        <p role="alert" className="basis-full font-mono text-sm text-fg">
           {error}
         </p>
       ) : null}

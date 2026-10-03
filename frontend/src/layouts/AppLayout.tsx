@@ -20,7 +20,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { prefetchRouteModule } from "@/router/prefetch";
 
 const iconButtonClass =
-  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line text-fg-muted transition-colors hover:border-n-4 hover:text-fg";
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line text-fg-muted transition-colors hover:border-line-strong hover:text-fg";
 
 function SearchPill() {
   const repo = useShellRepo();
@@ -70,7 +70,7 @@ function CopyLinkButton() {
     <button
       type="button"
       onClick={copy}
-      className="inline-flex h-9 items-center gap-2 rounded-full border border-line px-3 text-fg-muted text-sm transition-colors hover:border-n-4 hover:text-fg"
+      className="inline-flex h-9 items-center gap-2 rounded-full border border-line px-3 text-fg-muted text-sm transition-colors hover:border-line-strong hover:text-fg"
     >
       {copied ? (
         <Check aria-hidden className="h-4 w-4 text-accent" />
@@ -190,7 +190,7 @@ function TopBar({ onHelp }: { onHelp: () => void }) {
               "inline-flex h-9 items-center gap-2 rounded-full border px-3 text-sm transition-colors",
               isActive
                 ? "border-accent text-fg"
-                : "border-line text-fg-muted hover:border-n-4 hover:text-fg",
+                : "border-line text-fg-muted hover:border-line-strong hover:text-fg",
             )
           }
         >

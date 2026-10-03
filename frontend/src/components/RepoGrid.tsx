@@ -1,9 +1,19 @@
-'use client';
+"use client";
 
-import React, { useEffect, useState } from 'react';
-import { ArrowRight, Plus, Star, Loader2 } from 'lucide-react';
-import { api } from '@/lib/api';
-import { useNavigate } from 'react-router-dom';
+import {
+  BookOpen,
+  Code2,
+  Link2,
+  Loader2,
+  MessageSquare,
+  Star,
+} from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { api } from "@/lib/api";
+import { t } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { prefetchRouteModule } from "@/router/prefetch";
 
 interface RepoData {
   owner: string;
@@ -14,53 +24,70 @@ interface RepoData {
   stars: number | null;
 }
 
-const RepoCard = ({ repo }: { repo: RepoData }) => {
-  const navigate = useNavigate();
+const formatStars = (stars: number) =>
+  stars >= 1000 ? `${(stars / 1000).toFixed(1)}k` : String(stars);
 
-  const handleCardClick = () => {
-    navigate(`/app/wiki/${repo.taskId}?repo=${encodeURIComponent(repo.url)}`);
-  };
-
+function RepoRow({ repo }: { repo: RepoData }) {
   return (
-    <div
-      onClick={handleCardClick}
-      className="group relative flex flex-col justify-between rounded-xl bg-white border border-stone-200 p-4 hover:bg-stone-50 hover:border-stone-300 transition-all cursor-pointer h-[160px] shadow-sm"
+    <Link
+      to={`/app/wiki/${repo.taskId}?repo=${encodeURIComponent(repo.url)}`}
+      onMouseEnter={() => prefetchRouteModule("wiki")}
+      onFocus={() => prefetchRouteModule("wiki")}
+      className="flex items-center gap-4 rounded-2xl border border-line bg-panel px-5 py-4 transition-colors hover:border-accent-line"
     >
-      <div>
-        <div className="flex items-start justify-between gap-2">
-          <div className="font-medium text-stone-900 truncate w-full pr-8">
-            {repo.owner} / {repo.name}
-          </div>
-          <div className="absolute right-4 top-4 shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-stone-100 text-stone-500 group-hover:bg-sky-100 group-hover:text-sky-800 transition-colors">
-            <ArrowRight className="w-4 h-4" />
-          </div>
-        </div>
+      <span
+        aria-hidden
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-raised font-mono text-fg-muted text-sm uppercase"
+      >
+        {repo.name.slice(0, 2)}
+      </span>
+      <span className="min-w-0 sm:w-56 sm:shrink-0">
+        <span className="block truncate font-medium text-fg">{repo.name}</span>
+        <span className="block truncate text-fg-muted text-sm">
+          {repo.owner}
+        </span>
+      </span>
+      <span className="line-clamp-2 hidden min-w-0 flex-1 text-fg-muted text-sm sm:block">
+        {repo.description || t("dashboardNoDescription")}
+      </span>
+      {repo.stars !== null ? (
+        <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 font-mono text-fg-muted text-sm tabular-nums">
+          <Star aria-hidden className="h-3.5 w-3.5" />
+          {formatStars(repo.stars)}
+        </span>
+      ) : null}
+    </Link>
+  );
+}
 
-        <div className="mt-2 text-sm text-stone-600 line-clamp-3 h-[60px]">
-          {repo.description || 'No description available'}
-        </div>
-      </div>
+const FEATURES = [
+  { icon: BookOpen, label: "featureRead" },
+  { icon: Code2, label: "featureTrace" },
+  { icon: MessageSquare, label: "featureAsk" },
+  { icon: Link2, label: "featureShare" },
+] as const;
 
-      <div className="mt-auto flex items-center gap-4 text-xs text-stone-500">
+/** Shown while the user has no repositories yet. */
+function FeatureCards() {
+  return (
+    <div className="mx-auto mt-6 hidden max-w-3xl grid-cols-4 gap-4 pb-8 md:grid">
+      {FEATURES.map(({ icon: Icon, label }, index) => (
         <div
-          className="flex items-center gap-1"
-          aria-label={repo.stars !== null ? `Stars ${repo.stars}` : 'Stars unknown'}
+          key={label}
+          className={cn(
+            "flex aspect-square flex-col items-center justify-center gap-3 rounded-2xl border border-line bg-panel text-center",
+            index % 2 === 1 && "translate-y-6 border-accent-line",
+          )}
         >
-          <Star className="w-3 h-3 text-stone-500" />
-          <span>
-            {repo.stars !== null
-              ? repo.stars >= 1000
-                ? `${(repo.stars / 1000).toFixed(1)}k`
-                : repo.stars
-              : '—'}
-          </span>
+          <Icon aria-hidden className="h-7 w-7 text-accent" strokeWidth={1.5} />
+          <span className="text-fg-muted text-sm">{t(label)}</span>
         </div>
-      </div>
+      ))}
     </div>
   );
-};
+}
 
-export default function RepoGrid({ userId, onAddRepo }: { userId: string; onAddRepo: () => void }) {
+export default function RepoGrid({ userId }: { userId: string }) {
   const [repos, setRepos] = useState<RepoData[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -74,21 +101,23 @@ export default function RepoGrid({ userId, onAddRepo }: { userId: string; onAddR
           if (!entry.repo_url || !entry.task_id) continue;
           try {
             const urlObj = new URL(entry.repo_url);
-            const parts = urlObj.pathname.split('/').filter(Boolean);
+            const parts = urlObj.pathname.split("/").filter(Boolean);
             if (parts.length < 2) continue;
 
             const g = entry.github_short_description;
             const d = entry.description;
             const description =
-              typeof g === 'string' && g.trim()
+              typeof g === "string" && g.trim()
                 ? g.trim()
-                : typeof d === 'string' && d.trim()
+                : typeof d === "string" && d.trim()
                   ? d.trim()
                   : null;
 
             const rawStars = entry.stargazers_count;
             const stars =
-              typeof rawStars === 'number' && !Number.isNaN(rawStars) ? rawStars : null;
+              typeof rawStars === "number" && !Number.isNaN(rawStars)
+                ? rawStars
+                : null;
 
             list.push({
               owner: parts[0],
@@ -105,7 +134,7 @@ export default function RepoGrid({ userId, onAddRepo }: { userId: string; onAddR
 
         setRepos(list);
       } catch (error) {
-        console.error('Failed to load dashboard repositories:', error);
+        console.error("Failed to load dashboard repositories:", error);
       } finally {
         setLoading(false);
       }
@@ -118,32 +147,26 @@ export default function RepoGrid({ userId, onAddRepo }: { userId: string; onAddR
 
   if (loading) {
     return (
-      <div className="flex justify-center py-10">
-        <Loader2 className="w-8 h-8 text-sky-600 animate-spin" />
+      <div className="relative flex justify-center py-12">
+        <Loader2 aria-hidden className="h-6 w-6 animate-spin text-fg-muted" />
       </div>
     );
   }
 
-  return (
-    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-      <div
-        onClick={onAddRepo}
-        className="group flex flex-col justify-between rounded-xl bg-sky-50 border border-sky-200/80 p-4 hover:bg-sky-100/80 hover:border-sky-300 transition-all cursor-pointer h-[160px] shadow-sm"
-      >
-        <div>
-          <div className="w-8 h-8 rounded-full bg-white border border-sky-200 flex items-center justify-center text-sky-700 mb-3 group-hover:scale-110 transition-transform shadow-sm">
-            <Plus className="w-5 h-5" />
-          </div>
-          <div className="font-medium text-sky-950">Add repo</div>
-        </div>
-        <div className="self-end text-sky-700 group-hover:translate-x-1 transition-transform">
-          <ArrowRight className="w-5 h-5" />
-        </div>
-      </div>
+  if (repos.length === 0) return <FeatureCards />;
 
-      {repos.map((repo) => (
-        <RepoCard key={`${repo.owner}/${repo.name}`} repo={repo} />
-      ))}
-    </div>
+  return (
+    <section className="relative mx-auto mt-16 max-w-3xl pb-8">
+      <h2 className="mb-3 font-mono text-fg-faint text-xs uppercase tracking-wider">
+        {t("dashboardRepos")}
+      </h2>
+      <ul className="space-y-3">
+        {repos.map((repo) => (
+          <li key={`${repo.owner}/${repo.name}`}>
+            <RepoRow repo={repo} />
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

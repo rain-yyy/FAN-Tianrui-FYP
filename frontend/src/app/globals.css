@@ -6,11 +6,6 @@
  * orange accent. Panels are flat (hairline border, no drop shadow); the only
  * glow is the faint orange wash behind the home hero and the search field.
  * Text on an orange fill is always dark (`accent-fg`); white fails contrast.
- *
- * The old light-theme names (paper, sheet, ink, n-1..n-9, rail*, evidence*)
- * are kept as aliases of the new tokens so unmigrated screens render dark.
- * Each migration step swaps their usages for the new names; the aliases are
- * deleted in the final cleanup step.
  */
 @theme {
   /* Canvas, panels, text */
@@ -37,46 +32,12 @@
   --color-danger: #ff7a85;
   --color-info: #7cb7ff;
 
-  /* Legacy aliases (see header) */
-  --color-paper: var(--color-bg);
-  --color-sheet: var(--color-panel);
-  --color-ink: var(--color-fg);
-
-  /* Neutral ramp, inverted for dark: higher number = more contrast */
-  --color-n-1: #1a1918;
-  --color-n-2: #201e1c;
-  --color-n-3: #302d2a;
-  --color-n-4: #443f3a;
-  --color-n-5: #6b655d;
-  --color-n-6: #aaa49b;
-  --color-n-7: #bfb9b0;
-  --color-n-8: #d8d3cb;
-  --color-n-9: #ebe7e0;
-
-  --color-rail: var(--color-accent-strong);
-  --color-rail-raised: var(--color-raised);
-  --color-rail-line: var(--color-line-strong);
-  --color-rail-ink: var(--color-accent-fg);
-  --color-rail-muted: var(--color-accent);
-
-  --color-evidence: var(--color-accent);
-  --color-evidence-tint: var(--color-accent-soft);
-
   /* Type: one sans for UI and reading text, mono for code and codes */
   --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-sans);
   --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", monospace;
 
   /* Reading measure for body text */
   --container-measure: 68ch;
-}
-
-/*
- * Legacy alias still used by the unmigrated login component (Auth.tsx).
- * Delete once nothing references it.
- */
-@theme inline {
-  --color-muted-foreground: var(--color-n-6);
 }
 
 :root {
@@ -110,9 +71,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-n-3);
+  background: var(--color-line-strong);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-n-4);
+  background: var(--color-fg-faint);
 }

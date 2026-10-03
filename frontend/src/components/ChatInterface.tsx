@@ -84,7 +84,7 @@ function rememberOpen(open: boolean) {
   }
 }
 
-export interface ChatPage {
+interface ChatPage {
   code: string;
   title: string;
   /** First file listed for the page, used in an example question. */
