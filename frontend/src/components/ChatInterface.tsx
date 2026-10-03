@@ -11,10 +11,11 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LiveStepFlow } from "@/components/LiveStepFlow";
 import { type DisplayMessage, MessageItem } from "@/components/MessageItem";
 import { ChatStreamStopped, useChatStream } from "@/hooks/useChatStream";
+import { useShortcut } from "@/hooks/useShortcut";
 import { repoFullName } from "@/layouts/ShellContext";
 import { buildAnswerNotes } from "@/lib/answerNotes";
 import {
@@ -211,7 +212,7 @@ function HistoryList({
                   onClick={() => setConfirming(chatId)}
                   aria-label={t("chatDelete")}
                   title={t("chatDelete")}
-                  className="shrink-0 px-3 text-n-6 opacity-0 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+                  className="shrink-0 px-3 text-n-6 hover:text-ink [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
                 >
                   <Trash2 aria-hidden className="h-3.5 w-3.5" />
                 </button>
@@ -314,6 +315,19 @@ export default function ChatInterface({
     setOpenState(next);
     rememberOpen(next);
   };
+
+  // `/` opens the panel and puts the cursor in the question box. The focus
+  // happens in an effect because the box may not be mounted yet.
+  const [focusRequest, setFocusRequest] = useState(0);
+  const askShortcut = useCallback(() => {
+    setOpenState(true);
+    setView("chat");
+    setFocusRequest((n) => n + 1);
+  }, []);
+  useShortcut("/", askShortcut);
+  useEffect(() => {
+    if (focusRequest > 0) inputRef.current?.focus();
+  }, [focusRequest]);
 
   const showChat = async (id: string) => {
     setView("chat");
@@ -483,7 +497,7 @@ export default function ChatInterface({
             type="button"
             onClick={() => setOpen(true)}
             aria-label={t("chatOpen")}
-            title={t("chatOpen")}
+            title={t("chatOpenHint")}
             className="flex flex-col items-center gap-2 px-2 py-3 text-n-7 hover:bg-n-1 hover:text-ink"
           >
             <MessageSquare aria-hidden className="h-4 w-4" />
@@ -507,6 +521,16 @@ export default function ChatInterface({
   return (
     <aside
       aria-label={t("chatPanel")}
+      // Full screen below lg: Esc returns to the page.
+      onKeyDown={(event) => {
+        if (
+          event.key === "Escape" &&
+          !window.matchMedia(DESKTOP_QUERY).matches
+        ) {
+          event.stopPropagation();
+          setOpen(false);
+        }
+      }}
       className="fixed inset-0 z-50 flex flex-col bg-sheet lg:static lg:z-auto lg:w-[clamp(20rem,28vw,36rem)] lg:shrink-0 lg:border-n-3 lg:border-l"
     >
       <header className="flex h-12 shrink-0 items-center gap-1 border-n-3 border-b pr-1 pl-4">

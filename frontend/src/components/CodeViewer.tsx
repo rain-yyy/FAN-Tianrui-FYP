@@ -1,7 +1,8 @@
 "use client";
 
 import { Check, Copy, RotateCw, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useModalDialog } from "@/hooks/useModalDialog";
 import { api } from "@/lib/api";
 import { type FileCitation, formatFileCitation } from "@/lib/citations";
 import { t } from "@/lib/i18n";
@@ -89,7 +90,7 @@ function CodeLines({
   const focusStart = range?.start;
 
   // Bring the cited line into view and focus the code for keyboard scrolling.
-  // The dialog opens in a layout effect, so it already has layout here.
+  // useModalDialog opens the dialog in a layout effect, so it has layout here.
   useEffect(() => {
     const scroller = scrollRef.current;
     if (!scroller) return;
@@ -107,7 +108,7 @@ function CodeLines({
       // biome-ignore lint/a11y/noNoninteractiveTabindex: the code region scrolls, so it must take keyboard focus
       tabIndex={0}
       aria-label={label}
-      className="h-full overflow-auto bg-sheet outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--color-rail)]"
+      className="min-h-0 flex-1 overflow-auto bg-sheet outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--color-rail)]"
     >
       <pre className="py-3 font-mono text-[0.8125rem] text-ink leading-[1.6]">
         {lines.map((content, index) => {
@@ -151,7 +152,6 @@ export default function CodeViewer({
   initialSourceIndex = 0,
   repoUrl,
 }: CodeViewerProps) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const [index, setIndex] = useState(() =>
     Math.min(Math.max(0, initialSourceIndex), Math.max(0, sources.length - 1)),
   );
@@ -162,20 +162,7 @@ export default function CodeViewer({
   const state = useFileText(repoUrl, file?.path, attempt);
   const label = file ? formatFileCitation(file) : "";
 
-  // Native modal dialog: focus trap, Esc and inert background come with it.
-  // A layout effect, so the dialog is open before any child effect measures
-  // it. React removes the element before this cleanup runs, so the browser's
-  // own focus restore never fires; return focus to the opener by hand.
-  useLayoutEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const opener = document.activeElement;
-    dialog.showModal();
-    return () => {
-      dialog.close();
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
-    };
-  }, []);
+  const dialogProps = useModalDialog(onClose);
 
   useEffect(() => {
     if (!copied) return;
@@ -202,17 +189,9 @@ export default function CodeViewer({
   const slash = file ? file.path.lastIndexOf("/") : -1;
 
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click is a pointer shortcut; Esc (the dialog's cancel event) closes from the keyboard
     <dialog
-      ref={dialogRef}
+      {...dialogProps}
       aria-labelledby="code-inspector-title"
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
-      onClick={(event) => {
-        if (event.target === dialogRef.current) onClose();
-      }}
       className="m-auto h-[min(88vh,60rem)] w-[min(72rem,calc(100vw-2rem))] max-w-none border border-n-4 bg-sheet p-0 text-ink backdrop:bg-ink/40"
     >
       <div className="flex h-full flex-col">
@@ -326,9 +305,24 @@ export default function CodeViewer({
           ) : null}
 
           <div
-            className="min-w-0 flex-1"
+            className="flex min-w-0 flex-1 flex-col"
             aria-busy={state.status === "loading"}
           >
+            {sources.length > 1 ? (
+              // Below md the file list is hidden; a select keeps switching.
+              <select
+                value={index}
+                onChange={(event) => setIndex(Number(event.target.value))}
+                aria-label={t("inspectorFiles")}
+                className="shrink-0 border-n-3 border-b bg-paper px-3 py-2 font-mono text-xs md:hidden"
+              >
+                {sources.map((source, i) => (
+                  <option key={formatFileCitation(source)} value={i}>
+                    {formatFileCitation(source)}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             {!file ? null : state.status === "loading" ? (
               <p className="p-6 text-n-6 text-sm">
                 {t("inspectorLoading", { path: file.path })}
@@ -352,6 +346,7 @@ export default function CodeViewer({
               </div>
             ) : (
               <CodeLines
+                // Remount per file so scroll position and focus start fresh.
                 key={label}
                 text={state.text}
                 file={file}

@@ -215,8 +215,16 @@ export default function AppLayout() {
   return (
     <ShellProvider>
       <div className="flex h-dvh flex-col bg-paper md:flex-row">
+        <a
+          href="#main"
+          className="sr-only z-50 bg-rail px-3 py-2 text-rail-ink text-sm focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+        >
+          {t("skipToContent")}
+        </a>
         <Rail />
         <main
+          id="main"
+          tabIndex={-1}
           className={cn(
             "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto",
             !fullBleed && "p-4 md:p-8",

@@ -1,7 +1,8 @@
 "use client";
 
 import { Code2, Maximize2, RefreshCw, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useModalDialog } from "@/hooks/useModalDialog";
 import { t } from "@/lib/i18n";
 
 type MermaidApi = typeof import("mermaid").default;
@@ -122,45 +123,31 @@ const smallButtonClass =
   "inline-flex items-center gap-1.5 border border-n-3 bg-sheet px-2 py-1 text-n-7 text-xs hover:border-n-5 hover:text-ink";
 
 function ZoomedDiagram({ svg, onClose }: { svg: string; onClose: () => void }) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null;
-    closeRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      opener?.focus();
-    };
-  }, [onClose]);
-
+  const dialogProps = useModalDialog(onClose);
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      {...dialogProps}
       aria-label={t("wikiDiagram")}
-      className="fixed inset-0 z-[60] flex flex-col bg-sheet"
+      className="m-0 h-dvh max-h-none w-full max-w-none bg-sheet p-0 text-ink backdrop:bg-ink/40"
     >
-      <div className="flex h-12 shrink-0 items-center justify-end border-n-3 border-b px-4">
-        <button
-          ref={closeRef}
-          type="button"
-          onClick={onClose}
-          aria-label={t("diagramClose")}
-          className="-mr-2 p-2 text-n-7 hover:text-ink"
-        >
-          <X aria-hidden className="h-5 w-5" />
-        </button>
+      <div className="flex h-full flex-col">
+        <div className="flex h-12 shrink-0 items-center justify-end border-n-3 border-b px-4">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t("diagramClose")}
+            className="-mr-2 p-2 text-n-7 hover:text-ink"
+          >
+            <X aria-hidden className="h-5 w-5" />
+          </button>
+        </div>
+        <div
+          className="min-h-0 flex-1 overflow-auto p-8 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:w-full [&_svg]:max-w-none"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: SVG produced by mermaid with securityLevel "strict"
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
       </div>
-      <div
-        className="min-h-0 flex-1 overflow-auto p-8 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:w-full [&_svg]:max-w-none"
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: SVG produced by mermaid with securityLevel "strict"
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
-    </div>
+    </dialog>
   );
 }
 

@@ -11,9 +11,12 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import ChatInterface from "@/components/ChatInterface";
+import { ShortcutHelp } from "@/components/wiki/ShortcutHelp";
 import { TaskStatePanel } from "@/components/wiki/TaskStatePanel";
 import { WikiArticle, type WikiPageBody } from "@/components/wiki/WikiArticle";
 import { WikiToc } from "@/components/wiki/WikiToc";
+import { useModalDialog } from "@/hooks/useModalDialog";
+import { useShortcut } from "@/hooks/useShortcut";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { parseWikiToc, type WikiToc as Toc, type TocNode } from "@/lib/wikiToc";
@@ -21,29 +24,6 @@ import { parseWikiToc, type WikiToc as Toc, type TocNode } from "@/lib/wikiToc";
 const WikiMap = dynamic(() => import("@/components/wiki/WikiMap"), {
   ssr: false,
 });
-
-/** Plain `M` (not while typing or inside a dialog) toggles the map. */
-function useMapShortcut(toggle: () => void) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "m" && event.key !== "M") return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.repeat || event.defaultPrevented) return;
-      const target = event.target as HTMLElement | null;
-      if (
-        target?.closest(
-          "input, textarea, select, [contenteditable='true'], dialog",
-        )
-      ) {
-        return;
-      }
-      event.preventDefault();
-      toggle();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [toggle]);
-}
 
 const mapButtonClass = "p-2 text-n-6 hover:text-ink";
 
@@ -190,50 +170,40 @@ function ContentsPanel({
   node: TocNode;
   onClose: () => void;
 }) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    closeRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
+  const dialogProps = useModalDialog(onClose);
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      {...dialogProps}
       aria-label={t("wikiContents")}
-      className="fixed inset-0 z-50 flex flex-col bg-sheet md:hidden"
+      className="m-0 h-dvh max-h-none w-full max-w-none bg-sheet p-0 text-ink"
     >
-      <div className="flex h-12 shrink-0 items-center justify-between border-n-3 border-b px-4">
-        <span className="font-medium text-ink text-sm">
-          {t("wikiContents")}
-        </span>
-        <button
-          ref={closeRef}
-          type="button"
-          onClick={onClose}
-          aria-label={t("wikiCloseContents")}
-          className="-mr-2 p-2 text-n-7 hover:text-ink"
+      <div className="flex h-full flex-col">
+        <div className="flex h-12 shrink-0 items-center justify-between border-n-3 border-b px-4">
+          <span className="font-medium text-ink text-sm">
+            {t("wikiContents")}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t("wikiCloseContents")}
+            className="-mr-2 p-2 text-n-7 hover:text-ink"
+          >
+            <X aria-hidden className="h-5 w-5" />
+          </button>
+        </div>
+        <nav
+          aria-label={t("wikiContents")}
+          className="flex-1 overflow-y-auto px-2 py-3"
         >
-          <X aria-hidden className="h-5 w-5" />
-        </button>
+          <WikiToc
+            nodes={toc.nodes}
+            activeId={node.id}
+            activeChapterId={node.chapterId}
+            onNavigate={onClose}
+          />
+        </nav>
       </div>
-      <nav
-        aria-label={t("wikiContents")}
-        className="flex-1 overflow-y-auto px-2 py-3"
-      >
-        <WikiToc
-          nodes={toc.nodes}
-          activeId={node.id}
-          activeChapterId={node.chapterId}
-          onNavigate={onClose}
-        />
-      </nav>
-    </div>
+    </dialog>
   );
 }
 
@@ -256,7 +226,11 @@ export default function WikiViewer({
       }),
     [setSearchParams],
   );
-  useMapShortcut(toggleMap);
+  useShortcut("m", toggleMap);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const openHelp = useCallback(() => setHelpOpen(true), []);
+  const closeHelp = useCallback(() => setHelpOpen(false), []);
+  useShortcut("?", openHelp);
   const [citedFiles, setCitedFiles] = useState<string[]>([]);
   const citedSet = useMemo(() => new Set(citedFiles), [citedFiles]);
   const [tocCollapsed, setTocCollapsed] = useState(false);
@@ -293,6 +267,18 @@ export default function WikiViewer({
     setEvidencePath(null);
   }, [nodeId]);
   const evidence = evidencePath ? toc?.byFile.get(evidencePath) : undefined;
+
+  // The tab title names the page, so screen readers announce navigation.
+  const pageTitle = node ? `${node.code} ${node.title}` : "";
+  const repoTitle = toc?.title ?? "";
+  useEffect(() => {
+    if (!pageTitle) return;
+    const view = mapOpen ? t("mapTitle") : pageTitle;
+    document.title = [view, repoTitle, "GitReader"].filter(Boolean).join(" · ");
+    return () => {
+      document.title = "GitReader";
+    };
+  }, [pageTitle, repoTitle, mapOpen]);
 
   const chatContext = node ? pageContext(node, chapter, page.data) : undefined;
   const chatPage = useMemo(
@@ -386,6 +372,19 @@ export default function WikiViewer({
                 />
               ) : null}
             </nav>
+            <button
+              type="button"
+              onClick={openHelp}
+              aria-label={t("shortcutTitle")}
+              title={t("shortcutTitle")}
+              className={cn(
+                "flex shrink-0 items-center gap-2 border-n-2 border-t px-4 py-2 text-left text-n-6 text-xs hover:text-ink",
+                tocCollapsed && "justify-center px-0",
+              )}
+            >
+              <kbd className="border border-n-3 px-1 font-mono">?</kbd>
+              {tocCollapsed ? null : <span>{t("shortcutTitle")}</span>}
+            </button>
           </aside>
 
           <div
@@ -446,6 +445,8 @@ export default function WikiViewer({
       {contentsOpen && toc && node ? (
         <ContentsPanel toc={toc} node={node} onClose={closeContents} />
       ) : null}
+
+      {helpOpen ? <ShortcutHelp onClose={closeHelp} /> : null}
 
       {repoUrl ? (
         <ChatInterface
