@@ -47,7 +47,7 @@ jobs:
 
       - name: API smoke test
         run: |
-          uv run python scripts/api.py > api.log 2>&1 &
+          .venv/bin/python scripts/api.py > api.log 2>&1 &
           for i in $(seq 1 60); do
             if curl -fsS localhost:8000/health; then exit 0; fi
             sleep 2
