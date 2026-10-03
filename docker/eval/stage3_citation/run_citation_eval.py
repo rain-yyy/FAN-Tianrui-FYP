@@ -29,9 +29,9 @@ _EVAL_ROOT = Path(__file__).resolve().parents[1]
 if str(_EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVAL_ROOT))
 
-from common import (
-    bootstrap,  # noqa: E402,F401
-    manifest,  # noqa: E402
+from common import (  # noqa: E402
+    bootstrap,  # noqa: F401
+    manifest,
 )
 from common import llm_usage_tracker as tracker  # noqa: E402
 from common.api_client import chat_turn  # noqa: E402
@@ -141,9 +141,9 @@ def _load_semantic_questions(num_questions: int) -> list[dict[str, Any]]:
             f"{QUESTION_SET_PATH} not found -- run stage2_retrieval.build_question_set first."
         )
     rows = [
-        json.loads(l)
-        for l in QUESTION_SET_PATH.read_text(encoding="utf-8").splitlines()
-        if l.strip()
+        json.loads(line)
+        for line in QUESTION_SET_PATH.read_text(encoding="utf-8").splitlines()
+        if line.strip()
     ]
     semantic = [r for r in rows if r.get("source") == "semantic"]
     return semantic[:num_questions]
@@ -245,9 +245,9 @@ def recompute_from_existing() -> None:
         )
 
     rows = [
-        json.loads(l)
-        for l in CITATION_RESULTS_PATH.read_text(encoding="utf-8").splitlines()
-        if l.strip()
+        json.loads(line)
+        for line in CITATION_RESULTS_PATH.read_text(encoding="utf-8").splitlines()
+        if line.strip()
     ]
     for row in rows:
         repo_id = row["question_id"].split("::")[0]

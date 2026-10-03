@@ -46,7 +46,7 @@ def get_client() -> httpx.AsyncClient:
     return _client
 
 
-class GenerationTimeout(Exception):
+class GenerationTimeoutError(Exception):
     pass
 
 
@@ -112,7 +112,7 @@ async def poll_task_to_completion(
                 cache_hit=cache_hit,
             )
         if time.monotonic() - started > timeout_sec:
-            raise GenerationTimeout(
+            raise GenerationTimeoutError(
                 f"task {task_id} did not finish within {timeout_sec}s"
             )
         await asyncio.sleep(interval_sec)

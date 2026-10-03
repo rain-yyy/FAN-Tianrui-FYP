@@ -30,13 +30,13 @@ _EVAL_ROOT = Path(__file__).resolve().parents[1]
 if str(_EVAL_ROOT) not in sys.path:
     sys.path.insert(0, str(_EVAL_ROOT))
 
-from common import (
-    bootstrap,  # noqa: E402,F401
-    manifest,  # noqa: E402
+from common import (  # noqa: E402
+    bootstrap,  # noqa: F401
+    manifest,
 )
 from common import llm_usage_tracker as tracker  # noqa: E402
 from common.api_client import (  # noqa: E402
-    GenerationTimeout,
+    GenerationTimeoutError,
     poll_task_to_completion,
     trigger_generate,
 )
@@ -86,7 +86,7 @@ async def run_one(repo_url: str, tier_hint: str, user_id: str) -> dict[str, Any]
 
     try:
         outcome = await poll_task_to_completion(task_id)
-    except GenerationTimeout as exc:
+    except GenerationTimeoutError as exc:
         manifest.set_generation_status(repo_url, "timeout")
         return {
             "repo_url": repo_url,

@@ -6,17 +6,17 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 # Absolute path, independent of CWD (a bare "../../.env.local" only resolves
 # correctly when launched from docker/scripts/, not from docker/ as documented
 # in CLAUDE.md — see docker/tests/conftest.py for the same fix applied there).
 load_dotenv(PROJECT_ROOT.parent / ".env.local")
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from src.api.routers import chat, files, health, repos, tasks
+from src.api.routers import chat, files, health, repos, tasks  # noqa: E402
 
 app = FastAPI(
     title="Project Wiki Generation API",

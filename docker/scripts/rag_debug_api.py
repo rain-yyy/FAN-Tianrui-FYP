@@ -8,16 +8,16 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 # 尝试加载 .env 文件，根据你的环境可能需要调整路径
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
 
-from src.chat.tools.rag_tool import RAGSearchEngine
+from src.chat.tools.rag_tool import RAGSearchEngine  # noqa: E402
 
 # 初始化日志
 logging.basicConfig(level=logging.INFO)

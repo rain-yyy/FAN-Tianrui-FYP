@@ -136,9 +136,9 @@ def main() -> None:
 
     client = get_qdrant_client()
     questions = [
-        json.loads(l)
-        for l in QUESTION_SET_PATH.read_text(encoding="utf-8").splitlines()
-        if l.strip()
+        json.loads(line)
+        for line in QUESTION_SET_PATH.read_text(encoding="utf-8").splitlines()
+        if line.strip()
     ]
     print(f"Evaluating {len(questions)} questions across 3 retrieval configs...")
 

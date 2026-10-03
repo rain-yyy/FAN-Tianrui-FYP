@@ -62,7 +62,7 @@ async def test_generate_creates_task_record(
     await api_client.post(f"/task/{task_id}/cancel")
 
 
-async def test_get_task_not_found_returns_404(api_client):
+async def test_get_task_not_found_returns_404(api_client, supabase_client):
     resp = await api_client.post(f"/task/does-not-exist-{uuid.uuid4()}")
     assert resp.status_code == 404
 
@@ -124,7 +124,7 @@ async def test_cancel_immediately_after_create_marks_task_failed_cancelled(
     assert final_status == "failed"
 
 
-async def test_cancel_unknown_task_returns_404(api_client):
+async def test_cancel_unknown_task_returns_404(api_client, supabase_client):
     resp = await api_client.post(f"/task/does-not-exist-{uuid.uuid4()}/cancel")
     assert resp.status_code == 404
 

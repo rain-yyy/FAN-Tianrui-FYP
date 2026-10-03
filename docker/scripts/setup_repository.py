@@ -14,7 +14,7 @@ if str(_DOCKER_ROOT) not in sys.path:
         0, str(_DOCKER_ROOT)
     )  # 把 docker/ 加入 sys.path，使 `import src.xxx` 可用
 
-from src.paths import REPO_STORE_ROOT, repo_disk_dirname
+from src.paths import REPO_STORE_ROOT, repo_disk_dirname  # noqa: E402
 
 # REPO_STORE_ROOT 始终是绝对路径（相对路径的 REPO_STORE_PATH 会被锚定到仓库根），
 # setup_repository() 的返回值也因此始终是绝对路径
