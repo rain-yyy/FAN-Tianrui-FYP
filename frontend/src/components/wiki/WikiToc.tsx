@@ -18,12 +18,16 @@ interface WikiTocProps {
   onNavigate?: () => void;
 }
 
-/** `?d=<code>` on the current URL, keeping every other parameter. */
+/**
+ * `?d=<code>` on the current URL, keeping the other parameters. Following a
+ * chapter link always lands in the reading view, so `view` is dropped.
+ */
 export function useCodeHref() {
   const [params] = useSearchParams();
   return (code: string) => {
     const next = new URLSearchParams(params);
     next.set("d", code);
+    next.delete("view");
     return { search: `?${next.toString()}` };
   };
 }

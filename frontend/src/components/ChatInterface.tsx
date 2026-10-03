@@ -11,11 +11,12 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LiveStepFlow } from "@/components/LiveStepFlow";
 import { type DisplayMessage, MessageItem } from "@/components/MessageItem";
 import { ChatStreamStopped, useChatStream } from "@/hooks/useChatStream";
 import { repoFullName } from "@/layouts/ShellContext";
+import { buildAnswerNotes } from "@/lib/answerNotes";
 import {
   api,
   type ChatHistoryItem,
@@ -99,6 +100,8 @@ interface ChatInterfaceProps {
   /** `toc.byFile`, so answer notes can name the wiki chapters of a file. */
   filePages?: Map<string, TocNode[]>;
   onEvidence?: (path: string | null) => void;
+  /** Reports the files cited in the open conversation (for the map). */
+  onCitedFiles?: (paths: string[]) => void;
 }
 
 const iconButtonClass =
@@ -276,6 +279,7 @@ export default function ChatInterface({
   initialChatId,
   filePages,
   onEvidence,
+  onCitedFiles,
 }: ChatInterfaceProps) {
   const [open, setOpenState] = useState(initialOpen);
   const [view, setView] = useState<"chat" | "history">("chat");
@@ -287,6 +291,24 @@ export default function ChatInterface({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const { isStreaming, liveSteps, streamingAnswer, sendMessage, stop } =
     useChatStream();
+
+  const citedPaths = useMemo(() => {
+    const paths = new Set<string>();
+    for (const message of messages) {
+      if (message.role !== "assistant") continue;
+      const { files } = buildAnswerNotes(
+        message.content,
+        message.sources,
+        message.tool_trajectory,
+      );
+      for (const file of files) paths.add(file.path);
+    }
+    return [...paths].sort();
+  }, [messages]);
+  // The map lives outside this panel; tell it which files are in play.
+  useEffect(() => {
+    onCitedFiles?.(citedPaths);
+  }, [citedPaths, onCitedFiles]);
 
   const setOpen = (next: boolean) => {
     setOpenState(next);

@@ -316,26 +316,21 @@ export const api = {
     return true;
   },
 
+  /** Repo-relative path → file text. Rejects with the backend's `detail`. */
   getFileContent: async (
     repoUrl: string,
     filePath: string,
+    signal?: AbortSignal,
   ): Promise<string> => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/file/content`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_url: repoUrl, file_path: filePath }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`Failed to fetch file: ${res.statusText}`);
-      }
-      const data = await res.json();
-      return data.content;
-    } catch (error) {
-      console.error("Failed to get file content:", error);
-      throw error;
+    const data = await requestJson<{ content?: unknown }>("/file/content", {
+      method: "POST",
+      body: JSON.stringify({ repo_url: repoUrl, file_path: filePath }),
+      signal,
+    });
+    if (typeof data.content !== "string") {
+      throw new Error("The file response had no content.");
     }
+    return data.content;
   },
 
   // Unified agent-first chat streaming API (single event vocabulary, single node loop)
