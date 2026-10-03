@@ -17,9 +17,9 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
     <dialog
       {...dialogProps}
       aria-labelledby="shortcut-help-title"
-      className="m-auto w-[min(26rem,calc(100vw-2rem))] border border-n-4 bg-sheet p-0 text-ink backdrop:bg-ink/40"
+      className="m-auto w-[min(26rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-line-strong bg-overlay p-0 text-fg backdrop:bg-bg/80"
     >
-      <div className="flex h-12 items-center justify-between border-n-3 border-b pr-2 pl-5">
+      <div className="flex h-12 items-center justify-between border-line border-b pr-2 pl-5">
         <h2 id="shortcut-help-title" className="font-medium text-sm">
           {t("shortcutTitle")}
         </h2>
@@ -27,7 +27,7 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
           type="button"
           onClick={onClose}
           aria-label={t("shortcutCloseHelp")}
-          className="inline-flex h-8 w-8 items-center justify-center text-n-6 hover:bg-n-1 hover:text-ink"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-fg-muted hover:bg-raised hover:text-fg"
         >
           <X aria-hidden className="h-4 w-4" />
         </button>
@@ -36,11 +36,11 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
         {SHORTCUTS.map(([key, label]) => (
           <div key={key} className="contents">
             <dt>
-              <kbd className="inline-block min-w-7 border border-n-4 px-1.5 py-0.5 text-center font-mono text-ink text-xs">
+              <kbd className="inline-block min-w-7 rounded-md border border-line-strong bg-raised px-1.5 py-0.5 text-center font-mono text-fg text-xs">
                 {key}
               </kbd>
             </dt>
-            <dd className="text-n-8">{t(label)}</dd>
+            <dd className="text-fg">{t(label)}</dd>
           </div>
         ))}
       </dl>

@@ -108,9 +108,9 @@ function CodeLines({
       // biome-ignore lint/a11y/noNoninteractiveTabindex: the code region scrolls, so it must take keyboard focus
       tabIndex={0}
       aria-label={label}
-      className="min-h-0 flex-1 overflow-auto bg-sheet outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--color-rail)]"
+      className="min-h-0 flex-1 overflow-auto bg-raised outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--color-accent-line)]"
     >
-      <pre className="py-3 font-mono text-[0.8125rem] text-ink leading-[1.6]">
+      <pre className="py-3 font-mono text-[0.8125rem] text-fg leading-[1.6]">
         {lines.map((content, index) => {
           const number = index + 1;
           const marked =
@@ -123,15 +123,15 @@ function CodeLines({
               // biome-ignore lint/suspicious/noArrayIndexKey: lines are positional
               key={index}
               data-line={number}
-              className={cn("flex", marked && "bg-evidence-tint")}
+              className={cn("flex", marked && "bg-accent-soft")}
             >
               <span
                 aria-hidden
                 className={cn(
                   "shrink-0 select-none pr-4 text-right tabular-nums",
                   marked
-                    ? "text-evidence shadow-[inset_2px_0_0_var(--color-evidence)]"
-                    : "text-n-6",
+                    ? "text-accent shadow-[inset_2px_0_0_var(--color-accent)]"
+                    : "text-fg-muted",
                 )}
                 style={{ width: `calc(${gutter} + 1.25rem)` }}
               >
@@ -192,13 +192,13 @@ export default function CodeViewer({
     <dialog
       {...dialogProps}
       aria-labelledby="code-inspector-title"
-      className="m-auto h-[min(88vh,60rem)] w-[min(72rem,calc(100vw-2rem))] max-w-none border border-n-4 bg-sheet p-0 text-ink backdrop:bg-ink/40"
+      className="m-auto h-[min(88vh,60rem)] w-[min(72rem,calc(100vw-2rem))] max-w-none overflow-hidden rounded-2xl border border-line-strong bg-panel p-0 text-fg backdrop:bg-bg/80"
     >
       <div className="flex h-full flex-col">
-        <header className="flex h-12 shrink-0 items-center gap-3 border-n-3 border-b pr-2 pl-4">
+        <header className="flex h-12 shrink-0 items-center gap-3 border-line border-b pr-2 pl-4">
           <h2
             id="code-inspector-title"
-            className="shrink-0 font-medium text-n-7 text-xs uppercase tracking-wider"
+            className="shrink-0 font-medium text-fg-muted text-xs uppercase tracking-wider"
           >
             {t("inspectorTitle")}
           </h2>
@@ -208,13 +208,13 @@ export default function CodeViewer({
               title={label}
             >
               {slash > 0 ? (
-                <span className="text-n-6">
+                <span className="text-fg-muted">
                   {file.path.slice(0, slash + 1)}
                 </span>
               ) : null}
-              <span className="text-ink">{file.fileName}</span>
+              <span className="text-fg">{file.fileName}</span>
               {file.lines ? (
-                <span className="text-n-6 tabular-nums">
+                <span className="text-fg-muted tabular-nums">
                   :{file.lines.start}
                   {file.lines.end !== file.lines.start
                     ? `–${file.lines.end}`
@@ -229,7 +229,7 @@ export default function CodeViewer({
             type="button"
             onClick={copyPath}
             disabled={!file}
-            className="inline-flex h-8 items-center gap-1.5 px-2 text-n-7 text-xs hover:bg-n-1 hover:text-ink"
+            className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-fg-muted text-xs hover:bg-raised hover:text-fg"
           >
             {copied ? (
               <Check aria-hidden className="h-3.5 w-3.5" />
@@ -243,7 +243,7 @@ export default function CodeViewer({
             onClick={onClose}
             aria-label={t("inspectorClose")}
             title={t("inspectorClose")}
-            className="inline-flex h-8 w-8 items-center justify-center text-n-6 hover:bg-n-1 hover:text-ink"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-fg-muted hover:bg-raised hover:text-fg"
           >
             <X aria-hidden className="h-4 w-4" />
           </button>
@@ -253,7 +253,7 @@ export default function CodeViewer({
           {sources.length > 1 ? (
             <nav
               aria-label={t("inspectorFiles")}
-              className="hidden w-60 shrink-0 flex-col border-n-3 border-r bg-paper md:flex"
+              className="hidden w-60 shrink-0 flex-col border-line border-r bg-bg md:flex"
             >
               {sources.length > 8 ? (
                 <input
@@ -262,7 +262,7 @@ export default function CodeViewer({
                   onChange={(event) => setFilter(event.target.value)}
                   placeholder={t("inspectorFilter")}
                   aria-label={t("inspectorFilter")}
-                  className="m-2 border border-n-3 bg-sheet px-2 py-1.5 text-xs outline-none placeholder:text-n-6 focus:border-rail"
+                  className="m-2 border border-line bg-panel px-2 py-1.5 text-xs outline-none placeholder:text-fg-faint focus:border-accent-line"
                 />
               ) : null}
               <ul className="min-h-0 flex-1 overflow-y-auto py-1">
@@ -278,8 +278,8 @@ export default function CodeViewer({
                         className={cn(
                           "block w-full truncate px-3 py-1.5 text-left font-mono text-xs",
                           i === index
-                            ? "bg-ink text-sheet"
-                            : "text-n-8 hover:bg-n-1 hover:text-ink",
+                            ? "bg-accent-soft text-accent"
+                            : "text-fg hover:bg-raised hover:text-fg",
                         )}
                       >
                         {source.fileName}
@@ -287,7 +287,7 @@ export default function CodeViewer({
                           <span
                             className={cn(
                               "tabular-nums",
-                              i === index ? "text-n-3" : "text-n-6",
+                              i === index ? "text-accent" : "text-fg-faint",
                             )}
                           >
                             :{source.lines.start}
@@ -298,7 +298,7 @@ export default function CodeViewer({
                   );
                 })}
               </ul>
-              <p className="border-n-3 border-t px-3 py-2 font-mono text-n-6 text-xs tabular-nums">
+              <p className="border-line border-t px-3 py-2 font-mono text-fg-muted text-xs tabular-nums">
                 {t("inspectorCount", { n: sources.length })}
               </p>
             </nav>
@@ -314,7 +314,7 @@ export default function CodeViewer({
                 value={index}
                 onChange={(event) => setIndex(Number(event.target.value))}
                 aria-label={t("inspectorFiles")}
-                className="shrink-0 border-n-3 border-b bg-paper px-3 py-2 font-mono text-xs md:hidden"
+                className="shrink-0 border-line border-b bg-bg px-3 py-2 font-mono text-xs md:hidden"
               >
                 {sources.map((source, i) => (
                   <option key={formatFileCitation(source)} value={i}>
@@ -324,21 +324,21 @@ export default function CodeViewer({
               </select>
             ) : null}
             {!file ? null : state.status === "loading" ? (
-              <p className="p-6 text-n-6 text-sm">
+              <p className="p-6 text-fg-muted text-sm">
                 {t("inspectorLoading", { path: file.path })}
               </p>
             ) : state.status === "error" ? (
               <div className="p-6">
-                <p className="font-medium text-ink text-sm">
+                <p className="font-medium text-fg text-sm">
                   {t("inspectorFailed", { path: file.path })}
                 </p>
-                <p className="mt-2 border-ink border-l-2 bg-paper py-2 pl-3 font-mono text-n-8 text-xs">
+                <p className="mt-2 border-line-strong border-l-2 bg-bg py-2 pl-3 font-mono text-fg text-xs">
                   {state.message}
                 </p>
                 <button
                   type="button"
                   onClick={retry}
-                  className="mt-4 inline-flex items-center gap-2 border border-n-3 bg-sheet px-3 py-1.5 text-ink text-sm hover:border-n-5"
+                  className="mt-4 inline-flex items-center gap-2 rounded-full border border-line px-3 py-1.5 text-fg text-sm hover:border-line-strong"
                 >
                   <RotateCw aria-hidden className="h-3.5 w-3.5" />
                   {t("retry")}

@@ -62,7 +62,7 @@ function Trace({ steps }: { steps: ToolTrajectoryStep[] }) {
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
-        className="inline-flex items-center gap-1 font-mono text-n-6 text-xs hover:text-ink"
+        className="inline-flex items-center gap-1 font-mono text-fg-muted text-xs hover:text-fg"
       >
         <Chevron aria-hidden className="h-3 w-3" />
         {steps.length === 1
@@ -71,18 +71,18 @@ function Trace({ steps }: { steps: ToolTrajectoryStep[] }) {
         {failed > 0 ? `, ${t("chatTraceFailed", { n: failed })}` : null}
       </button>
       {open ? (
-        <ol className="mt-1.5 space-y-1 border-n-3 border-l pl-3">
+        <ol className="mt-1.5 space-y-1 border-line border-l pl-3">
           {steps.map((step, index) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: steps have no id and never reorder
             <li key={index} className="flex gap-2 text-xs leading-snug">
-              <span className="w-12 shrink-0 font-mono text-n-6">
+              <span className="w-12 shrink-0 font-mono text-fg-muted">
                 {toolLabel(step.tool)}
               </span>
-              <span className="min-w-0 flex-1 text-n-8">
+              <span className="min-w-0 flex-1 text-fg">
                 {getToolDescription(step.tool, step.arguments)}
               </span>
               {step.status === "success" ? null : (
-                <span className="shrink-0 font-mono text-ink">
+                <span className="shrink-0 font-mono text-fg">
                   {t("chatStepFailed")}
                 </span>
               )}
@@ -107,20 +107,20 @@ function AnswerNotesList({ notes, filePages, onOpen, onEvidence }: NotesProps) {
   return (
     <ol
       aria-label={t("chatNotes")}
-      className="mt-4 space-y-1.5 border-n-3 border-t pt-3"
+      className="mt-4 space-y-1.5 border-line border-t pt-3"
     >
       {notes.map((note) => {
         if (note.kind === "web") {
           return (
             <li key={`web:${note.link.url}`} className="flex gap-2 text-xs">
-              <span className="w-4 shrink-0 text-right font-mono text-n-6 tabular-nums">
+              <span className="w-4 shrink-0 text-right font-mono text-fg-muted tabular-nums">
                 {note.number}
               </span>
               <a
                 href={note.link.url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex min-w-0 items-center gap-1 text-n-8 underline-offset-2 hover:text-ink hover:underline"
+                className="inline-flex min-w-0 items-center gap-1 text-fg underline-offset-2 hover:text-fg hover:underline"
               >
                 <span className="truncate">{note.link.url}</span>
                 <ExternalLink aria-hidden className="h-3 w-3 shrink-0" />
@@ -134,7 +134,7 @@ function AnswerNotesList({ notes, filePages, onOpen, onEvidence }: NotesProps) {
         return (
           <li key={label} className="text-xs leading-snug">
             <div className="flex gap-2">
-              <span className="w-4 shrink-0 text-right font-mono text-n-6 tabular-nums">
+              <span className="w-4 shrink-0 text-right font-mono text-fg-muted tabular-nums">
                 {note.number}
               </span>
               <button
@@ -145,12 +145,12 @@ function AnswerNotesList({ notes, filePages, onOpen, onEvidence }: NotesProps) {
                 onFocus={() => onEvidence?.(file.path)}
                 onBlur={() => onEvidence?.(null)}
                 title={t("wikiOpenSource", { path: label })}
-                className="min-w-0 flex-1 break-words text-left font-mono text-ink hover:bg-evidence-tint focus-visible:bg-evidence-tint"
+                className="min-w-0 flex-1 break-words text-left font-mono text-fg hover:bg-accent-soft focus-visible:bg-accent-soft"
               >
                 {label}
               </button>
               {note.tool ? (
-                <span className="shrink-0 font-mono text-n-6">
+                <span className="shrink-0 font-mono text-fg-muted">
                   {toolLabel(note.tool)}
                 </span>
               ) : null}
@@ -162,7 +162,7 @@ function AnswerNotesList({ notes, filePages, onOpen, onEvidence }: NotesProps) {
                     key={page.id}
                     to={codeHref(page.code)}
                     title={page.title}
-                    className="inline-flex items-center gap-1 font-mono text-n-7 tabular-nums hover:text-ink"
+                    className="inline-flex items-center gap-1 font-mono text-fg-muted tabular-nums hover:text-fg"
                   >
                     {page.code}
                   </Link>
@@ -226,10 +226,10 @@ export const MessageItem = memo(function MessageItem({
             type="button"
             onClick={() => setInspected(note.fileIndex)}
             title={t("wikiOpenSource", { path: formatFileCitation(note.file) })}
-            className="font-mono text-[0.875em] text-ink underline decoration-n-4 underline-offset-2 hover:decoration-ink"
+            className="font-mono text-[0.875em] text-accent underline decoration-line-strong underline-offset-2 hover:decoration-accent"
           >
             {children}
-            <sup className="ml-0.5 text-[0.75em] text-n-6 tabular-nums">
+            <sup className="ml-0.5 text-[0.75em] text-fg-muted tabular-nums">
               {note.number}
             </sup>
           </button>
@@ -250,8 +250,8 @@ export const MessageItem = memo(function MessageItem({
 
   if (isUser) {
     return (
-      <div className="mb-5 border-rail border-l-2 pl-3">
-        <p className="whitespace-pre-wrap font-medium text-ink text-sm leading-relaxed">
+      <div className="mb-5 border-accent-line border-l-2 pl-3">
+        <p className="whitespace-pre-wrap font-medium text-fg text-sm leading-relaxed">
           {message.content}
         </p>
       </div>
@@ -260,7 +260,7 @@ export const MessageItem = memo(function MessageItem({
 
   return (
     <article className="mb-8">
-      <p className="mb-1 flex items-center gap-2 font-mono text-n-6 text-xs tabular-nums">
+      <p className="mb-1 flex items-center gap-2 font-mono text-fg-muted text-xs tabular-nums">
         <span>{t("chatAnswer")}</span>
         <span>{timeFormat.format(message.timestamp)}</span>
       </p>
@@ -278,7 +278,7 @@ export const MessageItem = memo(function MessageItem({
       ) : null}
 
       {message.isError || message.stopped ? (
-        <p className="mt-2 border-ink border-l-2 pl-3 font-mono text-n-7 text-xs">
+        <p className="mt-2 border-line-strong border-l-2 pl-3 font-mono text-fg-muted text-xs">
           {message.isError ? t("chatTurnFailed") : t("chatStopped")}
         </p>
       ) : null}

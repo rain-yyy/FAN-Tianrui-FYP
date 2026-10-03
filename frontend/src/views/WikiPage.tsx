@@ -88,7 +88,6 @@ function TaskView({
   if (isTaskInFlight(task)) {
     return (
       <TaskStatePanel
-        live
         stamp={task.status}
         title={t("taskInFlightTitle")}
         detail={task.current_step || null}
@@ -173,7 +172,6 @@ export default function WikiPage() {
   if (state.kind === "loading") {
     return (
       <TaskStatePanel
-        live
         stamp={t("taskLoadingStamp")}
         title={t("taskLoadingTitle")}
         meta={{ taskId, repo: repoUrl ? repoFullName(repoUrl) : undefined }}

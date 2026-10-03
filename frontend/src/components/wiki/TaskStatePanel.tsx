@@ -15,10 +15,26 @@ function formatTime(value: string | null | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : timeFormat.format(date);
 }
 
-/** Status stamp: a bordered mono label. States are stamped, never hidden. */
+const STATUS_TONE: Record<string, string> = {
+  pending: "border-info/40 text-info",
+  processing: "border-accent-line text-accent",
+  completed: "border-ok/40 text-ok",
+  cached: "border-ok/40 text-ok",
+  cancelled: "border-warn/40 text-warn",
+  failed: "border-danger/40 text-danger",
+  error: "border-danger/40 text-danger",
+};
+
+/** Status label: a coloured pill. States are always shown, never hidden. */
 function StatusStamp({ status }: { status: string }) {
   return (
-    <span className="inline-block border border-current px-1.5 py-0.5 font-mono text-xs uppercase leading-none tracking-wider">
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-xs uppercase leading-none tracking-wider",
+        STATUS_TONE[status] ?? "border-line text-fg-muted",
+      )}
+    >
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current" />
       {status}
     </span>
   );
@@ -40,7 +56,6 @@ interface TaskStatePanelProps {
   detailIsError?: boolean;
   /** 0–100, from the backend. Omit when there is no progress to show. */
   progress?: number | null;
-  live?: boolean;
   meta?: TaskMeta;
   actions?: React.ReactNode;
 }
@@ -51,7 +66,6 @@ export function TaskStatePanel({
   detail,
   detailIsError = false,
   progress,
-  live = false,
   meta,
   actions,
 }: TaskStatePanelProps) {
@@ -65,28 +79,26 @@ export function TaskStatePanel({
   return (
     <section
       aria-labelledby="task-state-title"
-      className="mx-auto w-full max-w-measure px-4 py-16 md:py-24"
+      className="mx-4 my-10 rounded-2xl border border-line bg-panel p-8 sm:mx-auto sm:w-full sm:max-w-xl md:my-16"
     >
-      <div className={cn(live ? "text-rail" : "text-ink")}>
-        <StatusStamp status={stamp} />
-      </div>
+      <StatusStamp status={stamp} />
 
       <h1
         id="task-state-title"
-        className="mt-5 font-serif text-3xl leading-tight text-ink"
+        className="mt-5 font-medium text-2xl text-fg leading-tight tracking-tight"
       >
         {title}
       </h1>
 
       {meta?.repo ? (
-        <p className="mt-2 font-mono text-sm text-n-6">{meta.repo}</p>
+        <p className="mt-2 font-mono text-sm text-fg-muted">{meta.repo}</p>
       ) : null}
 
       {pct !== null ? (
         <div className="mt-8">
           <div className="flex items-baseline justify-between gap-4 text-sm">
-            <span className="text-n-7">{detail ?? t("taskWaiting")}</span>
-            <span className="font-mono tabular-nums text-ink">
+            <span className="text-fg-muted">{detail ?? t("taskWaiting")}</span>
+            <span className="font-mono tabular-nums text-fg">
               {Math.round(pct)}%
             </span>
           </div>
@@ -96,10 +108,10 @@ export function TaskStatePanel({
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(pct)}
-            className="mt-2 h-px w-full bg-n-3"
+            className="mt-2 h-1 w-full overflow-hidden rounded-full bg-raised"
           >
             <div
-              className="-mt-px h-[3px] bg-rail transition-[width] duration-500"
+              className="h-full rounded-full bg-accent-strong transition-[width] duration-500"
               style={{ width: `${pct}%` }}
             />
           </div>
@@ -111,8 +123,8 @@ export function TaskStatePanel({
           className={cn(
             "mt-6 whitespace-pre-wrap break-words text-sm leading-relaxed",
             detailIsError
-              ? "border-ink border-l-2 bg-sheet py-3 pr-4 pl-4 font-mono text-ink"
-              : "text-n-7",
+              ? "rounded-xl border border-danger/40 bg-raised px-4 py-3 font-mono text-fg"
+              : "text-fg-muted",
           )}
         >
           {detail}
@@ -124,7 +136,7 @@ export function TaskStatePanel({
       ) : null}
 
       {meta?.taskId || created || updated ? (
-        <dl className="mt-12 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 border-n-2 border-t pt-4 text-xs text-n-6">
+        <dl className="mt-12 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 border-line border-t pt-4 text-xs text-fg-muted">
           {meta?.taskId ? (
             <>
               <dt>{t("taskIdLabel")}</dt>
@@ -150,9 +162,9 @@ export function TaskStatePanel({
 }
 
 export const primaryActionClass =
-  "inline-flex h-9 items-center gap-2 bg-rail px-4 text-sm font-medium text-rail-ink hover:bg-rail-raised disabled:opacity-60";
+  "inline-flex h-9 items-center gap-2 rounded-full bg-accent-strong px-4 text-sm font-medium text-accent-fg hover:bg-accent disabled:opacity-60";
 const secondaryActionClass =
-  "inline-flex h-9 items-center gap-2 border border-n-3 bg-sheet px-4 text-sm text-ink hover:border-n-5";
+  "inline-flex h-9 items-center gap-2 rounded-full border border-line px-4 text-sm text-fg hover:border-line-strong";
 
 export function BackToReposLink() {
   return (

@@ -33,26 +33,26 @@ export function LiveStepFlow({ steps, streamingAnswer }: LiveStepFlowProps) {
 
   return (
     <div className="mb-8">
-      <p className="mb-2 flex items-center gap-2 font-mono text-n-6 text-xs">
+      <p className="mb-2 flex items-center gap-2 font-mono text-fg-muted text-xs">
         <span
           aria-hidden
-          className="h-1.5 w-1.5 animate-pulse rounded-full bg-rail"
+          className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent-strong"
         />
         <span>{iteration?.title ?? t("agentWorking")}</span>
       </p>
 
       {tools.length > 0 ? (
-        <ol className="space-y-1 border-n-3 border-l pl-3">
+        <ol className="space-y-1 border-line border-l pl-3">
           {tools.map((step) => (
             <li key={step.id} className="flex gap-2 text-xs leading-snug">
-              <span className="w-12 shrink-0 font-mono text-n-6">
+              <span className="w-12 shrink-0 font-mono text-fg-muted">
                 {step.toolName ? toolLabel(step.toolName) : ""}
               </span>
-              <span className="min-w-0 flex-1 text-n-8">{step.title}</span>
+              <span className="min-w-0 flex-1 text-fg">{step.title}</span>
               <span
                 className={cn(
                   "shrink-0 font-mono",
-                  step.status === "error" ? "text-ink" : "text-n-6",
+                  step.status === "error" ? "text-danger" : "text-fg-muted",
                 )}
               >
                 {t(STATUS_KEY[step.status])}
@@ -64,7 +64,7 @@ export function LiveStepFlow({ steps, streamingAnswer }: LiveStepFlowProps) {
 
       {streamingAnswer ? (
         // Plain text while streaming; Markdown renders once the turn is done.
-        <p className="mt-3 whitespace-pre-wrap font-serif text-[0.9375rem] text-ink leading-relaxed">
+        <p className="mt-3 whitespace-pre-wrap font-sans text-[0.9375rem] text-fg leading-relaxed">
           {streamingAnswer}
         </p>
       ) : null}

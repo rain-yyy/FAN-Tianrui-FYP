@@ -103,7 +103,7 @@ interface ChatInterfaceProps {
 }
 
 const iconButtonClass =
-  "inline-flex h-8 w-8 items-center justify-center text-n-6 hover:bg-n-1 hover:text-ink aria-pressed:bg-n-2 aria-pressed:text-ink";
+  "inline-flex h-8 w-8 items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-raised hover:text-fg aria-pressed:bg-accent-soft aria-pressed:text-accent";
 
 function HistoryList({
   userId,
@@ -141,13 +141,13 @@ function HistoryList({
   };
 
   if (loading) {
-    return <p className="p-4 text-n-6 text-sm">{t("loadingChat")}</p>;
+    return <p className="p-4 text-fg-muted text-sm">{t("loadingChat")}</p>;
   }
   if (items.length === 0) {
     return (
       <div className="p-4 text-sm">
-        <p className="text-ink">{t("noChatHistory")}</p>
-        <p className="mt-1 text-n-6">{t("startChatHint")}</p>
+        <p className="text-fg">{t("noChatHistory")}</p>
+        <p className="mt-1 text-fg-muted">{t("startChatHint")}</p>
       </div>
     );
   }
@@ -161,11 +161,11 @@ function HistoryList({
 
   return (
     <div>
-      <p className="px-4 pt-3 pb-1 font-mono text-n-6 text-xs">
+      <p className="px-4 pt-3 pb-1 font-mono text-fg-muted text-xs">
         {repoFullName(repoUrl)}
       </p>
       {error ? (
-        <p role="alert" className="mx-4 my-2 font-mono text-ink text-xs">
+        <p role="alert" className="mx-4 my-2 font-mono text-fg text-xs">
           {t("deleteFailed")}: {error}
         </p>
       ) : null}
@@ -178,7 +178,7 @@ function HistoryList({
               key={chatId}
               className={cn(
                 "group flex items-stretch",
-                active ? "bg-n-2" : "hover:bg-n-1",
+                active ? "bg-raised" : "hover:bg-raised",
               )}
             >
               <button
@@ -187,10 +187,10 @@ function HistoryList({
                 aria-current={active ? "true" : undefined}
                 className="min-w-0 flex-1 px-4 py-2 text-left"
               >
-                <span className="block truncate text-ink text-sm">
+                <span className="block truncate text-fg text-sm">
                   {item.title || `${t("chatDefault")} ${chatId.slice(0, 8)}`}
                 </span>
-                <span className="block font-mono text-n-6 text-xs tabular-nums">
+                <span className="block font-mono text-fg-muted text-xs tabular-nums">
                   {dateFormat.format(new Date(item.created_at))}
                 </span>
               </button>
@@ -199,7 +199,7 @@ function HistoryList({
                   type="button"
                   onClick={() => remove(chatId)}
                   disabled={busy === chatId}
-                  className="shrink-0 px-3 font-medium text-ink text-xs underline underline-offset-2"
+                  className="shrink-0 px-3 font-medium text-fg text-xs underline underline-offset-2"
                 >
                   {busy === chatId ? t("chatDeleting") : t("chatConfirmDelete")}
                 </button>
@@ -209,7 +209,7 @@ function HistoryList({
                   onClick={() => setConfirming(chatId)}
                   aria-label={t("chatDelete")}
                   title={t("chatDelete")}
-                  className="shrink-0 px-3 text-n-6 hover:text-ink [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
+                  className="shrink-0 px-3 text-fg-muted hover:text-fg [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
                 >
                   <Trash2 aria-hidden className="h-3.5 w-3.5" />
                 </button>
@@ -238,17 +238,17 @@ function EmptyState({
     : [];
   return (
     <div className="px-4 py-6">
-      <p className="font-serif text-ink text-lg leading-snug">
+      <p className="font-medium text-fg text-xl leading-snug tracking-tight">
         {t("chatEmptyTitle")}
       </p>
-      <p className="mt-2 text-n-7 text-sm leading-relaxed">
+      <p className="mt-2 text-fg-muted text-sm leading-relaxed">
         {t("chatEmptyDetail")}
       </p>
       {examples.length > 0 ? (
         <>
-          <p className="mt-6 flex items-center gap-2 font-mono text-n-6 text-xs">
+          <p className="mt-6 flex items-center gap-2 font-mono text-fg-muted text-xs">
             <span>{t("chatExamplesFor")}</span>
-            <span className="text-n-7">{page?.code}</span>
+            <span className="text-fg-muted">{page?.code}</span>
           </p>
           <ul className="mt-2 space-y-1.5">
             {examples.map((question) => (
@@ -256,7 +256,7 @@ function EmptyState({
                 <button
                   type="button"
                   onClick={() => onAsk(question)}
-                  className="w-full border border-n-3 bg-sheet px-3 py-2 text-left text-ink text-sm leading-snug hover:border-n-5"
+                  className="w-full rounded-xl border border-line bg-raised px-3 py-2.5 text-left text-fg text-sm leading-snug transition-colors hover:border-accent-line"
                 >
                   {question}
                 </button>
@@ -476,7 +476,7 @@ export default function ChatInterface({
             onClick={() => setOpen(true)}
             aria-label={t("chatOpen")}
             title={t("chatOpenHint")}
-            className="flex flex-col items-center gap-2 px-2 py-3 text-n-7 hover:bg-n-1 hover:text-ink"
+            className="flex flex-col items-center gap-2 px-2 py-3 text-fg-muted hover:bg-raised hover:text-fg"
           >
             <MessageSquare aria-hidden className="h-4 w-4" />
             <span className="text-xs [writing-mode:vertical-rl]">
@@ -487,7 +487,7 @@ export default function ChatInterface({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="fixed right-4 bottom-4 z-40 inline-flex h-10 items-center gap-2 bg-rail px-4 font-medium text-rail-ink text-sm lg:hidden"
+          className="fixed right-4 bottom-4 z-40 inline-flex h-10 items-center gap-2 rounded-full bg-accent-strong px-4 font-medium text-accent-fg text-sm lg:hidden"
         >
           <MessageSquare aria-hidden className="h-4 w-4" />
           {t("chatAsk")}
@@ -511,11 +511,13 @@ export default function ChatInterface({
       }}
       className="fixed inset-0 z-50 flex flex-col bg-panel lg:static lg:z-auto lg:w-[clamp(20rem,28vw,36rem)] lg:shrink-0 lg:overflow-hidden lg:rounded-2xl lg:border lg:border-line"
     >
-      <header className="flex h-12 shrink-0 items-center gap-1 border-n-3 border-b pr-1 pl-4">
-        <h2 className="min-w-0 flex-1 truncate font-medium text-ink text-sm">
+      <header className="flex h-12 shrink-0 items-center gap-1 border-line border-b pr-2 pl-4">
+        <h2 className="min-w-0 flex-1 truncate font-medium text-fg text-sm">
           {t("chatAsk")}
           {page ? (
-            <span className="ml-2 font-mono text-n-6 text-xs">{page.code}</span>
+            <span className="ml-2 font-mono text-fg-muted text-xs">
+              {page.code}
+            </span>
           ) : null}
         </h2>
         <button
@@ -572,7 +574,7 @@ export default function ChatInterface({
         <div className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto">
           <div className="grow px-4 py-4">
             {loadingChat ? (
-              <p className="text-n-6 text-sm">{t("loadingChat")}</p>
+              <p className="text-fg-muted text-sm">{t("loadingChat")}</p>
             ) : messages.length === 0 && !isStreaming ? (
               <EmptyState page={page} onAsk={(q) => void ask(q)} />
             ) : (
@@ -598,7 +600,7 @@ export default function ChatInterface({
               <button
                 type="button"
                 onClick={retry}
-                className="mb-4 inline-flex items-center gap-2 border border-n-3 bg-sheet px-3 py-1.5 text-ink text-sm hover:border-n-5"
+                className="mb-4 inline-flex items-center gap-2 rounded-full border border-line px-3 py-1.5 text-fg text-sm hover:border-line-strong"
               >
                 <RotateCw aria-hidden className="h-3.5 w-3.5" />
                 {t("retry")}
@@ -613,9 +615,9 @@ export default function ChatInterface({
           event.preventDefault();
           submit();
         }}
-        className="shrink-0 border-n-3 border-t p-3"
+        className="shrink-0 p-3"
       >
-        <div className="flex items-end gap-2 border border-n-3 bg-sheet focus-within:border-rail">
+        <div className="flex items-end gap-2 rounded-3xl border border-line bg-raised pl-2 focus-within:border-accent-line">
           <textarea
             ref={inputRef}
             value={input}
@@ -633,7 +635,7 @@ export default function ChatInterface({
                 : t("chatPlaceholder")
             }
             aria-label={t("chatInputLabel")}
-            className="field-sizing-content max-h-40 min-h-[3.25rem] flex-1 resize-none bg-transparent px-3 py-2.5 text-ink text-sm leading-relaxed outline-none placeholder:text-n-6"
+            className="field-sizing-content max-h-40 min-h-[3.25rem] flex-1 resize-none bg-transparent px-3 py-2.5 text-fg text-sm leading-relaxed outline-none placeholder:text-fg-faint"
           />
           {isStreaming ? (
             <button
@@ -641,7 +643,7 @@ export default function ChatInterface({
               onClick={stop}
               aria-label={t("chatStop")}
               title={t("chatStop")}
-              className="m-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center bg-ink text-sheet"
+              className="m-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fg text-bg"
             >
               <Square aria-hidden className="h-3 w-3 fill-current" />
             </button>
@@ -651,7 +653,7 @@ export default function ChatInterface({
               disabled={!input.trim()}
               aria-label={t("chatSend")}
               title={t("chatSend")}
-              className="m-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center bg-rail text-rail-ink disabled:bg-n-2 disabled:text-n-6"
+              className="m-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-strong text-accent-fg disabled:bg-overlay disabled:text-fg-muted"
             >
               <ArrowUp aria-hidden className="h-4 w-4" />
             </button>
