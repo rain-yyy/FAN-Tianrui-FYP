@@ -25,6 +25,7 @@ import {
 } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import type { TocNode } from "@/lib/wikiToc";
 
 /**
  * Mirrors the backend's _generate_chat_preview_sync so a new session gets a
@@ -95,6 +96,9 @@ interface ChatInterfaceProps {
   page?: ChatPage;
   currentPageContext?: string;
   initialChatId?: string;
+  /** `toc.byFile`, so answer notes can name the wiki chapters of a file. */
+  filePages?: Map<string, TocNode[]>;
+  onEvidence?: (path: string | null) => void;
 }
 
 const iconButtonClass =
@@ -270,6 +274,8 @@ export default function ChatInterface({
   page,
   currentPageContext,
   initialChatId,
+  filePages,
+  onEvidence,
 }: ChatInterfaceProps) {
   const [open, setOpenState] = useState(initialOpen);
   const [view, setView] = useState<"chat" | "history">("chat");
@@ -554,22 +560,17 @@ export default function ChatInterface({
                   key={message.id}
                   message={message}
                   repoUrl={repoUrl}
+                  filePages={filePages}
+                  onEvidence={onEvidence}
                 />
               ))
             )}
 
             {isStreaming ? (
-              <div className="mb-6 border-n-3 border-l-2 pl-3">
-                <LiveStepFlow
-                  steps={liveSteps}
-                  isAgent
-                  currentPhase={t("agentWorking")}
-                  streamingAnswer={streamingAnswer}
-                />
-                {liveSteps.length === 0 ? (
-                  <p className="text-n-7 text-sm">{t("agentWorking")}</p>
-                ) : null}
-              </div>
+              <LiveStepFlow
+                steps={liveSteps}
+                streamingAnswer={streamingAnswer}
+              />
             ) : null}
 
             {retryQuestion ? (

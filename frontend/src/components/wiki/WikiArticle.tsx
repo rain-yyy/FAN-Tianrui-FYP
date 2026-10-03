@@ -10,6 +10,7 @@ import Mermaid from "@/components/Mermaid";
 import { useCodeHref } from "@/components/wiki/WikiToc";
 import { parseCitations } from "@/lib/citations";
 import { t } from "@/lib/i18n";
+import { readingProse } from "@/lib/prose";
 import { cn } from "@/lib/utils";
 import { type MarginNote, placeNotes } from "@/lib/wikiNotes";
 import { slotSwatch, type TocNode } from "@/lib/wikiToc";
@@ -32,18 +33,6 @@ export interface WikiPageBody {
 
 const REMARK_PLUGINS = [remarkGfm];
 const REHYPE_PLUGINS = [rehypeHighlight];
-
-const proseClass = cn(
-  "prose max-w-none font-serif text-[1.0625rem] leading-relaxed text-ink",
-  "prose-headings:font-serif prose-headings:font-semibold prose-headings:text-ink",
-  "prose-p:text-ink prose-li:text-ink prose-strong:text-ink",
-  "prose-a:text-rail prose-a:underline-offset-2",
-  "prose-code:font-mono prose-code:text-[0.875em] prose-code:font-normal prose-code:text-ink",
-  "prose-code:before:content-none prose-code:after:content-none",
-  "prose-pre:rounded-none prose-pre:border prose-pre:border-n-3 prose-pre:bg-sheet prose-pre:text-ink",
-  "prose-blockquote:border-n-4 prose-blockquote:text-n-8",
-  "prose-th:text-ink prose-td:text-ink prose-hr:border-n-3",
-);
 
 /**
  * Main column and margin column; children pick a column explicitly. Keyed to
@@ -87,7 +76,7 @@ const Markdown = memo(function Markdown({
   );
 
   return (
-    <div className={proseClass}>
+    <div className={readingProse}>
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={REHYPE_PLUGINS}

@@ -374,6 +374,8 @@ export default function WikiViewer({
           repoUrl={repoUrl}
           page={chatPage}
           currentPageContext={chatContext}
+          filePages={toc?.byFile}
+          onEvidence={setEvidencePath}
           initialChatId={initialChatId}
         />
       ) : null}
