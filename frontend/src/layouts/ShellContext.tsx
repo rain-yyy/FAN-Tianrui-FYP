@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 
-export interface ShellRepo {
+interface ShellRepo {
   /** Full `owner/name` label, e.g. `tiangolo/fastapi`. */
   fullName: string;
   /** Route of the wiki workspace that registered this repo. */

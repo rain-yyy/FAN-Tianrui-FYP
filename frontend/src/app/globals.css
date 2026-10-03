@@ -71,27 +71,11 @@
 }
 
 /*
- * Legacy aliases for components not yet migrated to the tokens above.
- * Remove once nothing references them.
+ * Legacy alias still used by unmigrated components (Auth, MessageItem).
+ * Delete once nothing references it.
  */
 @theme inline {
-  --color-background: var(--color-paper);
-  --color-foreground: var(--color-ink);
-  --color-card: var(--color-sheet);
-  --color-card-foreground: var(--color-ink);
-  --color-primary: var(--color-rail);
-  --color-primary-foreground: var(--color-rail-ink);
-  --color-secondary: var(--color-n-1);
-  --color-secondary-foreground: var(--color-n-8);
-  --color-muted: var(--color-n-1);
   --color-muted-foreground: var(--color-n-6);
-  --color-accent: var(--color-rail-raised);
-  --color-accent-foreground: var(--color-rail-ink);
-  --color-destructive: var(--color-evidence);
-  --color-destructive-foreground: #ffffff;
-  --color-border: var(--color-n-2);
-  --color-input: var(--color-n-3);
-  --color-ring: var(--color-rail);
 }
 
 :root {

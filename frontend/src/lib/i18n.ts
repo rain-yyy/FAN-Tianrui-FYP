@@ -11,13 +11,7 @@ const STRINGS = {
   userMenu: "Account",
   unknownUser: "Unknown user",
 
-  apiOnline: "API SYSTEM: ONLINE",
-  apiOffline: "API SYSTEM: OFFLINE",
   dashboardTitle: "Which repo would you like to understand?",
-  inputPlaceholder: "Paste a GitHub repository URL...",
-  generateButton: "Generate",
-  generating: "Generating...",
-  taskFailed: "Task failed",
   retry: "Retry",
 
   historyTitle: "History",
@@ -30,10 +24,7 @@ const STRINGS = {
   chatHistory: "Chat History",
   noChatHistory: "No conversations yet",
   startChatHint: "Conversations will be saved after you start",
-  newChat: "New Chat",
-  askPlaceholder: "Type your question...",
   deleteConfirm: "Delete failed, please retry",
-  noSources: "No sources",
   sources: "Sources",
   chatDefault: "Chat",
   loadingChat: "Loading conversation...",
@@ -50,7 +41,6 @@ const STRINGS = {
 
   loading: "Loading...",
   error: "Something went wrong",
-  notFoundIndex: "No vector index found. Please generate docs first.",
 } as const;
 
 export type DictKey = keyof typeof STRINGS;
