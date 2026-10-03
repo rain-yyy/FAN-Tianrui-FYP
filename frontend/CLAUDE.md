@@ -16,7 +16,7 @@ No test suite. Verify UI changes in a browser: run `npm run dev`, open `http://l
 
 ## Rules
 
-- **Biome is the linter and formatter** (`biome.jsonc`): double quotes, semicolons, 80-column lines, sorted imports, React rules. Existing files still fail `npm run lint` (about 100 legacy errors). **Make every file you touch pass `npx biome check <file>`; don't clean up files you aren't changing.** Formatting a legacy file rewrites the whole thing, so leave a legacy file alone unless the task needs it. Pass `biome check --write` explicit file paths, never a directory, or it reformats untouched legacy files.
+- **Biome is the linter and formatter** (`biome.jsonc`): double quotes, semicolons, 80-column lines, sorted imports, React rules. `npm run lint` currently passes with 0 errors and 0 warnings (the last 12 legacy files were formatted on 2026-10-03; one remaining info notice says the `biome.jsonc` schema can be migrated with `biome migrate`). **Keep it at 0: make every file you touch pass `npx biome check <file>`.** Pass `biome check --write` explicit file paths, never a directory.
 - Use the `@/` alias for `src/*`. Put UI copy in `src/lib/i18n.ts` (`t("key")`, English only). Use design tokens (below), not raw Tailwind palette colors like `stone-*` or `sky-*`.
 - Don't change the backend or invent endpoints. Task state comes **only** from `POST /task/{id}`; never infer it on the client.
 - Follow the `vercel-react-best-practices` skill: lazy-load heavy components, avoid request waterfalls, clean up polling and SSE on unmount, and keep streamed tokens from re-rendering the whole tree.

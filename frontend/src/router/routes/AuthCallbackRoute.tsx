@@ -1,3 +1,3 @@
-'use client';
+"use client";
 
-export { default } from '@/views/AuthCallbackPage';
+export { default } from "@/views/AuthCallbackPage";

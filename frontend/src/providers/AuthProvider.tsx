@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { User } from '@supabase/supabase-js';
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import type { User } from "@supabase/supabase-js";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 interface AuthContextValue {
   user: User | null;
@@ -17,7 +17,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    document.documentElement.lang = 'en';
+    document.documentElement.lang = "en";
   }, []);
 
   useEffect(() => {
@@ -49,11 +49,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       isLoading,
       signOut: async () => {
         await supabase.auth.signOut();
-        localStorage.removeItem('wiki_gen_task_id');
-        localStorage.removeItem('wiki_gen_repo_url');
+        localStorage.removeItem("wiki_gen_task_id");
+        localStorage.removeItem("wiki_gen_repo_url");
       },
     }),
-    [user, isLoading]
+    [user, isLoading],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -62,7 +62,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
+    throw new Error("useAuth must be used within AuthProvider");
   }
   return context;
 };
