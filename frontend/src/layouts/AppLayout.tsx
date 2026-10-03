@@ -1,160 +1,223 @@
-'use client';
+"use client";
 
-import { History, Home, LogOut, FileCode2, User } from 'lucide-react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { useState, useRef, useEffect } from 'react';
-import { cn } from '@/lib/utils';
-import { useAuth } from '@/providers/AuthProvider';
-import { prefetchRouteModule } from '@/router/prefetch';
-import { t } from '@/lib/i18n';
+import { History, LayoutGrid, LogOut, type LucideIcon } from "lucide-react";
+import Image from "next/image";
+import { useEffect, useId, useRef, useState } from "react";
+import { Link, NavLink, Outlet, useMatch } from "react-router-dom";
+import { ShellProvider, useShellRepo } from "@/layouts/ShellContext";
+import { t } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/AuthProvider";
+import { prefetchRouteModule } from "@/router/prefetch";
 
-export default function AppLayout() {
+type PrefetchKey = Parameters<typeof prefetchRouteModule>[0];
+
+interface RailLinkProps {
+  to: string;
+  icon: LucideIcon;
+  label: string;
+  title: string;
+  prefetch?: PrefetchKey;
+}
+
+const railItemClass = (isActive: boolean) =>
+  cn(
+    "relative flex flex-col items-center justify-center gap-1 rounded-md",
+    "h-12 w-12 md:h-14 md:w-14 text-xs font-medium transition-colors",
+    isActive
+      ? "bg-rail-raised text-rail-ink"
+      : "text-rail-muted hover:bg-rail-raised/60 hover:text-rail-ink",
+  );
+
+function RailLink({ to, icon: Icon, label, title, prefetch }: RailLinkProps) {
+  return (
+    <NavLink
+      to={to}
+      title={title}
+      onMouseEnter={prefetch ? () => prefetchRouteModule(prefetch) : undefined}
+      onFocus={prefetch ? () => prefetchRouteModule(prefetch) : undefined}
+      className={({ isActive }) => railItemClass(isActive)}
+    >
+      {({ isActive }) => (
+        <>
+          {isActive ? (
+            <span
+              aria-hidden
+              className="absolute inset-y-2 -left-1 w-0.5 rounded-full bg-rail-ink md:-left-2"
+            />
+          ) : null}
+          <Icon aria-hidden className="h-5 w-5" strokeWidth={1.75} />
+          <span className="leading-none">{label}</span>
+        </>
+      )}
+    </NavLink>
+  );
+}
+
+function RepoMark() {
+  const repo = useShellRepo();
+  const isWiki = useMatch("/app/wiki/*") !== null;
+  if (!repo) return null;
+
+  const name = repo.fullName.split("/").pop() ?? repo.fullName;
+  return (
+    <Link
+      to={repo.href}
+      title={repo.fullName}
+      aria-label={t("shellCurrentRepo", { repo: repo.fullName })}
+      aria-current={isWiki ? "page" : undefined}
+      className={railItemClass(isWiki)}
+    >
+      <span
+        aria-hidden
+        className="flex h-6 w-6 items-center justify-center rounded-sm border border-rail-line font-mono text-xs uppercase"
+      >
+        {name.slice(0, 2)}
+      </span>
+      <span className="max-w-full truncate px-1 font-mono leading-none">
+        {name}
+      </span>
+    </Link>
+  );
+}
+
+function UserMenu() {
   const { user, signOut } = useAuth();
-  const identity = user?.email ?? user?.phone ?? user?.id ?? 'Unknown User';
-  const navigate = useNavigate();
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const profileRef = useRef<HTMLDivElement>(null);
+  const identity = user?.email ?? user?.phone ?? user?.id ?? t("unknownUser");
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
-        setIsProfileOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--background)]">
-      <header className="h-16 border-b border-stone-200 bg-white/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between sticky top-0 z-40 shadow-sm shadow-stone-900/5">
-        <div className="flex items-center gap-6">
+    <div className="relative" ref={rootRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-label={t("userMenu")}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        title={identity}
+        className={cn(
+          "flex h-9 w-9 items-center justify-center rounded-full border font-mono text-sm uppercase transition-colors",
+          open
+            ? "border-rail-ink bg-rail-raised text-rail-ink"
+            : "border-rail-line text-rail-muted hover:border-rail-muted hover:text-rail-ink",
+        )}
+      >
+        {identity.slice(0, 1)}
+      </button>
+
+      {open ? (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label={t("userMenu")}
+          className="absolute top-full right-0 z-50 mt-2 w-64 border border-n-3 bg-sheet text-ink shadow-[0_1px_0_var(--color-n-2)] md:top-auto md:right-auto md:bottom-0 md:left-full md:mt-0 md:ml-3"
+        >
+          <div className="border-n-2 border-b px-4 py-3">
+            <p className="text-n-6 text-xs">{t("signedInAs")}</p>
+            <p className="mt-0.5 truncate text-sm font-medium" title={identity}>
+              {identity}
+            </p>
+          </div>
           <button
-            onClick={() => navigate('/app/dashboard')}
-            className="flex items-center gap-3 hover:opacity-90 transition-opacity group"
-            aria-label="Go to Dashboard"
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              void signOut();
+            }}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-n-1 focus-visible:bg-n-1"
           >
-            <div className="w-9 h-9 rounded-xl bg-sky-50 border border-sky-200/80 flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm">
-              {/* <FileCode2 className="w-5 h-5 text-sky-700" /> */}
-              <img src="/logo.png" alt="GitReader" className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-base font-semibold text-stone-900 tracking-tight">
-                GitReader
-              </p>
-            </div>
+            <LogOut aria-hidden className="h-4 w-4 text-n-6" />
+            {t("signOut")}
           </button>
-
-          <div className="h-6 w-px bg-stone-200 hidden md:block" />
-
-          <nav className="hidden md:flex items-center gap-2">
-            <NavLink
-              to="/app/dashboard"
-              onMouseEnter={() => prefetchRouteModule('dashboard')}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200',
-                  isActive
-                    ? 'bg-sky-100 text-sky-900 border border-sky-200/80'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border border-transparent'
-                )
-              }
-            >
-              <Home className="w-4 h-4" />
-              {t('dashboard')}
-            </NavLink>
-            <NavLink
-              to="/app/history"
-              onMouseEnter={() => prefetchRouteModule('history')}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200',
-                  isActive
-                    ? 'bg-sky-100 text-sky-900 border border-sky-200/80'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border border-transparent'
-                )
-              }
-            >
-              <History className="w-4 h-4" />
-              {t('history')}
-            </NavLink>
-          </nav>
         </div>
-
-        <div className="flex items-center gap-4">
-          <div className="md:hidden flex items-center gap-1.5 mr-2">
-            <NavLink
-              to="/app/dashboard"
-              className={({ isActive }) =>
-                cn(
-                  'p-2 rounded-xl transition-all border',
-                  isActive
-                    ? 'bg-sky-100 text-sky-900 border-sky-200 shadow-sm'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border-transparent'
-                )
-              }
-            >
-              <Home className="w-5 h-5" />
-            </NavLink>
-            <NavLink
-              to="/app/history"
-              className={({ isActive }) =>
-                cn(
-                  'p-2 rounded-xl transition-all border',
-                  isActive
-                    ? 'bg-sky-100 text-sky-900 border-sky-200 shadow-sm'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border-transparent'
-                )
-              }
-            >
-              <History className="w-5 h-5" />
-            </NavLink>
-          </div>
-
-          <div className="relative" ref={profileRef}>
-            <button
-              onClick={() => setIsProfileOpen(!isProfileOpen)}
-              className="w-9 h-9 rounded-full bg-stone-100 border border-stone-200 flex items-center justify-center hover:ring-2 hover:ring-sky-200 hover:border-sky-300 transition-all focus:outline-none group shadow-sm"
-              aria-label="User menu"
-            >
-              <User className="w-5 h-5 text-stone-600 group-hover:text-sky-800 transition-colors" />
-            </button>
-
-            {isProfileOpen && (
-              <div className="absolute right-0 mt-3 w-64 rounded-2xl border border-stone-200 bg-white shadow-xl shadow-stone-900/10 overflow-hidden py-1 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="px-4 py-4 border-b border-stone-100 bg-stone-50/80">
-                  <p className="text-xs text-stone-500 font-medium mb-1">{t('signedInAs')}</p>
-                  <p className="text-sm font-semibold text-stone-900 truncate flex items-center gap-2" title={identity}>
-                    <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                    {identity}
-                  </p>
-                </div>
-                <div className="p-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsProfileOpen(false);
-                      void signOut();
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-rose-700 hover:text-rose-800 hover:bg-rose-50 rounded-xl transition-all font-medium group"
-                  >
-                    <LogOut className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-                    {t('signOut')}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 w-full max-w-[1600px] mx-auto p-4 md:p-8 flex flex-col relative">
-        <Outlet />
-      </main>
-
-      <footer className="h-10 border-t border-stone-200 bg-white/60 px-4 md:px-8 flex items-center justify-center text-xs text-stone-500">
-        Project Wiki Generator · Powered by AI
-      </footer>
+      ) : null}
     </div>
+  );
+}
+
+function Rail() {
+  return (
+    <header className="z-40 flex h-14 shrink-0 items-center gap-2 bg-rail px-2 text-rail-ink md:h-dvh md:w-20 md:flex-col md:gap-3 md:px-0 md:py-3">
+      <Link
+        to="/app/dashboard"
+        aria-label={t("shellHome")}
+        title="GitReader"
+        className="flex shrink-0 flex-col items-center gap-1 rounded-md p-1 md:w-full"
+      >
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-sheet">
+          <Image src="/logo.png" alt="" width={28} height={28} priority />
+        </span>
+        <span className="hidden font-serif text-xs tracking-wide md:block">
+          GitReader
+        </span>
+      </Link>
+
+      <div
+        aria-hidden
+        className="mx-1 h-8 w-px bg-rail-line md:mx-0 md:h-px md:w-10"
+      />
+
+      <nav
+        aria-label={t("shellNav")}
+        className="flex flex-1 items-center gap-1 md:flex-none md:flex-col"
+      >
+        <RepoMark />
+        <RailLink
+          to="/app/dashboard"
+          icon={LayoutGrid}
+          label={t("navRepos")}
+          title={t("dashboard")}
+          prefetch="dashboard"
+        />
+        <RailLink
+          to="/app/history"
+          icon={History}
+          label={t("history")}
+          title={t("history")}
+          prefetch="history"
+        />
+      </nav>
+
+      <div className="md:mt-auto">
+        <UserMenu />
+      </div>
+    </header>
+  );
+}
+
+export default function AppLayout() {
+  return (
+    <ShellProvider>
+      <div className="flex h-dvh flex-col bg-paper md:flex-row">
+        <Rail />
+        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-4 md:p-8">
+          <Outlet />
+        </main>
+      </div>
+    </ShellProvider>
   );
 }

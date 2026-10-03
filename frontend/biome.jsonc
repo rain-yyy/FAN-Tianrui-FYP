@@ -3,7 +3,8 @@
   "vcs": {
     "enabled": true,
     "clientKind": "git",
-    "useIgnoreFile": true        // 自动跳过 .gitignore 里的文件
+    "root": "..",
+    "useIgnoreFile": true // 自动跳过 .gitignore 里的文件
   },
   "files": {
     "includes": ["src/**", "!**/dist", "!**/*.gen.ts"]
@@ -21,22 +22,27 @@
       "trailingCommas": "all"
     }
   },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true // 允许 @theme / @plugin 等 Tailwind v4 语法
+    }
+  },
   "linter": {
     "enabled": true,
     "rules": {
       "recommended": true,
       "correctness": {
         "noUnusedVariables": "warn",
-        "useExhaustiveDependencies": "warn"   // 检查 Hooks 依赖数组
+        "useExhaustiveDependencies": "warn" // 检查 Hooks 依赖数组
       }
     },
     "domains": {
-      "react": "recommended"     // 启用 React 相关规则
+      "react": "recommended" // 启用 React 相关规则
     }
   },
   "assist": {
     "actions": {
-      "source": { "organizeImports": "on" }   // 自动整理 import 顺序
+      "source": { "organizeImports": "on" } // 自动整理 import 顺序
     }
   }
 }

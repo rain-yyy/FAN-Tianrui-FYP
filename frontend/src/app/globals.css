@@ -1,65 +1,118 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-:root {
-  /* Bright paper + ink — sky primary, teal accent (no violet / magenta stack) */
-  --background: #fafaf9;
-  --foreground: #1c1917;
+/*
+ * GitReader design tokens — Tufte-style scientific publishing.
+ * Cool white paper, ink-black text, deep indigo shell rail.
+ * Directory colours are data colours; one red marks "current evidence" only.
+ * Flat fills, hairlines, zero gradients.
+ */
+@theme {
+  /* Surfaces & text */
+  --color-paper: #f8f9fb;
+  --color-sheet: #ffffff;
+  --color-ink: #16181d;
 
-  --card: #ffffff;
-  --card-foreground: #1c1917;
+  /* 9-step cool neutral ramp: lighter = sparser, darker = denser */
+  --color-n-1: #f1f3f6;
+  --color-n-2: #e4e7ec;
+  --color-n-3: #d0d5dd;
+  --color-n-4: #a9b0bc;
+  --color-n-5: #858d9b;
+  --color-n-6: #5f6775;
+  --color-n-7: #474e5a;
+  --color-n-8: #323843;
+  --color-n-9: #1f242c;
 
-  --primary: #0284c7;
-  --primary-foreground: #ffffff;
+  /* Shell rail (deep indigo) */
+  --color-rail: #23205c;
+  --color-rail-raised: #2f2b74;
+  --color-rail-line: #3d3984;
+  --color-rail-ink: #eceaf8;
+  --color-rail-muted: #b3b0dc;
 
-  --secondary: #f5f5f4;
-  --secondary-foreground: #292524;
+  /* The one red: current evidence */
+  --color-evidence: #c8312b;
+  --color-evidence-tint: #fbeceb;
 
-  --muted: #f5f5f4;
-  --muted-foreground: #78716c;
+  /*
+   * Directory category colours, fixed order, never cycled.
+   * Validated (dataviz validate_palette, light, surface paper): adjacent CVD
+   * ΔE >= 9.1, normal-vision ΔE >= 19.6. Several sit below 3:1 on paper, so a
+   * directory colour never carries identity alone — always pair with its code.
+   * Directories past slot 7 fold into --color-dir-other.
+   * `-on` is the text colour on a solid selected fill (>= 4.5:1).
+   */
+  --color-dir-1: #2670cc;
+  --color-dir-1-on: #ffffff;
+  --color-dir-2: #eb6834;
+  --color-dir-2-on: #16181d;
+  --color-dir-3: #1baf7a;
+  --color-dir-3-on: #16181d;
+  --color-dir-4: #eda100;
+  --color-dir-4-on: #16181d;
+  --color-dir-5: #e87ba4;
+  --color-dir-5-on: #16181d;
+  --color-dir-6: #008300;
+  --color-dir-6-on: #ffffff;
+  --color-dir-7: #4a3aa7;
+  --color-dir-7-on: #ffffff;
+  --color-dir-other: #858d9b;
+  --color-dir-other-on: #16181d;
 
-  --accent: #0d9488;
-  --accent-foreground: #ffffff;
+  /* Type: serif reading text, durable sans UI, mono code + tabular figures */
+  --font-serif:
+    var(--font-source-serif), ui-serif, Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
 
-  --destructive: #dc2626;
-  --destructive-foreground: #ffffff;
-
-  --border: #e7e5e4;
-  --input: #e7e5e4;
-  --ring: #0284c7;
+  /* Reading measure for body text */
+  --container-measure: 68ch;
 }
 
+/*
+ * Legacy aliases for components not yet migrated to the tokens above.
+ * Remove once nothing references them.
+ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-background: var(--color-paper);
+  --color-foreground: var(--color-ink);
+  --color-card: var(--color-sheet);
+  --color-card-foreground: var(--color-ink);
+  --color-primary: var(--color-rail);
+  --color-primary-foreground: var(--color-rail-ink);
+  --color-secondary: var(--color-n-1);
+  --color-secondary-foreground: var(--color-n-8);
+  --color-muted: var(--color-n-1);
+  --color-muted-foreground: var(--color-n-6);
+  --color-accent: var(--color-rail-raised);
+  --color-accent-foreground: var(--color-rail-ink);
+  --color-destructive: var(--color-evidence);
+  --color-destructive-foreground: #ffffff;
+  --color-border: var(--color-n-2);
+  --color-input: var(--color-n-3);
+  --color-ring: var(--color-rail);
+}
 
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+:root {
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
-  background-image:
-    radial-gradient(circle at 18% 0%, rgba(14, 165, 233, 0.07), transparent 42%),
-    radial-gradient(circle at 88% 8%, rgba(13, 148, 136, 0.05), transparent 38%);
   min-height: 100vh;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--color-n-2);
+  color: var(--color-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-rail);
+  outline-offset: 2px;
 }
 
 /* Remove default backtick pseudo-elements added by @tailwindcss/typography around inline <code> */
@@ -68,7 +121,7 @@ body {
   content: none;
 }
 
-/* Custom Scrollbar */
+/* Scrollbar: hairline thumb on paper */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -77,9 +130,24 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d6d3d1;
+  background: var(--color-n-3);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #a8a29e;
+  background: var(--color-n-4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: must beat component motion utilities */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: must beat component motion utilities */
+    animation-iteration-count: 1 !important;
+    /* biome-ignore lint/complexity/noImportantStyles: must beat component motion utilities */
+    transition-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: must beat component motion utilities */
+    scroll-behavior: auto !important;
+  }
 }

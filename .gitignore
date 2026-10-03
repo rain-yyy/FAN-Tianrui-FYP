@@ -34,3 +34,8 @@ frontend/.env.local
 /.agents/
 /.claude/skills/
 skills-lock.json
+
+#impeccable
+/frontend/.impeccable/
+/frontend/PRODUCT.md
+/Document/FRONTEND_REDESIGN_PLAN.md
