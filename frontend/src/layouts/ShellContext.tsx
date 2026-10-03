@@ -16,16 +16,24 @@ interface ShellRepo {
   href: string;
 }
 
+interface ShellChat {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}
+
 interface ShellContextValue {
   repo: ShellRepo | null;
   setRepo: (repo: ShellRepo | null) => void;
+  chat: ShellChat | null;
+  setChat: (chat: ShellChat | null) => void;
 }
 
 const ShellContext = createContext<ShellContextValue | null>(null);
 
 export function ShellProvider({ children }: { children: ReactNode }) {
   const [repo, setRepo] = useState<ShellRepo | null>(null);
-  const value = useMemo(() => ({ repo, setRepo }), [repo]);
+  const [chat, setChat] = useState<ShellChat | null>(null);
+  const value = useMemo(() => ({ repo, setRepo, chat, setChat }), [repo, chat]);
   return (
     <ShellContext.Provider value={value}>{children}</ShellContext.Provider>
   );
@@ -33,6 +41,10 @@ export function ShellProvider({ children }: { children: ReactNode }) {
 
 export function useShellRepo(): ShellRepo | null {
   return useContext(ShellContext)?.repo ?? null;
+}
+
+export function useShellChat(): ShellChat | null {
+  return useContext(ShellContext)?.chat ?? null;
 }
 
 /** `https://github.com/owner/name(.git)` → `owner/name`. */
@@ -56,4 +68,20 @@ export function useRegisterShellRepo(repoUrl: string, href: string) {
     setRepo({ fullName: repoFullName(repoUrl), href });
     return () => setRepo(null);
   }, [setRepo, repoUrl, href]);
+}
+
+/**
+ * Lets the chat panel report its open state to the top bar's Chat button
+ * while mounted. `setOpen` must be stable.
+ */
+export function useRegisterShellChat(
+  open: boolean,
+  setOpen: (open: boolean) => void,
+) {
+  const setChat = useContext(ShellContext)?.setChat;
+  useEffect(() => {
+    if (!setChat) return;
+    setChat({ open, setOpen });
+    return () => setChat(null);
+  }, [setChat, open, setOpen]);
 }

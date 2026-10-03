@@ -8,6 +8,7 @@ const STRINGS = {
   shellNav: "Main",
   shellFindRepo: "Find or add a repository",
   shellCopyLink: "Copy link",
+  shellChat: "Chat",
   shellLinkCopied: "Link copied",
   userMenu: "Account",
   unknownUser: "Unknown user",

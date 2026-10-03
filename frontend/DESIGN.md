@@ -35,7 +35,7 @@ Dark-only, warm and quiet: a charcoal canvas, rounded panels with hairline borde
 
 ## Layout
 
-- **Top bar** (all `/app` pages): GitReader mark, a pill showing the current repo (or "Find or add a repository") that links home, History, "Copy link" (wiki only), `?` help, account menu.
+- **Top bar** (all `/app` pages): GitReader mark, a pill showing the current repo (or "Find or add a repository") that links home, History, "Copy link" and Chat (wiki only; Chat toggles the chat card), `?` help, account menu.
 - **Reading desk** (`/app/wiki/:taskId`): three columns that scroll independently. TOC list | article card (margin notes become a second column at `@5xl`) | chat card, collapsible to a strip. Below `md` the TOC is a full-screen dialog; below `lg` the chat is full screen.
 - **Home:** centred wordmark, subtitle, pill URL field with an orange wash, then the user's repos as rows (or four feature cards when there are none).
 - **History:** rows with the repo URL, date, a status pill and a delete button.

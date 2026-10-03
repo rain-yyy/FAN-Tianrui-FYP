@@ -16,7 +16,7 @@ import { LiveStepFlow } from "@/components/LiveStepFlow";
 import { type DisplayMessage, MessageItem } from "@/components/MessageItem";
 import { ChatStreamStopped, useChatStream } from "@/hooks/useChatStream";
 import { useShortcut } from "@/hooks/useShortcut";
-import { repoFullName } from "@/layouts/ShellContext";
+import { repoFullName, useRegisterShellChat } from "@/layouts/ShellContext";
 import {
   api,
   type ChatHistoryItem,
@@ -289,10 +289,11 @@ export default function ChatInterface({
   const { isStreaming, liveSteps, streamingAnswer, sendMessage, stop } =
     useChatStream();
 
-  const setOpen = (next: boolean) => {
+  const setOpen = useCallback((next: boolean) => {
     setOpenState(next);
     rememberOpen(next);
-  };
+  }, []);
+  useRegisterShellChat(open, setOpen);
 
   // `/` opens the panel and puts the cursor in the question box. The focus
   // happens in an effect because the box may not be mounted yet.

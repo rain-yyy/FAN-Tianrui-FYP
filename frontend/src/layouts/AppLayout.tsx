@@ -6,6 +6,7 @@ import {
   History,
   Link2,
   LogOut,
+  MessageSquare,
   Search,
 } from "lucide-react";
 import Image from "next/image";
@@ -13,7 +14,11 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useMatch } from "react-router-dom";
 import { ShortcutHelp } from "@/components/wiki/ShortcutHelp";
 import { useShortcut } from "@/hooks/useShortcut";
-import { ShellProvider, useShellRepo } from "@/layouts/ShellContext";
+import {
+  ShellProvider,
+  useShellChat,
+  useShellRepo,
+} from "@/layouts/ShellContext";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
@@ -80,6 +85,27 @@ function CopyLinkButton() {
       <span className="hidden sm:inline">
         {copied ? t("shellLinkCopied") : t("shellCopyLink")}
       </span>
+    </button>
+  );
+}
+
+function ChatButton() {
+  const chat = useShellChat();
+  if (!chat) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => chat.setOpen(!chat.open)}
+      aria-pressed={chat.open}
+      className={cn(
+        "inline-flex h-9 items-center gap-2 rounded-full border px-3 text-sm transition-colors",
+        chat.open
+          ? "border-accent-line bg-accent-soft text-accent"
+          : "border-accent-line text-accent hover:bg-accent-soft",
+      )}
+    >
+      <MessageSquare aria-hidden className="h-4 w-4" />
+      <span className="hidden sm:inline">{t("shellChat")}</span>
     </button>
   );
 }
@@ -198,6 +224,7 @@ function TopBar({ onHelp }: { onHelp: () => void }) {
           <span className="hidden sm:inline">{t("history")}</span>
         </NavLink>
         {inWiki ? <CopyLinkButton /> : null}
+        <ChatButton />
         <button
           type="button"
           onClick={onHelp}
