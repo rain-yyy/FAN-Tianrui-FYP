@@ -1,31 +1,16 @@
 "use client";
 
-import {
-  List,
-  Map as MapIcon,
-  PanelLeftClose,
-  PanelLeftOpen,
-  X,
-} from "lucide-react";
-import dynamic from "next/dynamic";
+import { List, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import ChatInterface from "@/components/ChatInterface";
-import { ShortcutHelp } from "@/components/wiki/ShortcutHelp";
 import { TaskStatePanel } from "@/components/wiki/TaskStatePanel";
 import { WikiArticle, type WikiPageBody } from "@/components/wiki/WikiArticle";
 import { WikiToc } from "@/components/wiki/WikiToc";
 import { useModalDialog } from "@/hooks/useModalDialog";
-import { useShortcut } from "@/hooks/useShortcut";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { parseWikiToc, type WikiToc as Toc, type TocNode } from "@/lib/wikiToc";
-
-const WikiMap = dynamic(() => import("@/components/wiki/WikiMap"), {
-  ssr: false,
-});
-
-const mapButtonClass = "p-2 text-n-6 hover:text-ink";
 
 interface WikiViewerProps {
   userId: string;
@@ -175,18 +160,18 @@ function ContentsPanel({
     <dialog
       {...dialogProps}
       aria-label={t("wikiContents")}
-      className="m-0 h-dvh max-h-none w-full max-w-none bg-sheet p-0 text-ink"
+      className="m-0 h-dvh max-h-none w-full max-w-none bg-panel p-0 text-fg"
     >
       <div className="flex h-full flex-col">
-        <div className="flex h-12 shrink-0 items-center justify-between border-n-3 border-b px-4">
-          <span className="font-medium text-ink text-sm">
+        <div className="flex h-12 shrink-0 items-center justify-between border-line border-b px-4">
+          <span className="font-medium text-fg text-sm">
             {t("wikiContents")}
           </span>
           <button
             type="button"
             onClick={onClose}
             aria-label={t("wikiCloseContents")}
-            className="-mr-2 p-2 text-n-7 hover:text-ink"
+            className="-mr-2 p-2 text-fg-muted hover:text-fg"
           >
             <X aria-hidden className="h-5 w-5" />
           </button>
@@ -214,25 +199,7 @@ export default function WikiViewer({
   repoUrl,
   initialChatId,
 }: WikiViewerProps) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const mapOpen = searchParams.get("view") === "map";
-  const toggleMap = useCallback(
-    () =>
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        if (next.get("view") === "map") next.delete("view");
-        else next.set("view", "map");
-        return next;
-      }),
-    [setSearchParams],
-  );
-  useShortcut("m", toggleMap);
-  const [helpOpen, setHelpOpen] = useState(false);
-  const openHelp = useCallback(() => setHelpOpen(true), []);
-  const closeHelp = useCallback(() => setHelpOpen(false), []);
-  useShortcut("?", openHelp);
-  const [citedFiles, setCitedFiles] = useState<string[]>([]);
-  const citedSet = useMemo(() => new Set(citedFiles), [citedFiles]);
+  const [searchParams] = useSearchParams();
   const [tocCollapsed, setTocCollapsed] = useState(false);
   const [contentsOpen, setContentsOpen] = useState(false);
   const [evidencePath, setEvidencePath] = useState<string | null>(null);
@@ -273,12 +240,13 @@ export default function WikiViewer({
   const repoTitle = toc?.title ?? "";
   useEffect(() => {
     if (!pageTitle) return;
-    const view = mapOpen ? t("mapTitle") : pageTitle;
-    document.title = [view, repoTitle, "GitReader"].filter(Boolean).join(" · ");
+    document.title = [pageTitle, repoTitle, "GitReader"]
+      .filter(Boolean)
+      .join(" · ");
     return () => {
       document.title = "GitReader";
     };
-  }, [pageTitle, repoTitle, mapOpen]);
+  }, [pageTitle, repoTitle]);
 
   const chatContext = node ? pageContext(node, chapter, page.data) : undefined;
   const chatPage = useMemo(
@@ -301,152 +269,106 @@ export default function WikiViewer({
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
-      {mapOpen && toc ? (
-        <WikiMap
-          toc={toc}
-          citedFiles={citedSet}
-          evidencePath={evidencePath}
-          repoUrl={repoUrl}
-          onClose={toggleMap}
-        />
-      ) : (
-        <>
-          <aside
-            className={cn(
-              "hidden shrink-0 flex-col border-n-3 border-r bg-sheet md:flex",
-              tocCollapsed ? "w-16" : "w-56 2xl:w-72",
-            )}
+    <div className="flex min-h-0 flex-1 gap-4 px-4 pb-4 md:px-6">
+      <aside
+        className={cn(
+          "hidden shrink-0 flex-col md:flex",
+          tocCollapsed ? "w-14" : "w-56 2xl:w-72",
+        )}
+      >
+        <div
+          className={cn(
+            "flex h-10 shrink-0 items-center",
+            tocCollapsed ? "justify-center" : "justify-between pl-2",
+          )}
+        >
+          {tocCollapsed ? null : (
+            <span className="min-w-0 flex-1 truncate text-fg-muted text-sm">
+              {toc?.title || t("wikiContents")}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setTocCollapsed((prev) => !prev)}
+            aria-expanded={!tocCollapsed}
+            aria-label={
+              tocCollapsed ? t("wikiExpandToc") : t("wikiCollapseToc")
+            }
+            title={tocCollapsed ? t("wikiExpandToc") : t("wikiCollapseToc")}
+            className="rounded-lg p-2 text-fg-faint transition-colors hover:text-fg"
           >
-            <div
-              className={cn(
-                "flex h-12 shrink-0 items-center border-n-2 border-b",
-                tocCollapsed ? "justify-center" : "justify-between pr-2 pl-4",
-              )}
-            >
-              {tocCollapsed ? null : (
-                <span className="min-w-0 flex-1 truncate font-medium text-ink text-sm">
-                  {toc?.title || t("wikiContents")}
-                </span>
-              )}
-              {tocCollapsed ? null : (
-                <button
-                  type="button"
-                  onClick={toggleMap}
-                  aria-label={t("mapOpen")}
-                  title={t("mapOpenHint")}
-                  className={mapButtonClass}
-                >
-                  <MapIcon aria-hidden className="h-4 w-4" />
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setTocCollapsed((prev) => !prev)}
-                aria-expanded={!tocCollapsed}
-                aria-label={
-                  tocCollapsed ? t("wikiExpandToc") : t("wikiCollapseToc")
-                }
-                title={tocCollapsed ? t("wikiExpandToc") : t("wikiCollapseToc")}
-                className="p-2 text-n-6 hover:text-ink"
-              >
-                {tocCollapsed ? (
-                  <PanelLeftOpen aria-hidden className="h-4 w-4" />
-                ) : (
-                  <PanelLeftClose aria-hidden className="h-4 w-4" />
-                )}
-              </button>
-            </div>
-            <nav
-              aria-label={t("wikiContents")}
-              aria-busy={structure.loading}
-              className="min-h-0 flex-1 overflow-y-auto px-2 py-3"
-            >
-              {toc && node ? (
-                <WikiToc
-                  nodes={toc.nodes}
-                  activeId={node.id}
-                  activeChapterId={node.chapterId}
-                  evidence={evidence}
-                  compact={tocCollapsed}
-                />
-              ) : null}
-            </nav>
+            {tocCollapsed ? (
+              <PanelLeftOpen aria-hidden className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose aria-hidden className="h-4 w-4" />
+            )}
+          </button>
+        </div>
+        <nav
+          aria-label={t("wikiContents")}
+          aria-busy={structure.loading}
+          className="min-h-0 flex-1 overflow-y-auto py-1"
+        >
+          {toc && node ? (
+            <WikiToc
+              nodes={toc.nodes}
+              activeId={node.id}
+              activeChapterId={node.chapterId}
+              evidence={evidence}
+              compact={tocCollapsed}
+            />
+          ) : null}
+        </nav>
+      </aside>
+
+      <div
+        ref={scrollRef}
+        className="@container min-w-0 flex-1 overflow-y-auto rounded-2xl border border-line bg-panel"
+      >
+        {node ? (
+          <div className="sticky top-0 z-10 flex h-12 items-center border-line border-b bg-panel px-4 md:hidden">
             <button
               type="button"
-              onClick={openHelp}
-              aria-label={t("shortcutTitle")}
-              title={t("shortcutTitle")}
-              className={cn(
-                "flex shrink-0 items-center gap-2 border-n-2 border-t px-4 py-2 text-left text-n-6 text-xs hover:text-ink",
-                tocCollapsed && "justify-center px-0",
-              )}
+              onClick={() => setContentsOpen(true)}
+              aria-haspopup="dialog"
+              aria-label={t("wikiOpenContents")}
+              className="flex min-w-0 items-center gap-2 text-fg text-sm"
             >
-              <kbd className="border border-n-3 px-1 font-mono">?</kbd>
-              {tocCollapsed ? null : <span>{t("shortcutTitle")}</span>}
+              <List aria-hidden className="h-4 w-4 shrink-0 text-fg-muted" />
+              <span className="font-mono text-xs tabular-nums">
+                {node.code}
+              </span>
+              <span className="truncate">{node.title}</span>
             </button>
-          </aside>
-
-          <div
-            ref={scrollRef}
-            className="@container min-w-0 flex-1 overflow-y-auto"
-          >
-            {node ? (
-              <div className="sticky top-0 z-10 flex h-12 items-center border-n-3 border-b bg-paper px-4 md:hidden">
-                <button
-                  type="button"
-                  onClick={() => setContentsOpen(true)}
-                  aria-haspopup="dialog"
-                  aria-label={t("wikiOpenContents")}
-                  className="flex min-w-0 items-center gap-2 text-ink text-sm"
-                >
-                  <List aria-hidden className="h-4 w-4 shrink-0 text-n-6" />
-                  <span className="font-mono text-xs tabular-nums">
-                    {node.code}
-                  </span>
-                  <span className="truncate">{node.title}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleMap}
-                  aria-label={t("mapOpen")}
-                  className={cn(mapButtonClass, "-mr-2 ml-auto")}
-                >
-                  <MapIcon aria-hidden className="h-4 w-4" />
-                </button>
-              </div>
-            ) : null}
-
-            <div className="mx-auto max-w-6xl px-5 py-10 md:px-10 lg:py-14">
-              {node && toc ? (
-                <WikiArticle
-                  node={node}
-                  chapter={chapter}
-                  body={page.data}
-                  byFile={toc.byFile}
-                  repoUrl={repoUrl}
-                  onEvidence={setEvidencePath}
-                  state={
-                    !pageUrl
-                      ? "missing"
-                      : page.error
-                        ? "error"
-                        : page.loading
-                          ? "loading"
-                          : "ready"
-                  }
-                />
-              ) : null}
-            </div>
           </div>
-        </>
-      )}
+        ) : null}
+
+        <div className="mx-auto max-w-6xl px-5 py-8 md:px-10 lg:py-10">
+          {node && toc ? (
+            <WikiArticle
+              node={node}
+              chapter={chapter}
+              body={page.data}
+              byFile={toc.byFile}
+              repoUrl={repoUrl}
+              onEvidence={setEvidencePath}
+              state={
+                !pageUrl
+                  ? "missing"
+                  : page.error
+                    ? "error"
+                    : page.loading
+                      ? "loading"
+                      : "ready"
+              }
+            />
+          ) : null}
+        </div>
+      </div>
 
       {contentsOpen && toc && node ? (
         <ContentsPanel toc={toc} node={node} onClose={closeContents} />
       ) : null}
-
-      {helpOpen ? <ShortcutHelp onClose={closeHelp} /> : null}
 
       {repoUrl ? (
         <ChatInterface
@@ -458,7 +380,6 @@ export default function WikiViewer({
           currentPageContext={chatContext}
           filePages={toc?.byFile}
           onEvidence={setEvidencePath}
-          onCitedFiles={setCitedFiles}
           initialChatId={initialChatId}
         />
       ) : null}

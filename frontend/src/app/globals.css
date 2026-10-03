@@ -2,69 +2,70 @@
 @plugin "@tailwindcss/typography";
 
 /*
- * GitReader design tokens — Tufte-style scientific publishing.
- * Cool white paper, ink-black text, deep indigo shell rail.
- * Directory colours are data colours; one red marks "current evidence" only.
- * Flat fills, hairlines, zero gradients.
+ * GitReader design tokens: warm charcoal canvas, rounded panels, one ember
+ * orange accent. Panels are flat (hairline border, no drop shadow); the only
+ * glow is the faint orange wash behind the home hero and the search field.
+ * Text on an orange fill is always dark (`accent-fg`); white fails contrast.
+ *
+ * The old light-theme names (paper, sheet, ink, n-1..n-9, rail*, evidence*)
+ * are kept as aliases of the new tokens so unmigrated screens render dark.
+ * Each migration step swaps their usages for the new names; the aliases are
+ * deleted in the final cleanup step.
  */
 @theme {
-  /* Surfaces & text */
-  --color-paper: #f8f9fb;
-  --color-sheet: #ffffff;
-  --color-ink: #16181d;
+  /* Canvas, panels, text */
+  --color-bg: #0e0d0c;
+  --color-panel: #171615;
+  --color-raised: #201e1c;
+  --color-overlay: #272523;
+  --color-line: #302d2a;
+  --color-line-strong: #443f3a;
+  --color-fg: #f1eee9;
+  --color-fg-muted: #aaa49b;
+  --color-fg-faint: #8a847b;
 
-  /* 9-step cool neutral ramp: lighter = sparser, darker = denser */
-  --color-n-1: #f1f3f6;
-  --color-n-2: #e4e7ec;
-  --color-n-3: #d0d5dd;
-  --color-n-4: #a9b0bc;
-  --color-n-5: #858d9b;
-  --color-n-6: #5f6775;
-  --color-n-7: #474e5a;
-  --color-n-8: #323843;
-  --color-n-9: #1f242c;
+  /* Accent: plain for text and links, -strong for fills (with accent-fg) */
+  --color-accent: #ff9d4d;
+  --color-accent-strong: #f38020;
+  --color-accent-fg: #1a1006;
+  --color-accent-soft: rgb(255 157 77 / 0.13);
+  --color-accent-line: rgb(255 157 77 / 0.45);
 
-  /* Shell rail (deep indigo) */
-  --color-rail: #23205c;
-  --color-rail-raised: #2f2b74;
-  --color-rail-line: #3d3984;
-  --color-rail-ink: #eceaf8;
-  --color-rail-muted: #b3b0dc;
+  /* Status */
+  --color-ok: #6fd39a;
+  --color-warn: #f2d155;
+  --color-danger: #ff7a85;
+  --color-info: #7cb7ff;
 
-  /* The one red: current evidence */
-  --color-evidence: #c8312b;
-  --color-evidence-tint: #fbeceb;
+  /* Legacy aliases (see header) */
+  --color-paper: var(--color-bg);
+  --color-sheet: var(--color-panel);
+  --color-ink: var(--color-fg);
 
-  /*
-   * Directory category colours, fixed order, never cycled.
-   * Validated (dataviz validate_palette, light, surface paper): adjacent CVD
-   * ΔE >= 9.1, normal-vision ΔE >= 19.6. Several sit below 3:1 on paper, so a
-   * directory colour never carries identity alone — always pair with its code.
-   * Directories past slot 7 fold into --color-dir-other.
-   * `-on` is the text colour on a solid selected fill (>= 4.5:1).
-   */
-  --color-dir-1: #2670cc;
-  --color-dir-1-on: #ffffff;
-  --color-dir-2: #eb6834;
-  --color-dir-2-on: #16181d;
-  --color-dir-3: #1baf7a;
-  --color-dir-3-on: #16181d;
-  --color-dir-4: #eda100;
-  --color-dir-4-on: #16181d;
-  --color-dir-5: #e87ba4;
-  --color-dir-5-on: #16181d;
-  --color-dir-6: #008300;
-  --color-dir-6-on: #ffffff;
-  --color-dir-7: #4a3aa7;
-  --color-dir-7-on: #ffffff;
-  --color-dir-other: #858d9b;
-  --color-dir-other-on: #16181d;
+  /* Neutral ramp, inverted for dark: higher number = more contrast */
+  --color-n-1: #1a1918;
+  --color-n-2: #201e1c;
+  --color-n-3: #302d2a;
+  --color-n-4: #443f3a;
+  --color-n-5: #6b655d;
+  --color-n-6: #aaa49b;
+  --color-n-7: #bfb9b0;
+  --color-n-8: #d8d3cb;
+  --color-n-9: #ebe7e0;
 
-  /* Type: serif reading text, durable sans UI, mono code + tabular figures */
-  --font-serif:
-    var(--font-source-serif), ui-serif, Georgia, "Times New Roman", serif;
+  --color-rail: var(--color-accent-strong);
+  --color-rail-raised: var(--color-raised);
+  --color-rail-line: var(--color-line-strong);
+  --color-rail-ink: var(--color-accent-fg);
+  --color-rail-muted: var(--color-accent);
+
+  --color-evidence: var(--color-accent);
+  --color-evidence-tint: var(--color-accent-soft);
+
+  /* Type: one sans for UI and reading text, mono for code and codes */
   --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
+  --font-serif: var(--font-sans);
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", monospace;
 
   /* Reading measure for body text */
   --container-measure: 68ch;
@@ -79,24 +80,19 @@
 }
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 body {
   min-height: 100vh;
-  background: var(--color-paper);
-  color: var(--color-ink);
+  background: var(--color-bg);
+  color: var(--color-fg);
   font-family: var(--font-sans);
 }
 
 ::selection {
-  background: var(--color-n-2);
-  color: var(--color-ink);
-}
-
-:focus-visible {
-  outline: 2px solid var(--color-rail);
-  outline-offset: 2px;
+  background: var(--color-accent-soft);
+  color: var(--color-fg);
 }
 
 /* Remove default backtick pseudo-elements added by @tailwindcss/typography around inline <code> */
@@ -105,7 +101,7 @@ body {
   content: none;
 }
 
-/* Scrollbar: hairline thumb on paper */
+/* Scrollbar: hairline thumb on the canvas */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -119,19 +115,4 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-n-4);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    /* biome-ignore lint/complexity/noImportantStyles: must beat component motion utilities */
-    animation-duration: 0.01ms !important;
-    /* biome-ignore lint/complexity/noImportantStyles: must beat component motion utilities */
-    animation-iteration-count: 1 !important;
-    /* biome-ignore lint/complexity/noImportantStyles: must beat component motion utilities */
-    transition-duration: 0.01ms !important;
-    /* biome-ignore lint/complexity/noImportantStyles: must beat component motion utilities */
-    scroll-behavior: auto !important;
-  }
 }

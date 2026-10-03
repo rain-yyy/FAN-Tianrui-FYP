@@ -6,12 +6,11 @@ import { type DictKey, t } from "@/lib/i18n";
 
 const SHORTCUTS: ReadonlyArray<[string, DictKey]> = [
   ["/", "shortcutAsk"],
-  ["M", "shortcutMap"],
   ["Esc", "shortcutClose"],
   ["?", "shortcutHelp"],
 ];
 
-/** The wiki's keyboard shortcuts, opened with `?`. */
+/** Keyboard shortcuts, opened with `?` from the top bar. */
 export function ShortcutHelp({ onClose }: { onClose: () => void }) {
   const dialogProps = useModalDialog(onClose);
   return (

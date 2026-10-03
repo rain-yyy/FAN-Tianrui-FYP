@@ -119,12 +119,6 @@ export function TaskStatePanel({
         </p>
       ) : null}
 
-      {live ? (
-        <p aria-live="polite" className="sr-only">
-          {detail ? `${detail}, ${Math.round(pct ?? 0)}%` : null}
-        </p>
-      ) : null}
-
       {actions ? (
         <div className="mt-8 flex flex-wrap items-center gap-3">{actions}</div>
       ) : null}

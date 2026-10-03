@@ -15,8 +15,7 @@ import { formatFileCitation } from "@/lib/citations";
 import { t } from "@/lib/i18n";
 import { answerProse } from "@/lib/prose";
 import { getToolDescription, toolLabel } from "@/lib/toolDescriptions";
-import { cn } from "@/lib/utils";
-import { slotSwatch, type TocNode } from "@/lib/wikiToc";
+import type { TocNode } from "@/lib/wikiToc";
 
 const CodeViewer = dynamic(() => import("@/components/CodeViewer"), {
   ssr: false,
@@ -165,10 +164,6 @@ function AnswerNotesList({ notes, filePages, onOpen, onEvidence }: NotesProps) {
                     title={page.title}
                     className="inline-flex items-center gap-1 font-mono text-n-7 tabular-nums hover:text-ink"
                   >
-                    <span
-                      aria-hidden
-                      className={cn("h-1.5 w-1.5", slotSwatch(page.slot))}
-                    />
                     {page.code}
                   </Link>
                 ))}

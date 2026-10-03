@@ -25,17 +25,17 @@ function loadMermaid(): Promise<MermaidApi> {
           theme: "base",
           fontFamily: style.getPropertyValue("--font-sans").trim(),
           themeVariables: {
-            background: token("sheet"),
-            primaryColor: token("sheet"),
-            primaryTextColor: token("ink"),
-            primaryBorderColor: token("n-6"),
-            secondaryColor: token("n-1"),
-            tertiaryColor: token("n-1"),
-            lineColor: token("n-6"),
-            textColor: token("ink"),
-            clusterBkg: token("n-1"),
-            clusterBorder: token("n-4"),
-            edgeLabelBackground: token("sheet"),
+            background: token("raised"),
+            primaryColor: token("panel"),
+            primaryTextColor: token("fg"),
+            primaryBorderColor: token("fg-faint"),
+            secondaryColor: token("panel"),
+            tertiaryColor: token("panel"),
+            lineColor: token("fg-muted"),
+            textColor: token("fg"),
+            clusterBkg: token("panel"),
+            clusterBorder: token("line-strong"),
+            edgeLabelBackground: token("raised"),
             fontSize: "14px",
           },
           flowchart: { htmlLabels: true, curve: "basis" },
@@ -120,7 +120,7 @@ type RenderState =
   | { status: "error"; message: string };
 
 const smallButtonClass =
-  "inline-flex items-center gap-1.5 border border-n-3 bg-sheet px-2 py-1 text-n-7 text-xs hover:border-n-5 hover:text-ink";
+  "inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-fg-muted text-xs transition-colors hover:border-line-strong hover:text-fg";
 
 function ZoomedDiagram({ svg, onClose }: { svg: string; onClose: () => void }) {
   const dialogProps = useModalDialog(onClose);
@@ -128,15 +128,15 @@ function ZoomedDiagram({ svg, onClose }: { svg: string; onClose: () => void }) {
     <dialog
       {...dialogProps}
       aria-label={t("wikiDiagram")}
-      className="m-0 h-dvh max-h-none w-full max-w-none bg-sheet p-0 text-ink backdrop:bg-ink/40"
+      className="m-0 h-dvh max-h-none w-full max-w-none bg-panel p-0 text-fg backdrop:bg-bg/80"
     >
       <div className="flex h-full flex-col">
-        <div className="flex h-12 shrink-0 items-center justify-end border-n-3 border-b px-4">
+        <div className="flex h-12 shrink-0 items-center justify-end border-line border-b px-4">
           <button
             type="button"
             onClick={onClose}
             aria-label={t("diagramClose")}
-            className="-mr-2 p-2 text-n-7 hover:text-ink"
+            className="-mr-2 p-2 text-fg-muted hover:text-fg"
           >
             <X aria-hidden className="h-5 w-5" />
           </button>
@@ -185,7 +185,7 @@ export default function Mermaid({ chart }: { chart: string }) {
 
   if (current.status === "loading") {
     return (
-      <div className="flex min-h-40 items-center justify-center border border-n-2 bg-sheet text-n-6 text-sm">
+      <div className="flex min-h-40 items-center justify-center rounded-xl border border-line bg-raised text-fg-muted text-sm">
         {t("diagramRendering")}
       </div>
     );
@@ -193,9 +193,9 @@ export default function Mermaid({ chart }: { chart: string }) {
 
   if (current.status === "error") {
     return (
-      <div className="border-ink border-l-2 bg-sheet p-4">
+      <div className="rounded-xl border border-line bg-raised p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-ink text-sm">{t("diagramFailed")}</p>
+          <p className="text-fg text-sm">{t("diagramFailed")}</p>
           <div className="flex gap-2">
             <button
               type="button"
@@ -220,10 +220,12 @@ export default function Mermaid({ chart }: { chart: string }) {
         </div>
         {showSource ? (
           <>
-            <pre className="mt-3 max-h-52 overflow-auto border border-n-2 bg-paper p-3 font-mono text-n-8 text-xs">
+            <pre className="mt-3 max-h-52 overflow-auto rounded-lg border border-line bg-bg p-3 font-mono text-fg-muted text-xs">
               <code>{code}</code>
             </pre>
-            <p className="mt-2 font-mono text-n-7 text-xs">{current.message}</p>
+            <p className="mt-2 font-mono text-fg-faint text-xs">
+              {current.message}
+            </p>
           </>
         ) : null}
       </div>
@@ -232,7 +234,7 @@ export default function Mermaid({ chart }: { chart: string }) {
 
   return (
     <>
-      <div className="relative border border-n-2 bg-sheet">
+      <div className="relative rounded-xl border border-line bg-raised">
         <div
           className="flex justify-center overflow-x-auto p-6"
           // biome-ignore lint/security/noDangerouslySetInnerHtml: SVG produced by mermaid with securityLevel "strict"
@@ -243,7 +245,7 @@ export default function Mermaid({ chart }: { chart: string }) {
           onClick={() => setZoomed(true)}
           aria-label={t("diagramEnlarge")}
           title={t("diagramEnlarge")}
-          className="absolute top-2 right-2 p-1.5 text-n-6 hover:text-ink"
+          className="absolute right-2 bottom-2 rounded-lg p-1.5 text-fg-muted transition-colors hover:bg-overlay hover:text-fg"
         >
           <Maximize2 aria-hidden className="h-4 w-4" />
         </button>

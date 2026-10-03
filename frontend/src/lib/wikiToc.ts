@@ -2,12 +2,9 @@
  * Wiki table of contents with stable chapter codes.
  *
  * Top-level chapters get D1…Dn and their pages Dn.m. The code is the shared
- * name for a chapter across the TOC, margin notes, chips, the map and the URL
- * (`?d=D3.2`). The directory color comes from the top-level chapter: slots
- * 1–7 in order, then everything folds into `other` (never cycled).
+ * name for a chapter across the TOC, margin notes, chips and the URL
+ * (`?d=D3.2`).
  */
-
-type DirSlot = 1 | 2 | 3 | 4 | 5 | 6 | 7 | "other";
 
 export interface TocNode {
   id: string;
@@ -15,7 +12,6 @@ export interface TocNode {
   /** Repo-relative files the generator attached to this page. */
   files: string[];
   code: string;
-  slot: DirSlot;
   /** Top-level chapter this node belongs to (itself for a chapter). */
   chapterId: string;
   children: TocNode[];
@@ -31,34 +27,6 @@ export interface WikiToc {
   /** Repo-relative path → every page that lists it, in reading order. */
   byFile: Map<string, TocNode[]>;
 }
-
-const DIR_SLOTS = 7;
-
-/** Literal class names so Tailwind can see them. */
-const SLOT_CLASSES: Record<
-  DirSlot,
-  { fill: string; swatch: string; svg: string }
-> = {
-  1: { fill: "bg-dir-1 text-dir-1-on", swatch: "bg-dir-1", svg: "fill-dir-1" },
-  2: { fill: "bg-dir-2 text-dir-2-on", swatch: "bg-dir-2", svg: "fill-dir-2" },
-  3: { fill: "bg-dir-3 text-dir-3-on", swatch: "bg-dir-3", svg: "fill-dir-3" },
-  4: { fill: "bg-dir-4 text-dir-4-on", swatch: "bg-dir-4", svg: "fill-dir-4" },
-  5: { fill: "bg-dir-5 text-dir-5-on", swatch: "bg-dir-5", svg: "fill-dir-5" },
-  6: { fill: "bg-dir-6 text-dir-6-on", swatch: "bg-dir-6", svg: "fill-dir-6" },
-  7: { fill: "bg-dir-7 text-dir-7-on", swatch: "bg-dir-7", svg: "fill-dir-7" },
-  other: {
-    fill: "bg-dir-other text-dir-other-on",
-    swatch: "bg-dir-other",
-    svg: "fill-dir-other",
-  },
-};
-
-/** Solid selected fill with its matching text color. */
-export const slotFill = (slot: DirSlot) => SLOT_CLASSES[slot].fill;
-/** Small identity mark; always shown next to the code, never alone. */
-export const slotSwatch = (slot: DirSlot) => SLOT_CLASSES[slot].swatch;
-/** SVG fill for map marks. */
-export const slotSvgFill = (slot: DirSlot) => SLOT_CLASSES[slot].svg;
 
 interface RawTocItem {
   id?: unknown;
@@ -86,7 +54,7 @@ function rawItems(data: unknown): RawTocItem[] {
 function buildNodes(
   items: RawTocItem[],
   prefix: string,
-  top: { slot: DirSlot; chapterId: string } | null,
+  top: { chapterId: string } | null,
 ): TocNode[] {
   const nodes: TocNode[] = [];
   for (const item of items) {
@@ -97,10 +65,7 @@ function buildNodes(
     if (!id) continue;
     const position = nodes.length + 1;
     const code = top ? `${prefix}.${position}` : `D${position}`;
-    const own = top ?? {
-      slot: position <= DIR_SLOTS ? (position as DirSlot) : "other",
-      chapterId: id,
-    };
+    const own = top ?? { chapterId: id };
     nodes.push({
       id,
       title: asString(item.title) ?? asString(item.name) ?? id,
@@ -108,7 +73,6 @@ function buildNodes(
         ? item.files.filter((f): f is string => typeof f === "string")
         : [],
       code,
-      slot: own.slot,
       chapterId: own.chapterId,
       children: Array.isArray(item.children)
         ? buildNodes(item.children as RawTocItem[], code, own)

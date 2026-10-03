@@ -5,7 +5,7 @@ import { memo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { slotFill, slotSwatch, type TocNode } from "@/lib/wikiToc";
+import type { TocNode } from "@/lib/wikiToc";
 
 interface WikiTocProps {
   nodes: TocNode[];
@@ -19,15 +19,13 @@ interface WikiTocProps {
 }
 
 /**
- * `?d=<code>` on the current URL, keeping the other parameters. Following a
- * chapter link always lands in the reading view, so `view` is dropped.
+ * `?d=<code>` on the current URL, keeping the other parameters.
  */
 export function useCodeHref() {
   const [params] = useSearchParams();
   return (code: string) => {
     const next = new URLSearchParams(params);
     next.set("d", code);
-    next.delete("view");
     return { search: `?${next.toString()}` };
   };
 }
@@ -54,22 +52,23 @@ function TocRow({
       aria-current={active ? "page" : undefined}
       title={compact ? `${node.code} ${node.title}` : undefined}
       className={cn(
-        "flex min-w-0 flex-1 items-baseline gap-2 py-1 pr-2 text-sm leading-snug",
+        "flex min-w-0 flex-1 items-baseline gap-2 rounded-lg py-1.5 pr-2 text-sm leading-snug transition-colors",
         compact ? "justify-center pl-0" : "pl-2",
-        active ? slotFill(node.slot) : "text-n-8 hover:bg-n-1 hover:text-ink",
+        active
+          ? "bg-accent-soft text-accent"
+          : "text-fg-muted hover:bg-raised hover:text-fg",
         evidence &&
-          (active
-            ? "outline-2 outline-evidence -outline-offset-2"
-            : "bg-evidence-tint text-ink shadow-[inset_2px_0_0_var(--color-evidence)]"),
+          !active &&
+          "bg-accent-soft text-fg shadow-[inset_2px_0_0_var(--color-accent)]",
+        evidence && active && "outline-1 outline-accent -outline-offset-1",
       )}
     >
-      {active ? null : (
-        <span
-          aria-hidden
-          className={cn("h-2 w-2 shrink-0 self-center", slotSwatch(node.slot))}
-        />
-      )}
-      <span className="shrink-0 font-mono text-xs tabular-nums">
+      <span
+        className={cn(
+          "shrink-0 font-mono text-xs tabular-nums",
+          !active && "text-fg-faint",
+        )}
+      >
         {node.code}
       </span>
       {compact ? null : <span className="min-w-0 truncate">{node.title}</span>}
@@ -91,7 +90,7 @@ function PageList({
   onNavigate?: () => void;
 }) {
   return (
-    <ol className="mt-px ml-5 space-y-px border-n-2 border-l pl-2">
+    <ol className="mt-px ml-5 space-y-px border-line border-l pl-2">
       {nodes.map((node) => (
         <li key={node.id}>
           <div className="flex">
@@ -159,7 +158,7 @@ export const WikiToc = memo(function WikiToc({
                   onClick={() => toggle(chapter.id)}
                   aria-expanded={open}
                   aria-label={t("wikiToggleChapter", { title: chapter.title })}
-                  className="flex w-5 shrink-0 items-center justify-center text-n-6 hover:text-ink"
+                  className="flex w-5 shrink-0 items-center justify-center text-fg-faint hover:text-fg"
                 >
                   <Chevron aria-hidden className="h-3.5 w-3.5" />
                 </button>

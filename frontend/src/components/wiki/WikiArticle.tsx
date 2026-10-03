@@ -13,8 +13,8 @@ import { t } from "@/lib/i18n";
 import { readingProse } from "@/lib/prose";
 import { cn } from "@/lib/utils";
 import { type MarginNote, placeNotes } from "@/lib/wikiNotes";
-import { slotSwatch, type TocNode } from "@/lib/wikiToc";
-import "highlight.js/styles/github.css";
+import type { TocNode } from "@/lib/wikiToc";
+import "highlight.js/styles/github-dark.css";
 
 const CodeViewer = dynamic(() => import("@/components/CodeViewer"), {
   ssr: false,
@@ -64,7 +64,7 @@ const Markdown = memo(function Markdown({
               {children}
             </code>
             {note ? (
-              <sup className="ml-0.5 font-mono text-[0.7em] text-n-6 tabular-nums">
+              <sup className="ml-0.5 font-mono text-[0.7em] text-accent tabular-nums">
                 {note.number}
               </sup>
             ) : null}
@@ -101,7 +101,7 @@ function MarginNotes({ notes, page, byFile, onOpen, onEvidence }: NotesProps) {
   const codeHref = useCodeHref();
   return (
     <aside aria-label={t("wikiNotes")} className={MARGIN_COL}>
-      <ol className="space-y-3 border-n-3 border-t pt-3 @5xl:border-t-0 @5xl:pt-1">
+      <ol className="space-y-2 border-line border-t pt-3 @5xl:border-t-0 @5xl:pt-1">
         {notes.map(({ number, file, fileIndex }) => {
           const slash = file.path.lastIndexOf("/");
           const others = (byFile.get(file.path) ?? []).filter(
@@ -118,14 +118,14 @@ function MarginNotes({ notes, page, byFile, onOpen, onEvidence }: NotesProps) {
                 onBlur={() => onEvidence(null)}
                 aria-label={t("wikiOpenSource", { path: file.path })}
                 title={file.path}
-                className="group -mx-1.5 flex w-[calc(100%+0.75rem)] gap-2 px-1.5 py-1 text-left hover:bg-evidence-tint focus-visible:bg-evidence-tint"
+                className="group -mx-2 flex w-[calc(100%+1rem)] gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-accent-soft focus-visible:bg-accent-soft"
               >
-                <span className="w-4 shrink-0 text-right font-mono text-n-6 tabular-nums group-hover:text-evidence group-focus-visible:text-evidence">
+                <span className="w-4 shrink-0 text-right font-mono text-fg-faint tabular-nums group-hover:text-accent group-focus-visible:text-accent">
                   {number}
                 </span>
                 <span className="min-w-0 break-words font-mono">
                   {slash > 0 ? (
-                    <span className="text-n-6">
+                    <span className="text-fg-faint">
                       {file.path
                         .slice(0, slash)
                         .split("/")
@@ -137,23 +137,19 @@ function MarginNotes({ notes, page, byFile, onOpen, onEvidence }: NotesProps) {
                         ))}
                     </span>
                   ) : null}
-                  <span className="text-ink">{file.fileName}</span>
+                  <span className="text-fg">{file.fileName}</span>
                 </span>
               </button>
               {others.length > 0 ? (
-                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-6 text-n-6">
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-6 text-fg-faint">
                   <span>{t("wikiAlsoIn")}</span>
                   {others.map((other) => (
                     <Link
                       key={other.id}
                       to={codeHref(other.code)}
                       title={other.title}
-                      className="inline-flex items-center gap-1 font-mono text-n-7 tabular-nums hover:text-ink"
+                      className="inline-flex items-center gap-1 font-mono text-fg-muted tabular-nums hover:text-accent"
                     >
-                      <span
-                        aria-hidden
-                        className={cn("h-1.5 w-1.5", slotSwatch(other.slot))}
-                      />
                       {other.code}
                     </Link>
                   ))}
@@ -214,29 +210,28 @@ export const WikiArticle = memo(function WikiArticle({
 
   return (
     <article aria-busy={state === "loading"} className={DESK_GRID}>
-      <header className={cn(MAIN_COL, "border-n-3 border-b pb-6")}>
-        <p className="flex items-center gap-2 font-mono text-n-7 text-xs tabular-nums">
-          <span aria-hidden className={cn("h-2 w-2", slotSwatch(node.slot))} />
+      <header className={cn(MAIN_COL, "border-line border-b pb-6")}>
+        <p className="flex items-center gap-2 font-mono text-fg-muted text-xs tabular-nums">
           <span>{node.code}</span>
           {chapter ? (
             <>
-              <span aria-hidden className="text-n-5">
+              <span aria-hidden className="text-fg-faint">
                 /
               </span>
               <span className="truncate font-sans">{chapter.title}</span>
             </>
           ) : null}
         </p>
-        <h1 className="mt-3 font-semibold font-serif text-3xl text-ink leading-tight md:text-4xl">
+        <h1 className="mt-3 font-medium text-3xl text-fg tracking-tight leading-tight md:text-4xl">
           {node.title}
         </h1>
       </header>
 
       {state === "loading" ? (
         <div aria-hidden className={cn(MAIN_COL, "space-y-3")}>
-          <div className="h-3 w-11/12 bg-n-2" />
-          <div className="h-3 w-10/12 bg-n-2" />
-          <div className="h-3 w-8/12 bg-n-2" />
+          <div className="h-3 w-11/12 rounded bg-raised" />
+          <div className="h-3 w-10/12 rounded bg-raised" />
+          <div className="h-3 w-8/12 rounded bg-raised" />
         </div>
       ) : null}
 
@@ -244,7 +239,7 @@ export const WikiArticle = memo(function WikiArticle({
         <p
           className={cn(
             MAIN_COL,
-            "border-ink border-l-2 bg-sheet py-3 pl-4 text-ink text-sm",
+            "rounded-xl border border-line bg-raised px-4 py-3 text-fg text-sm",
           )}
         >
           {state === "error" ? t("wikiPageError") : t("wikiPageMissing")}
@@ -262,7 +257,7 @@ export const WikiArticle = memo(function WikiArticle({
 
           {body.mermaid ? (
             <figure className={MAIN_COL}>
-              <figcaption className="mb-2 font-mono text-n-6 text-xs uppercase tracking-wider">
+              <figcaption className="mb-2 font-mono text-fg-faint text-xs uppercase tracking-wider">
                 {t("wikiDiagram")}
               </figcaption>
               <Mermaid chart={body.mermaid} />
@@ -273,7 +268,7 @@ export const WikiArticle = memo(function WikiArticle({
             // biome-ignore lint/suspicious/noArrayIndexKey: sections are static per page and headings may repeat
             <Fragment key={index}>
               <section className={cn(MAIN_COL, "scroll-mt-8")}>
-                <h2 className="mb-4 font-semibold font-serif text-2xl text-ink">
+                <h2 className="mb-4 font-medium text-2xl text-fg tracking-tight">
                   {section.heading}
                 </h2>
                 <Markdown text={section.body} mentions={placed.byMention} />
