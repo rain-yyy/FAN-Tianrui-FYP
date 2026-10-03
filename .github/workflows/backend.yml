@@ -1,13 +1,11 @@
 name: Backend
 
-# DISABLED: automatic triggers are commented out; re-enable by uncommenting them. Manual runs only.
 on:
-  workflow_dispatch:
-  # push:
-  #   branches: [main]
-  #   paths: ["docker/**", ".github/workflows/backend.yml"]
-  # pull_request:
-  #   paths: ["docker/**", ".github/workflows/backend.yml"]
+  push:
+    branches: [main]
+    paths: ["docker/**", ".github/workflows/backend.yml"]
+  pull_request:
+    paths: ["docker/**", ".github/workflows/backend.yml"]
 
 concurrency:
   group: backend-${{ github.ref }}

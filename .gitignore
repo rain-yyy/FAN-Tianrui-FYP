@@ -26,6 +26,12 @@ frontend/tsconfig.tsbuildinfo
 .env*.local
 frontend/.env.local
 
-
 # Generated per-repo vector store / code graph data
 /vector_store/
+
+# cache
+docker/.pytest_cache/
+docker/.ruff_cache/
+
+# todo
+todo.txt
