@@ -1,26 +1,29 @@
-'use client';
+"use client";
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  ArrowUp, 
-  Loader2, 
-  X,
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  ArrowUp,
   Bot,
   History,
+  Loader2,
   MessageSquare,
   Plus,
-  Trash2
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { api, normalizeRepoUrl, ChatHistoryItem, ToolTrajectoryStep } from '@/lib/api';
-import { useChatStream } from '@/hooks/useChatStream';
-import { MessageItem, DisplayMessage } from './MessageItem';
-import SourcesPanel, { parseSource } from './SourcesPanel';
-import CodeViewer from './CodeViewer';
-import { LiveStepFlow } from './LiveStepFlow';
-import { t } from '@/lib/i18n';
-import { useAuth } from '@/providers/AuthProvider';
+  Trash2,
+  X,
+} from "lucide-react";
+import type React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useChatStream } from "@/hooks/useChatStream";
+import {
+  api,
+  type ChatHistoryItem,
+  normalizeRepoUrl,
+  type ToolTrajectoryStep,
+} from "@/lib/api";
+import { t } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { LiveStepFlow } from "./LiveStepFlow";
+import { type DisplayMessage, MessageItem } from "./MessageItem";
 
 /**
  * Replicates backend _generate_chat_preview_sync to create a session title
@@ -28,22 +31,26 @@ import { useAuth } from '@/providers/AuthProvider';
  */
 const generateChatPreview = (question: string): string => {
   let q = question.trim();
-  for (const prefix of ['[Current page context:', 'User question:', 'Question:']) {
+  for (const prefix of [
+    "[Current page context:",
+    "User question:",
+    "Question:",
+  ]) {
     if (q.startsWith(prefix)) {
       q = q.slice(prefix.length).trim();
       break;
     }
   }
-  for (const delimiter of ['？', '?', '。', '\n', '，', ',']) {
+  for (const delimiter of ["？", "?", "。", "\n", "，", ","]) {
     if (q.includes(delimiter)) {
       q = q.split(delimiter)[0].trim();
       break;
     }
   }
-  if (q.length <= 40) return q || 'New chat';
+  if (q.length <= 40) return q || "New chat";
   const truncated = q.slice(0, 40);
-  const lastSpace = truncated.lastIndexOf(' ');
-  return ((lastSpace > 20 ? truncated.slice(0, lastSpace) : truncated).trim()) + '...';
+  const lastSpace = truncated.lastIndexOf(" ");
+  return `${(lastSpace > 20 ? truncated.slice(0, lastSpace) : truncated).trim()}...`;
 };
 
 interface ChatInterfaceProps {
@@ -55,23 +62,24 @@ interface ChatInterfaceProps {
   onChatLoaded?: () => void;
 }
 
-export default function ChatInterface({ 
+export default function ChatInterface({
   userId,
-  repoUrl, 
+  repoUrl,
   currentPageContext,
   currentPageTitle,
   initialChatId,
   onChatLoaded,
 }: ChatInterfaceProps) {
-  const [mode, setMode] = useState<'closed' | 'open'>('closed');
+  const [mode, setMode] = useState<"closed" | "open">("closed");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [currentRepoUrl, setCurrentRepoUrl] = useState(repoUrl);
 
   useEffect(() => {
     setCurrentRepoUrl(repoUrl);
   }, [repoUrl]);
-  const [inputValue, setInputValue] = useState('');
-  const { isStreaming, liveSteps, streamingAnswer, sendMessage } = useChatStream();
+  const [inputValue, setInputValue] = useState("");
+  const { isStreaming, liveSteps, streamingAnswer, sendMessage } =
+    useChatStream();
   const [chatId, setChatId] = useState<string | undefined>(undefined);
   const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -86,11 +94,13 @@ export default function ChatInterface({
   const [isResizing, setIsResizing] = useState(false);
 
   useEffect(() => {
-    const savedWidth = localStorage.getItem('chat_sidebar_width');
+    const savedWidth = localStorage.getItem("chat_sidebar_width");
     const maxWidth = Math.floor(window.innerWidth * 0.9);
     const minWidth = Math.floor(window.innerWidth * 0.5);
     if (savedWidth) {
-      setSidebarWidth(Math.min(Math.max(parseInt(savedWidth, 10), minWidth), maxWidth));
+      setSidebarWidth(
+        Math.min(Math.max(parseInt(savedWidth, 10), minWidth), maxWidth),
+      );
     }
   }, []);
 
@@ -101,7 +111,7 @@ export default function ChatInterface({
 
   const stopResizing = useCallback(() => {
     setIsResizing(false);
-    localStorage.setItem('chat_sidebar_width', sidebarWidth.toString());
+    localStorage.setItem("chat_sidebar_width", sidebarWidth.toString());
   }, [sidebarWidth]);
 
   const resize = useCallback(
@@ -115,7 +125,7 @@ export default function ChatInterface({
         }
       }
     },
-    [isResizing]
+    [isResizing],
   );
 
   useEffect(() => {
@@ -128,38 +138,41 @@ export default function ChatInterface({
       window.removeEventListener("mouseup", stopResizing);
     };
   }, [isResizing, resize, stopResizing]);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fullViewInputRef = useRef<HTMLTextAreaElement>(null);
 
   const scrollToBottom = useCallback(() => {
-    if (mode === 'open') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (mode === "open") {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [mode]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on new messages to keep the newest in view
   useEffect(() => {
     scrollToBottom();
   }, [messages, mode, scrollToBottom]);
 
   useEffect(() => {
-    if (mode === 'open' && fullViewInputRef.current) {
+    if (mode === "open" && fullViewInputRef.current) {
       fullViewInputRef.current.focus();
     }
   }, [mode]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the repo or user changes (reworked in redesign step 7)
   useEffect(() => {
     setChatId(undefined);
     setMessages([]);
     loadChatHistory();
   }, [repoUrl, userId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: open the deep-linked chat once per id (reworked in redesign step 7)
   useEffect(() => {
     if (!initialChatId) return;
     const loadAndOpen = async () => {
       try {
         const chatMessages = await api.getChatMessages(initialChatId);
-        const displayMessages: DisplayMessage[] = chatMessages.map(msg => {
+        const displayMessages: DisplayMessage[] = chatMessages.map((msg) => {
           const meta = msg.metadata || {};
           return {
             id: msg.id,
@@ -167,15 +180,16 @@ export default function ChatInterface({
             content: msg.content,
             timestamp: new Date(msg.created_at),
             sources: (meta.sources as string[]) || [],
-            tool_trajectory: (meta.tool_trajectory as ToolTrajectoryStep[]) || [],
+            tool_trajectory:
+              (meta.tool_trajectory as ToolTrajectoryStep[]) || [],
           };
         });
         setMessages(displayMessages);
         setChatId(initialChatId);
 
-        setMode('open');
+        setMode("open");
       } catch (error) {
-        console.error('Failed to load initial chat:', error);
+        console.error("Failed to load initial chat:", error);
       } finally {
         onChatLoaded?.();
       }
@@ -190,11 +204,11 @@ export default function ChatInterface({
       const history = await api.getChatHistory(userId);
       const normalizedRepo = normalizeRepoUrl(repoUrl);
       const repoHistory = history.filter(
-        h => normalizeRepoUrl(h.repo_url) === normalizedRepo
+        (h) => normalizeRepoUrl(h.repo_url) === normalizedRepo,
       );
       setChatHistory(repoHistory);
     } catch (error) {
-      console.error('Failed to load chat history:', error);
+      console.error("Failed to load chat history:", error);
     } finally {
       setIsLoadingHistory(false);
     }
@@ -207,7 +221,7 @@ export default function ChatInterface({
     setCurrentRepoUrl(historyItem.repo_url);
     try {
       const chatMessages = await api.getChatMessages(effectiveChatId);
-      const displayMessages: DisplayMessage[] = chatMessages.map(msg => {
+      const displayMessages: DisplayMessage[] = chatMessages.map((msg) => {
         const meta = msg.metadata || {};
         return {
           id: msg.id,
@@ -220,12 +234,12 @@ export default function ChatInterface({
       });
       setMessages(displayMessages);
       setChatId(effectiveChatId);
-      
-      if (mode === 'closed') {
-        setMode('open');
+
+      if (mode === "closed") {
+        setMode("open");
       }
     } catch (error) {
-      console.error('Failed to load chat messages:', error);
+      console.error("Failed to load chat messages:", error);
     } finally {
       setIsChatLoading(false);
     }
@@ -239,27 +253,29 @@ export default function ChatInterface({
     }
   };
 
-  const generateId = () => `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const generateId = () =>
+    `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
   const handleSendMessage = async () => {
     const question = inputValue.trim();
     if (!question || isStreaming) return;
 
-    if (mode === 'closed') {
-      setMode('open');
+    if (mode === "closed") {
+      setMode("open");
     }
 
-    setInputValue('');
+    setInputValue("");
 
-    if (fullViewInputRef.current) fullViewInputRef.current.style.height = 'auto';
+    if (fullViewInputRef.current)
+      fullViewInputRef.current.style.height = "auto";
 
     const userMessage: DisplayMessage = {
       id: generateId(),
-      role: 'user',
+      role: "user",
       content: question,
       timestamp: new Date(),
     };
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMessage]);
 
     try {
       const result = await sendMessage({
@@ -277,44 +293,47 @@ export default function ChatInterface({
       // refetching the full list — the server already persisted it.
       if (isNewSession) {
         const title = generateChatPreview(question);
-        setChatHistory(prev => [{
-          id: result.chatId,
-          chat_id: result.chatId,
-          user_id: userId,
-          repo_url: repoUrl,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          title,
-        } as ChatHistoryItem, ...prev]);
+        setChatHistory((prev) => [
+          {
+            id: result.chatId,
+            chat_id: result.chatId,
+            user_id: userId,
+            repo_url: repoUrl,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            title,
+          } as ChatHistoryItem,
+          ...prev,
+        ]);
       }
 
       const assistantMessage: DisplayMessage = {
         id: generateId(),
-        role: 'assistant',
+        role: "assistant",
         content: result.answer,
         timestamp: new Date(),
         sources: result.sources,
         tool_trajectory: result.trajectory,
         isNew: false, // Don't use typewriter effect since we already streamed
       };
-      setMessages(prev => [...prev, assistantMessage]);
-
+      setMessages((prev) => [...prev, assistantMessage]);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to send message';
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to send message";
 
       const errorDisplayMessage: DisplayMessage = {
         id: generateId(),
-        role: 'assistant',
+        role: "assistant",
         content: errorMessage,
         timestamp: new Date(),
         isError: true,
       };
-      setMessages(prev => [...prev, errorDisplayMessage]);
+      setMessages((prev) => [...prev, errorDisplayMessage]);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
@@ -322,37 +341,42 @@ export default function ChatInterface({
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value);
-    e.target.style.height = 'auto';
+    e.target.style.height = "auto";
     e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
   };
 
-  const handleDeleteChat = async (historyItem: ChatHistoryItem, e: React.MouseEvent) => {
+  const handleDeleteChat = async (
+    historyItem: ChatHistoryItem,
+    e: React.MouseEvent,
+  ) => {
     e.stopPropagation();
-    if (!userId || !window.confirm(t('deleteConfirmDialog'))) return;
+    if (!userId || !window.confirm(t("deleteConfirmDialog"))) return;
 
     const effectiveChatId = historyItem.chat_id ?? historyItem.id;
     setDeletingChatId(effectiveChatId);
-    
+
     try {
       await api.deleteChatHistory(effectiveChatId, userId);
-      setChatHistory(prev => prev.filter(item => (item.chat_id ?? item.id) !== effectiveChatId));
+      setChatHistory((prev) =>
+        prev.filter((item) => (item.chat_id ?? item.id) !== effectiveChatId),
+      );
       if (chatId === effectiveChatId) {
         handleNewChat();
       }
     } catch (error) {
-      console.error('Failed to delete chat:', error);
-      alert(t('deleteConfirm'));
+      console.error("Failed to delete chat:", error);
+      alert(t("deleteConfirm"));
     } finally {
       setDeletingChatId(null);
     }
   };
 
-  const repoName = repoUrl.split('/').slice(-2).join('/');
+  const repoName = repoUrl.split("/").slice(-2).join("/");
 
   return (
     <>
       <AnimatePresence>
-        {mode === 'closed' && (
+        {mode === "closed" && (
           <motion.div
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -361,7 +385,8 @@ export default function ChatInterface({
             className="fixed bottom-8 right-8 z-40"
           >
             <button
-              onClick={() => setMode('open')}
+              type="button"
+              onClick={() => setMode("open")}
               className="inline-flex items-center gap-2.5 rounded-full border border-sky-200 bg-white px-5 py-3.5 text-base font-medium text-sky-900 shadow-lg shadow-stone-900/10 hover:bg-sky-50 hover:scale-105 hover:border-sky-300 transition-all duration-300"
               aria-label="Open chat sidebar"
             >
@@ -373,16 +398,17 @@ export default function ChatInterface({
       </AnimatePresence>
 
       <AnimatePresence>
-        {mode === 'open' && (
+        {mode === "open" && (
           <motion.div
-            initial={{ x: '100%' }}
+            initial={{ x: "100%" }}
             animate={{ x: 0 }}
-            exit={{ x: '100%' }}
+            exit={{ x: "100%" }}
             transition={{ duration: 0.2 }}
             className="fixed top-0 right-0 bottom-0 z-50 bg-white border-l border-stone-200 flex flex-col shadow-[-12px_0_40px_rgba(0,0,0,0.08)]"
             style={{ width: sidebarWidth }}
           >
             {/* Drag Handle */}
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: pointer-only resize handle; the drawer is replaced by a docked panel in redesign step 7 */}
             <div
               className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-sky-300 z-[60] transition-colors"
               onMouseDown={startResizing}
@@ -391,6 +417,7 @@ export default function ChatInterface({
             <header className="h-14 border-b border-stone-200 flex items-center justify-between px-4 bg-stone-50/90">
               <div className="flex items-center gap-4">
                 <button
+                  type="button"
                   onClick={() => setShowHistorySidebar((prev) => !prev)}
                   className="inline-flex items-center gap-2 text-sm text-stone-600 hover:text-stone-900 transition-colors"
                   aria-label="Toggle history sidebar"
@@ -401,13 +428,16 @@ export default function ChatInterface({
                 {currentPageTitle && (
                   <>
                     <span className="text-stone-300">/</span>
-                    <span className="text-sm text-stone-800 truncate max-w-[200px]">{currentPageTitle}</span>
+                    <span className="text-sm text-stone-800 truncate max-w-[200px]">
+                      {currentPageTitle}
+                    </span>
                   </>
                 )}
               </div>
               <div className="flex items-center gap-3">
-                <button 
-                  onClick={() => setMode('closed')}
+                <button
+                  type="button"
+                  onClick={() => setMode("closed")}
                   className="p-2 text-stone-500 hover:text-stone-900 transition-colors"
                   aria-label="Close chat"
                 >
@@ -418,16 +448,19 @@ export default function ChatInterface({
 
             <div className="flex-1 flex overflow-hidden">
               {/* Chat history sidebar */}
-              <aside className={cn(
-                "w-64 border-r border-stone-200 bg-stone-50 flex-col transition-all duration-300",
-                showHistorySidebar ? "hidden sm:flex" : "hidden"
-              )}>
+              <aside
+                className={cn(
+                  "w-64 border-r border-stone-200 bg-stone-50 flex-col transition-all duration-300",
+                  showHistorySidebar ? "hidden sm:flex" : "hidden",
+                )}
+              >
                 <div className="p-3 border-b border-stone-200 flex items-center justify-between">
                   <h3 className="text-sm font-medium text-stone-800 flex items-center gap-2">
                     <History className="w-4 h-4 text-sky-600" />
-                    {t('chatHistory')}
+                    {t("chatHistory")}
                   </h3>
                   <button
+                    type="button"
                     onClick={handleNewChat}
                     className="p-1.5 rounded-lg bg-sky-100 text-sky-800 hover:bg-sky-200 active:scale-95 transition-all border border-sky-200/80"
                     aria-label="New chat"
@@ -443,62 +476,82 @@ export default function ChatInterface({
                   ) : chatHistory.length === 0 ? (
                     <div className="text-center py-8">
                       <MessageSquare className="w-8 h-8 text-stone-400 mx-auto mb-2" />
-                      <p className="text-xs text-stone-600">{t('noChatHistory')}</p>
-                      <p className="text-xs text-stone-500 mt-1">{t('startChatHint')}</p>
+                      <p className="text-xs text-stone-600">
+                        {t("noChatHistory")}
+                      </p>
+                      <p className="text-xs text-stone-500 mt-1">
+                        {t("startChatHint")}
+                      </p>
                     </div>
                   ) : (
                     chatHistory.map((item) => {
                       const effectiveChatId = item.chat_id ?? item.id;
                       return (
-                      <div
-                        key={item.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => handleLoadChat(item)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleLoadChat(item)}
-                        className={cn(
-                          "w-full text-left p-2.5 rounded-lg transition-all group cursor-pointer",
-                          chatId === effectiveChatId
-                            ? "bg-sky-100 border border-sky-200"
-                            : "hover:bg-stone-100 border border-transparent"
-                        )}
-                        aria-label={`Load chat ${item.title || effectiveChatId.slice(0, 8)}`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <MessageSquare className={cn(
-                            "w-4 h-4 shrink-0",
-                            chatId === effectiveChatId ? "text-sky-700" : "text-stone-500 group-hover:text-stone-600"
-                          )} />
-                          <span className={cn(
-                            "text-sm truncate flex-1",
-                            chatId === effectiveChatId ? "text-stone-900" : "text-stone-600 group-hover:text-stone-800"
-                          )}>
-                            {item.title || `${t('chatDefault')} ${effectiveChatId.slice(0, 8)}`}
-                          </span>
-                          
-                          {/* Delete Button */}
-                          <button
-                            onClick={(e) => handleDeleteChat(item, e)}
-                            className="p-1 rounded text-stone-500 hover:text-rose-700 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
-                            disabled={deletingChatId === effectiveChatId}
-                          >
-                            {deletingChatId === effectiveChatId ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <Trash2 className="w-3 h-3" />
+                        // biome-ignore lint/a11y/useSemanticElements: contains a nested delete button, so it cannot be a <button> (restructured in redesign step 7)
+                        <div
+                          key={item.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => handleLoadChat(item)}
+                          onKeyDown={(e) =>
+                            e.key === "Enter" && handleLoadChat(item)
+                          }
+                          className={cn(
+                            "w-full text-left p-2.5 rounded-lg transition-all group cursor-pointer",
+                            chatId === effectiveChatId
+                              ? "bg-sky-100 border border-sky-200"
+                              : "hover:bg-stone-100 border border-transparent",
+                          )}
+                          aria-label={`Load chat ${item.title || effectiveChatId.slice(0, 8)}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <MessageSquare
+                              className={cn(
+                                "w-4 h-4 shrink-0",
+                                chatId === effectiveChatId
+                                  ? "text-sky-700"
+                                  : "text-stone-500 group-hover:text-stone-600",
+                              )}
+                            />
+                            <span
+                              className={cn(
+                                "text-sm truncate flex-1",
+                                chatId === effectiveChatId
+                                  ? "text-stone-900"
+                                  : "text-stone-600 group-hover:text-stone-800",
+                              )}
+                            >
+                              {item.title ||
+                                `${t("chatDefault")} ${effectiveChatId.slice(0, 8)}`}
+                            </span>
+
+                            {/* Delete Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteChat(item, e)}
+                              className="p-1 rounded text-stone-500 hover:text-rose-700 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
+                              disabled={deletingChatId === effectiveChatId}
+                            >
+                              {deletingChatId === effectiveChatId ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-3 h-3" />
+                              )}
+                            </button>
+                          </div>
+                          <div className="mt-1 text-[10px] text-stone-500 ml-6">
+                            {new Date(item.created_at).toLocaleDateString(
+                              "en-US",
+                              {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              },
                             )}
-                          </button>
+                          </div>
                         </div>
-                        <div className="mt-1 text-[10px] text-stone-500 ml-6">
-                          {new Date(item.created_at).toLocaleDateString('en-US', { 
-                            month: 'short', 
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </div>
-                      </div>
-                    );
+                      );
                     })
                   )}
                 </div>
@@ -510,7 +563,9 @@ export default function ChatInterface({
                   {isChatLoading && (
                     <div className="flex flex-col items-center justify-center h-full text-center">
                       <Loader2 className="w-8 h-8 text-sky-600 animate-spin mb-4" />
-                      <p className="text-sm text-stone-600">{t('loadingChat')}</p>
+                      <p className="text-sm text-stone-600">
+                        {t("loadingChat")}
+                      </p>
                     </div>
                   )}
                   {messages.length === 0 && !isStreaming && !isChatLoading && (
@@ -519,34 +574,42 @@ export default function ChatInterface({
                         <Bot className="w-8 h-8 text-teal-700" />
                       </div>
                       <h2 className="text-2xl font-semibold text-stone-900 mb-3">
-                        {t('agentDeepAnalysis')}
+                        {t("agentDeepAnalysis")}
                       </h2>
                       <p className="text-[15px] text-stone-600 max-w-md leading-relaxed">
-                        {t('agentDesc')}
+                        {t("agentDesc")}
                       </p>
                     </div>
                   )}
                   <div className="space-y-2">
                     {messages.map((message) => (
-                      <div key={message.id} className="max-w-3xl mx-auto px-2 md:px-0">
-                        <MessageItem message={message} repoUrl={currentRepoUrl} />
+                      <div
+                        key={message.id}
+                        className="max-w-3xl mx-auto px-2 md:px-0"
+                      >
+                        <MessageItem
+                          message={message}
+                          repoUrl={currentRepoUrl}
+                        />
                       </div>
                     ))}
                   </div>
-                  
+
                   {isStreaming && (
                     <div className="max-w-3xl mx-auto px-2 md:px-0 mt-4">
                       <div className="ml-2 md:ml-12 p-4 rounded-xl bg-stone-50 border border-stone-200">
                         <LiveStepFlow
                           steps={liveSteps}
                           isAgent={true}
-                          currentPhase={t('agentWorking')}
+                          currentPhase={t("agentWorking")}
                           streamingAnswer={streamingAnswer}
                         />
                         {liveSteps.length === 0 && (
                           <div className="flex items-center gap-3 text-sm text-teal-700">
                             <Bot className="w-4 h-4 animate-pulse" />
-                            <span className="font-medium tracking-wide">{t('agentWorking')}</span>
+                            <span className="font-medium tracking-wide">
+                              {t("agentWorking")}
+                            </span>
                           </div>
                         )}
                       </div>
@@ -572,18 +635,21 @@ export default function ChatInterface({
                       <div className="flex items-center justify-between px-3 pb-3">
                         <div className="flex items-center gap-1.5">
                           <Bot className="w-3.5 h-3.5 text-teal-600" />
-                          <span className="text-[11px] font-medium text-teal-700">Agent</span>
+                          <span className="text-[11px] font-medium text-teal-700">
+                            Agent
+                          </span>
                         </div>
 
                         <div className="flex items-center gap-2">
                           <button
+                            type="button"
                             onClick={handleSendMessage}
                             disabled={!inputValue.trim() || isStreaming}
                             className={cn(
                               "p-2 rounded-xl transition-all shadow-sm",
                               inputValue.trim() && !isStreaming
                                 ? "bg-teal-600 text-white hover:bg-teal-500"
-                                : "bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200"
+                                : "bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200",
                             )}
                             aria-label="Send message"
                           >

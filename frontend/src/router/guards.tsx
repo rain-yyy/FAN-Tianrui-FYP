@@ -67,24 +67,3 @@ export function RoutePermissionGuard({
 
   return <Outlet />;
 }
-
-export function ComponentDataGuard({
-  allow,
-  children,
-}: {
-  allow: boolean;
-  children: React.ReactNode;
-}) {
-  if (!allow) {
-    return (
-      <div className="h-full min-h-[40vh] flex items-center justify-center">
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-900">
-          The route is valid, but this task is not ready to show Wiki content
-          yet.
-        </div>
-      </div>
-    );
-  }
-
-  return <>{children}</>;
-}

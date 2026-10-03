@@ -39,6 +39,29 @@ const STRINGS = {
   generatingPreview: "Generating answer...",
   deleteConfirmDialog: "Delete this conversation? This cannot be undone.",
 
+  taskLoadingStamp: "loading",
+  taskLoadingTitle: "Loading task status",
+  taskInFlightTitle: "Generating the wiki",
+  taskWaiting: "Waiting for the pipeline to start",
+  taskProgress: "Generation progress",
+  taskFailedTitle: "Generation failed",
+  taskFailedNoDetail:
+    "The backend reported a failure without an error message.",
+  taskStoppedTitle: "This task did not finish",
+  taskNoArtifactsTitle: "The wiki was not published",
+  taskNoArtifactsDetail:
+    "The task finished, but it has no structure or content URLs to read from.",
+  taskNotFoundTitle: "Task not found",
+  taskNotFoundDetail:
+    "No task exists with this id. It may have been deleted, or the link is wrong.",
+  taskUnreachableStamp: "offline",
+  taskUnreachableTitle: "Could not reach the task service",
+  taskRegenerate: "Generate again",
+  taskRegenerating: "Starting…",
+  taskBackToRepos: "Back to repos",
+  taskIdLabel: "Task",
+  taskCreatedLabel: "Started",
+  taskUpdatedLabel: "Last update",
   loading: "Loading...",
   error: "Something went wrong",
 } as const;
