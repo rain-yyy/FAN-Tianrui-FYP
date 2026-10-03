@@ -1,13 +1,11 @@
 name: Backend
 
-# DISABLED: automatic triggers are commented out; re-enable by uncommenting them. Manual runs only.
 on:
-  workflow_dispatch:
-  # push:
-  #   branches: [main]
-  #   paths: ["docker/**", ".github/workflows/backend.yml"]
-  # pull_request:
-  #   paths: ["docker/**", ".github/workflows/backend.yml"]
+  push:
+    branches: [main,ci/backend-workflow]
+    paths: ["docker/**", ".github/workflows/backend.yml"]
+  pull_request:
+    paths: ["docker/**", ".github/workflows/backend.yml"]
 
 concurrency:
   group: backend-${{ github.ref }}
@@ -49,7 +47,7 @@ jobs:
 
       - name: API smoke test
         run: |
-          uv run python scripts/api.py > api.log 2>&1 &
+          .venv/bin/python scripts/api.py > api.log 2>&1 &
           for i in $(seq 1 60); do
             if curl -fsS localhost:8000/health; then exit 0; fi
             sleep 2

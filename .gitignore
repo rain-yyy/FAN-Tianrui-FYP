@@ -39,3 +39,7 @@ skills-lock.json
 /frontend/.impeccable/
 /frontend/PRODUCT.md
 /Document/FRONTEND_REDESIGN_PLAN.md
+
+# frontend
+/frontend/example/
+/frontend/.vercel/
