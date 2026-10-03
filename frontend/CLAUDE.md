@@ -1,45 +1,60 @@
-# CLAUDE.md
+# CLAUDE.md — frontend
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Next.js 16 + React 19 client SPA for GitReader (repo → wiki + tool-using chat). Backend contract: `../Document/API_DOCUMENTATION.md`. The repo-root `../CLAUDE.md` covers the backend.
 
 ## Commands
 
 ```bash
-npm run dev     # start Next.js dev server (Turbopack)
-npm run build   # production build
-npm run start   # serve the production build
-npm run lint    # eslint (flat config: eslint-config-next core-web-vitals + typescript)
+npm run dev        # next dev (Turbopack) on :3000
+npm run build      # production build; must pass before handing work back
+npm run lint       # biome check . (there is no eslint)
+npm run lint:fix   # biome check --write
+npx biome check <files>   # lint only what you touched (see below)
 ```
 
-There is no test suite configured in this package.
+No test suite. Verify UI changes in a browser: run `npm run dev`, open `http://localhost:3000/app/...`, and check the console.
+
+## Rules
+
+- **Biome is the linter and formatter** (`biome.jsonc`): double quotes, semicolons, 80-column lines, sorted imports, React rules. Existing files still fail `npm run lint` (about 100 legacy errors). **Make every file you touch pass `npx biome check <file>`; don't clean up files you aren't changing.** Formatting a legacy file rewrites the whole thing, so leave a legacy file alone unless the task needs it.
+- Use the `@/` alias for `src/*`. Put UI copy in `src/lib/i18n.ts` (`t("key")`, English only). Use design tokens (below), not raw Tailwind palette colors like `stone-*` or `sky-*`.
+- Don't change the backend or invent endpoints. Task state comes **only** from `POST /task/{id}`; never infer it on the client.
+- Follow the `vercel-react-best-practices` skill: lazy-load heavy components, avoid request waterfalls, clean up polling and SSE on unmount, and keep streamed tokens from re-rendering the whole tree.
+- **After every change, sweep for dead code and delete it**: unused exports, components, hooks, i18n keys, CSS tokens and aliases, and `public/` assets. Find them with `grep -rn "<name>" src`. Unexport anything used only inside its own file. Changes to dependencies (`package.json`) need the user's approval first.
+- Don't commit. The user commits by hand. This is a solo project: suggest **one short one-line commit message** (conventional prefix, no body), and don't split work into overly fine commits.
 
 ## Architecture
 
-This is a Next.js 16 (App Router) app, but the App Router is used only as a **static shell**: every real route is handled client-side by `react-router-dom`, not by Next's file-based routing.
+- **Routing is client-side.** `src/app/[...slug]/page.tsx` and `src/app/page.tsx` dynamically import `src/router/RouterApp.tsx` (`ssr: false`), which owns the real route tree (`createBrowserRouter`). Add a page as `src/views/XPage.tsx` plus a lazy wrapper in `src/router/routes/`. `src/app/(dashboard)/…` and `(auth)/…` are legacy redirect shims; never add routes there.
+- **Route tree:** `RootLayoutView` → `GlobalRouteGuard` → public (`/login`, `/auth/callback`) and `AuthGuard` → `/app` (`AppLayout`) → `dashboard`, `history` (role `user`), `wiki/:taskId`. Guards live in `src/router/guards.tsx`; auth comes from `src/providers/AuthProvider.tsx` (Supabase, `useAuth()`).
+- **Shell:** `src/layouts/AppLayout.tsx` has the indigo left rail (Repos, History, account menu); below `md` it becomes a top bar. `src/layouts/ShellContext.tsx`: a workspace page calls `useRegisterShellRepo(repoUrl, href)` to show its repo in the rail.
+- **Wiki page:** `src/views/WikiPage.tsx` uses `useTaskStatus` (`src/hooks/useTaskStatus.ts`), which polls while the task is `pending`/`processing` and stops on any other status, an error, or unmount. Every non-ready state renders `src/components/wiki/TaskStatePanel.tsx`. `WikiViewer` renders only for `completed`/`cached` with R2 URLs.
+- **Reading desk:** `WikiViewer` fetches structure and page JSON from the R2 CDN (not the API) with `AbortController` and caches them per session; artifacts are immutable per task. The `/app/wiki/*` route is full-bleed (`AppLayout` drops its padding), and only the article column scrolls. Layout: `WikiToc` (collapsible to codes only; a full-screen dialog below `md`) | `WikiArticle` (serif, `max-w-measure`) | margin notes (a second grid column when the reading column is at least `@5xl`, i.e. 64rem, as a container query; otherwise inline after each block).
+- **Chapter codes:** `src/lib/wikiToc.ts` (`parseWikiToc`) gives top-level chapters `D1…Dn` and pages `Dn.m`, and keeps each node's `files`. The current page lives in the URL as `?d=D3.2`, so links, back/forward and deep links all work. The color slot comes from the top-level chapter (`slotFill`/`slotSwatch`, slots 1–7, then `other`). Parent chapters have their own page JSON. `toc.byFile` maps a path to every page that lists it.
+- **API client:** `src/lib/api.ts`. `askQuestionStream` is a hand-rolled SSE parser for `/chat/stream` (events `turn_start`, `iteration_start`, `tool_call_start`, `tool_call_result`, `answer_token`, `answer_done`, `complete`, `error`); a new stream should follow the same pattern. `normalizeRepoUrl()` must match the backend's `_normalize_repo_url`.
+- **Citations:** `src/lib/citations.ts` is the only parser for chat `sources` strings (`code:/abs/…/data/repos/<repo>/x.py`, `x.py:12-40`, `web:<url>`). It normalizes paths to repo-relative form, which `POST /file/content` requires. `parseCitations()` returns de-duplicated `files` and `links`; chips and the Code Inspector must index into the same `files` array.
+- **Margin notes:** `src/lib/wikiNotes.ts` (`placeNotes`) numbers a page's `files` and puts each one beside the first block that mentions its path (or a basename that is unique on the page); unmentioned files go beside the intro. Inline code naming a cited file gets a superscript number. Hovering or focusing a note marks every page that cites it in the TOC in `evidence` red; clicking opens the lazy-loaded `CodeViewer`. Only about 20% of files are mentioned in the generated text, so most notes sit beside the intro.
+- **Mermaid:** `Mermaid.tsx` loads mermaid through one shared promise, renders in a single effect (so the first visit works too), uses `securityLevel: "strict"`, and builds its `base` theme from the design tokens.
+- **Docked chat:** `ChatInterface` is the right column of the reading desk at `lg` and up (collapsible to a strip; the preference is in localStorage), and a full-screen panel below `lg`. `WikiViewer` passes the current page (`page`: code, title, first file) for the empty-state example questions, plus `currentPageContext`, and keys the panel by `repoUrl`. History loads the first time it's opened. Messages sit in a `flex-col-reverse` scroller, which keeps the newest message in view without scroll effects. `MessageItem`, `LiveStepFlow`, `SourcesPanel` and `CodeViewer` render inside it.
+- **Streaming:** `useChatStream` owns an `AbortController`. `stop()` (and unmounting) aborts, and `sendMessage` then rejects with `ChatStreamStopped`, carrying the partial answer, which is kept with a "stopped" label. Errors show a Retry button that re-asks the last question. `api.askQuestionStream` and `api.getTaskStatus` take an `AbortSignal`.
 
-- `src/app/page.tsx` and `src/app/[...slug]/page.tsx` both just render `RouterApp` (dynamically imported with `ssr: false`). The catch-all route means Next always hands off to the client router regardless of path.
-- `src/router/RouterApp.tsx` defines the actual route tree with `createBrowserRouter`. This is the file to edit when adding/moving pages. Route components live in `src/router/routes/*Route.tsx` (thin lazy wrappers) and render views from `src/views/*Page.tsx`.
-- Route tree shape: `/` (`RootLayoutView`) → `GlobalRouteGuard` (records last-visited path to `localStorage` under `wiki_route_tracking`, used by `RestoreLastPath` to send `/` back to wherever the user was) → public routes (`/login`, `/auth/callback`) and `AuthGuard`-protected routes under `/app` (`AppLayout` → `dashboard`, `history` (requires role `user` via `RoutePermissionGuard`), `wiki/:taskId`).
-- Auth guards and role checks are in `src/router/guards.tsx`. Auth state comes from `src/providers/AuthProvider.tsx`, which wraps Supabase (`src/lib/supabase.ts`) session state in a context (`useAuth()`).
-- All interactive components are `'use client'` — there is effectively no server-rendered content; treat this as a client SPA that happens to be deployed via Next/Vercel.
+## Design system (`src/app/globals.css`)
 
-### Backend integration
+Tufte-style scientific publishing: cool paper, ink text, a deep-indigo rail, flat fills, hairlines, **no gradients**.
 
-- `src/lib/api.ts` is the single client for the FastAPI backend (see `../docker/scripts/api.py` in the monorepo). It covers wiki generation tasks (`/generate`, `/task/:id`, `/tasks`, `/dashboard/repos`) and the single unified, agent-first chat endpoint (`/chat`, `/chat/stream` SSE, `/chat/history`, `/chat/messages/:id`) — there is no separate "RAG mode" vs. "Agent mode" split; `/chat`'s `ChatTurnResponse` returns a tool-call trajectory (`ToolTrajectoryStep[]`, field `tool_trajectory`) alongside the answer, and `/chat/stream` emits it incrementally via `turn_start`/`iteration_start`/`tool_call_start`/`tool_call_result`/`answer_token`/`answer_done`/`complete`/`error` events.
-- **`API_BASE_URL` in `src/lib/api.ts` is currently hardcoded to `http://localhost:8000`** (the `NEXT_PUBLIC_API_URL` env read is commented out). When working against a deployed backend, check this constant first.
-- The SSE stream parser (`askQuestionStream`) is a hand-rolled `event:`/`data:` line parser, not `EventSource` — follow the same pattern if adding another streaming endpoint.
-- `normalizeRepoUrl()` in `api.ts` must stay in sync with the backend's `_normalize_repo_url` — it's how the frontend matches a pasted GitHub URL to an already-indexed repo.
+- **Surfaces and text:** `paper`, `sheet`, `ink`. **Neutral ramp:** `n-1`…`n-9` (`n-6` is the lightest neutral allowed for body text; `n-5` and lighter are for lines only). **Rail:** `rail`, `rail-raised`, `rail-line`, `rail-ink`, `rail-muted`.
+- **`evidence` (red) marks "current evidence" only.** Don't use it for errors or status.
+- **Directory colors** `dir-1`…`dir-7` plus `dir-other`: a fixed order, never cycled, with a matching `-on` text color for solid fills. Several are below 3:1 contrast on paper, so always pair a color with its directory code.
+- **Fonts:** `font-serif` (Source Serif 4) for reading text, `font-sans` (IBM Plex Sans) for UI, `font-mono` (IBM Plex Mono) for code and `tabular-nums` figures. `max-w-measure` = 68ch.
+- `muted-foreground` is the only legacy alias left, and only the login component `Auth.tsx` uses it. Don't use it in new code, and delete it once Auth is migrated.
 
-### Wiki viewer / chat
+## Gotchas
 
-- `WikiViewer` (`src/components/WikiViewer.tsx`) fetches a wiki structure JSON and per-section content JSON (from R2/CDN URLs returned by the task status, not from the API base) and renders Markdown + Mermaid diagrams, with an in-memory TTL cache (`contentCache`) keyed by content URL.
-- `ChatInterface` (`src/components/ChatInterface.tsx`) implements the single chat/agent panel embedded in the wiki view: chat history sidebar, streaming answer rendering (`MessageItem`), source citations (`SourcesPanel`, `CodeViewer`), and a live tool-call/iteration display (`LiveStepFlow`) driven by the unified SSE event vocabulary — there is no mode toggle. It locally replicates the backend's chat-title generation (`generateChatPreview`) to avoid an extra round trip.
-- `src/lib/i18n.ts` is a flat English string table (`t()` lookup) — there is no locale switching, it exists purely to keep UI copy out of components.
+- **The API base URL comes from env.** `api.ts` reads `NEXT_PUBLIC_API_URL`, and `.env.local` points it at the deployed backend (`//fan-tianrui-fyp.fly.dev`), so local dev hits production data unless you change it. Fallback: `http://localhost:8000`.
+- `wiki_route_tracking` in localStorage drives the "restore last page" redirect on `/`. `/` itself is never recorded (recording it caused a blank-page redirect loop).
+- `next build` rewrites `next-env.d.ts`; don't commit that change.
+- The production chat currently fails (`User not found.` from the model provider), and some wikis have no vector index. See `../Document/BACKEND_GAPS_FOR_FRONTEND.md`. To test streaming, mock `/chat/stream` in the browser.
 
-### Path aliases
+## Redesign in progress
 
-`@/*` maps to `src/*` (see `tsconfig.json`). Use `@/...` imports rather than relative paths across directories, matching the existing codebase.
-
-## Environment
-
-Relevant vars (see `.env.local`, not committed): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (required for auth — `lib/supabase.ts` warns and falls back to an unusable client if missing), `NEXT_PUBLIC_API_URL` (currently unused, see above).
+The Wiki workspace and shell are being rebuilt in 12 reviewable steps. The plan and progress log are in `../Document/FRONTEND_REDESIGN_PLAN.md`. The design direction and critique are in `.impeccable/surfaces/` and `.impeccable/critique/`, with product context in `PRODUCT.md`. All of these are local and gitignored. Done so far: tokens and fonts, the shell rail, the task-status guard, citation parsing, the reading desk with chapter codes, margin notes with Mermaid, and the docked, abortable chat. Update this file at the end of every step.

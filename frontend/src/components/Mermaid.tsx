@@ -1,435 +1,267 @@
-'use client';
+"use client";
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { AlertTriangle, RefreshCw, Code2, X, ZoomIn } from 'lucide-react';
+import { Code2, Maximize2, RefreshCw, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "@/lib/i18n";
 
-interface MermaidProps {
-  chart: string;
-  isStreaming?: boolean;
+type MermaidApi = typeof import("mermaid").default;
+
+let mermaidReady: Promise<MermaidApi> | null = null;
+
+/** Loads and configures mermaid once; every diagram awaits the same promise. */
+function loadMermaid(): Promise<MermaidApi> {
+  if (!mermaidReady) {
+    mermaidReady = import("mermaid")
+      .then(({ default: mermaid }) => {
+        // Mermaid needs literal colors, so read the design tokens once.
+        const style = getComputedStyle(document.documentElement);
+        const token = (name: string) =>
+          style.getPropertyValue(`--color-${name}`).trim();
+        mermaid.initialize({
+          startOnLoad: false,
+          suppressErrorRendering: true,
+          securityLevel: "strict",
+          theme: "base",
+          fontFamily: style.getPropertyValue("--font-sans").trim(),
+          themeVariables: {
+            background: token("sheet"),
+            primaryColor: token("sheet"),
+            primaryTextColor: token("ink"),
+            primaryBorderColor: token("n-6"),
+            secondaryColor: token("n-1"),
+            tertiaryColor: token("n-1"),
+            lineColor: token("n-6"),
+            textColor: token("ink"),
+            clusterBkg: token("n-1"),
+            clusterBorder: token("n-4"),
+            edgeLabelBackground: token("sheet"),
+            fontSize: "14px",
+          },
+          flowchart: { htmlLabels: true, curve: "basis" },
+        });
+        return mermaid;
+      })
+      .catch((error: unknown) => {
+        mermaidReady = null; // allow a later retry
+        throw error;
+      });
+  }
+  return mermaidReady;
 }
 
-// Ensure mermaid is initialized only once (client-side).
-let mermaidInitialized = false;
-let mermaidModule: typeof import('mermaid') | null = null;
+const DIAGRAM_TYPES = [
+  "graph",
+  "flowchart",
+  "sequencediagram",
+  "classdiagram",
+  "statediagram",
+  "erdiagram",
+  "gantt",
+  "pie",
+  "journey",
+  "mindmap",
+  "timeline",
+  "gitgraph",
+  "quadrantchart",
+  "sankey",
+  "xychart",
+  "block-beta",
+];
 
-// Basic Mermaid syntax checks before render.
-const validateMermaidSyntax = (code: string): { valid: boolean; error?: string } => {
-  if (!code || !code.trim()) {
-    return { valid: false, error: 'Empty diagram code' };
-  }
+/** Strips a surrounding ``` fence the generator sometimes leaves in. */
+function cleanChart(code: string): string {
+  return code
+    .trim()
+    .replace(/^```(?:mermaid)?\s*/, "")
+    .replace(/```$/, "")
+    .trim();
+}
 
-  const trimmed = code.trim();
-  
-  // Check for incomplete code blocks (streaming artifacts)
-  if (trimmed.includes('```') && !trimmed.endsWith('```')) {
-    return { valid: false, error: 'Incomplete code block' };
-  }
-  
-  // Check for basic diagram type declaration
-  const validStarters = [
-    'graph', 'flowchart', 'sequenceDiagram', 'classDiagram', 
-    'stateDiagram', 'erDiagram', 'gantt', 'pie', 'journey',
-    'mindmap', 'timeline', 'gitGraph', 'quadrantChart', 'sankey',
-    'xychart', 'block-beta'
-  ];
-  
-  const firstLine = trimmed.split('\n')[0].toLowerCase().trim();
-  const hasValidStarter = validStarters.some(s => firstLine.startsWith(s.toLowerCase()));
-  
-  if (!hasValidStarter) {
-    return { valid: false, error: 'Missing diagram type declaration' };
-  }
-  
-  // Check for balanced brackets
-  const openBrackets = (code.match(/\[/g) || []).length;
-  const closeBrackets = (code.match(/\]/g) || []).length;
-  if (openBrackets !== closeBrackets) {
-    return { valid: false, error: 'Unbalanced brackets' };
-  }
-  
-  // Check for balanced parentheses
-  const openParens = (code.match(/\(/g) || []).length;
-  const closeParens = (code.match(/\)/g) || []).length;
-  if (openParens !== closeParens) {
-    return { valid: false, error: 'Unbalanced parentheses' };
-  }
-  
-  return { valid: true };
-};
+function hasDiagramType(code: string): boolean {
+  const firstLine = code.split("\n")[0].trim().toLowerCase();
+  return DIAGRAM_TYPES.some((type) => firstLine.startsWith(type));
+}
 
-// Clean mermaid code from markdown artifacts
-const cleanMermaidCode = (code: string): string => {
-  let cleaned = code.trim();
-  
-  // Remove markdown code fences
-  if (cleaned.startsWith('```mermaid')) {
-    cleaned = cleaned.slice(10);
-  } else if (cleaned.startsWith('```')) {
-    cleaned = cleaned.slice(3);
-  }
-  
-  if (cleaned.endsWith('```')) {
-    cleaned = cleaned.slice(0, -3);
-  }
-  
-  return cleaned.trim();
-};
+const NODE_LABEL = /(\w+)\[([^\]"]*)\]/g;
 
-export default function Mermaid({ chart, isStreaming = false }: MermaidProps) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [svg, setSvg] = useState<string>('');
-  const [isError, setIsError] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [isLoading, setIsLoading] = useState(true);
+/**
+ * Quotes `[...]` labels containing characters that are syntax in Mermaid,
+ * a common failure in generated diagrams. `aggressive` also escapes quotes
+ * and angle brackets.
+ */
+function quoteLabels(code: string, aggressive: boolean): string {
+  const special = aggressive ? /[()@<>#;&,:.`'"]/ : /[()@<>#;&,:.`']/;
+  return code.replace(NODE_LABEL, (match, id: string, label: string) => {
+    if (!special.test(label)) return match;
+    let safe = label.replace(/"/g, "'");
+    if (aggressive) safe = safe.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `${id}["${safe}"]`;
+  });
+}
+
+let renderSeq = 0;
+
+async function renderChart(code: string): Promise<string> {
+  const mermaid = await loadMermaid();
+  try {
+    return (
+      await mermaid.render(`mmd-${++renderSeq}`, quoteLabels(code, false))
+    ).svg;
+  } catch {
+    return (await mermaid.render(`mmd-${++renderSeq}`, quoteLabels(code, true)))
+      .svg;
+  }
+}
+
+type RenderState =
+  | { status: "loading" }
+  | { status: "ready"; svg: string }
+  | { status: "error"; message: string };
+
+const smallButtonClass =
+  "inline-flex items-center gap-1.5 border border-n-3 bg-sheet px-2 py-1 text-n-7 text-xs hover:border-n-5 hover:text-ink";
+
+function ZoomedDiagram({ svg, onClose }: { svg: string; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      opener?.focus();
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("wikiDiagram")}
+      className="fixed inset-0 z-[60] flex flex-col bg-sheet"
+    >
+      <div className="flex h-12 shrink-0 items-center justify-end border-n-3 border-b px-4">
+        <button
+          ref={closeRef}
+          type="button"
+          onClick={onClose}
+          aria-label={t("diagramClose")}
+          className="-mr-2 p-2 text-n-7 hover:text-ink"
+        >
+          <X aria-hidden className="h-5 w-5" />
+        </button>
+      </div>
+      <div
+        className="min-h-0 flex-1 overflow-auto p-8 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:w-full [&_svg]:max-w-none"
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: SVG produced by mermaid with securityLevel "strict"
+        dangerouslySetInnerHTML={{ __html: svg }}
+      />
+    </div>
+  );
+}
+
+export default function Mermaid({ chart }: { chart: string }) {
+  const code = useMemo(() => cleanChart(chart), [chart]);
+  const valid = code !== "" && hasDiagramType(code);
+  const [state, setState] = useState<RenderState>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
   const [showSource, setShowSource] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
-  const [isZoomed, setIsZoomed] = useState(false);
-  const renderAttemptRef = useRef(0);
+  const [zoomed, setZoomed] = useState(false);
+  const closeZoom = useCallback(() => setZoomed(false), []);
 
-  // Close zoom on Escape key
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` re-runs the render on Retry
   useEffect(() => {
-    if (!isZoomed) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsZoomed(false);
+    if (!valid) return;
+    let cancelled = false;
+    setState({ status: "loading" });
+    renderChart(code)
+      .then((svg) => {
+        if (!cancelled) setState({ status: "ready", svg });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : String(error);
+        setState({ status: "error", message: message.slice(0, 200) });
+      });
+    return () => {
+      cancelled = true;
     };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isZoomed]);
+  }, [code, valid, attempt]);
 
-  // Clean and validate chart code
-  const { cleanedChart, isValid, validationError } = useMemo(() => {
-    const cleaned = cleanMermaidCode(chart || '');
-    const validation = validateMermaidSyntax(cleaned);
-    return {
-      cleanedChart: cleaned,
-      isValid: validation.valid,
-      validationError: validation.error,
-    };
-  }, [chart]);
+  const current: RenderState = valid
+    ? state
+    : { status: "error", message: t("diagramMissingType") };
 
-  // Load and initialize mermaid once on the client.
-  useEffect(() => {
-    // Already initialized: mark ready.
-    if (mermaidInitialized && mermaidModule) {
-      setIsLoading(false);
-      return;
-    }
-
-    if (typeof window === 'undefined') return;
-
-    const loadMermaid = async () => {
-      try {
-        // Dynamic import so mermaid only loads in the browser.
-        if (!mermaidModule) {
-          mermaidModule = await import('mermaid');
-        }
-        
-        const mermaid = mermaidModule.default;
-        
-        // One-time initialize.
-        if (!mermaidInitialized) {
-          const currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark';
-          mermaid.initialize({
-            startOnLoad: false,
-            suppressErrorRendering: true,
-            theme: currentTheme,
-            securityLevel: 'loose',
-            fontFamily: 'var(--font-sans)',
-            flowchart: {
-              htmlLabels: true,
-              curve: 'basis',
-            },
-          });
-          mermaid.parseError = (err) => {
-             console.error('Mermaid parse error:', err);
-          };
-          mermaidInitialized = true;
-        }
-        
-        setIsLoading(false);
-      } catch (error) {
-        console.error('Mermaid initialization error:', error);
-        setIsError(true);
-        setErrorMessage('Failed to load diagram library');
-        setIsLoading(false);
-      }
-    };
-
-    loadMermaid();
-  }, []);
-
-  // Patch common Mermaid label issues from streamed output.
-  const fixMermaidSyntax = (mermaidCode: string): string => {
-    let fixed = mermaidCode;
-
-    // Characters that are syntactically special in Mermaid and must be quoted
-    // when they appear inside [] node labels:
-    //   ( )  – rounded-node syntax
-    //   < >  – HTML/subgraph syntax
-    //   @    – email / special use
-    //   # ;  – comment / statement separators
-    //   & ,  – logical operators / list separators
-    //   : .  – subgraph / namespace separators
-    //   '    – string delimiter
-    const SPECIAL = /[()@<>#;&,:.`']/;
-
-    // Step 1: wrap any UNQUOTED [] label that contains special chars in double quotes.
-    // The negative character class [^\]"] ensures we don't re-process already-quoted labels.
-    fixed = fixed.replace(
-      /(\w+)\[([^\]"]*)\]/g,
-      (match, nodeId: string, label: string) => {
-        if (SPECIAL.test(label)) {
-          // Escape any stray double-quotes in the label itself
-          const safeLabel = label.replace(/"/g, "'");
-          return `${nodeId}["${safeLabel}"]`;
-        }
-        return match;
-      }
-    );
-
-    // Step 2: for labels already wrapped in double-quotes, escape HTML angle brackets.
-    fixed = fixed.replace(
-      /(\w+)\["([^"]*)"\]/g,
-      (match, nodeId: string, label: string) => {
-        if (label.includes('<') || label.includes('>')) {
-          return `${nodeId}["${label.replace(/</g, '&lt;').replace(/>/g, '&gt;')}"]`;
-        }
-        return match;
-      }
-    );
-
-    return fixed;
-  };
-
-  // Render diagram when chart / init state changes.
-  useEffect(() => {
-    // Don't render if streaming or invalid
-    if (isStreaming && !isValid) {
-      setIsLoading(false);
-      return;
-    }
-
-    if (!cleanedChart || !mermaidInitialized || !mermaidModule) {
-      if (!cleanedChart) {
-        setIsLoading(false);
-      }
-      return;
-    }
-
-    // Skip rendering if validation fails
-    if (!isValid) {
-      setIsLoading(false);
-      setIsError(true);
-      setErrorMessage(validationError || 'Invalid diagram syntax');
-      return;
-    }
-
-    const currentAttempt = ++renderAttemptRef.current;
-
-    const renderChart = async () => {
-      try {
-        setIsError(false);
-        setErrorMessage('');
-        setIsLoading(true);
-        
-        setSvg('');
-        
-        const mermaid = mermaidModule!.default;
-        const id = `mermaid-${Math.random().toString(36).substring(2, 11)}`;
-        const chartToRender = fixMermaidSyntax(cleanedChart);
-        
-        const { svg: renderedSvg } = await mermaid.render(id, chartToRender);
-        
-        // Only update if this is still the latest attempt
-        if (currentAttempt === renderAttemptRef.current) {
-          setSvg(renderedSvg);
-          setIsLoading(false);
-          setRetryCount(0);
-        }
-      } catch (error: unknown) {
-        console.error('Mermaid render error:', error);
-        console.debug('Chart content:', cleanedChart);
-        
-        // Try aggressive fix
-        try {
-          const mermaid = mermaidModule!.default;
-          const id = `mermaid-retry-${Math.random().toString(36).substring(2, 11)}`;
-          
-          // More aggressive fixes: quote ALL unquoted labels that have special chars
-          const AGGRESSIVE_SPECIAL = /[()@<>#;&,:.`'"]/;
-          const aggressiveFix = cleanedChart
-            .replace(/(\w+)\[([^\]"]*)\]/g, (match, nodeId: string, label: string) => {
-              if (AGGRESSIVE_SPECIAL.test(label)) {
-                const cleanLabel = label
-                  .replace(/"/g, "'")
-                  .replace(/</g, '&lt;')
-                  .replace(/>/g, '&gt;');
-                return `${nodeId}["${cleanLabel}"]`;
-              }
-              return match;
-            });
-          
-          const { svg: renderedSvg } = await mermaid.render(id, aggressiveFix);
-          
-          if (currentAttempt === renderAttemptRef.current) {
-            setSvg(renderedSvg);
-            setIsLoading(false);
-          }
-        } catch (retryError) {
-          console.error('Mermaid retry render error:', retryError);
-          if (currentAttempt === renderAttemptRef.current) {
-            setIsError(true);
-            setErrorMessage(
-              retryError instanceof Error 
-                ? retryError.message.slice(0, 100) 
-                : 'Failed to render diagram'
-            );
-            setIsLoading(false);
-          }
-        }
-      }
-    };
-
-    // Add delay to ensure DOM is ready and debounce rapid changes
-    const timer = setTimeout(() => {
-      renderChart();
-    }, isStreaming ? 500 : 100);
-
-    return () => clearTimeout(timer);
-  }, [cleanedChart, isValid, validationError, isStreaming]);
-
-  // Retry handler
-  const handleRetry = () => {
-    setRetryCount(prev => prev + 1);
-    setIsError(false);
-    setErrorMessage('');
-    setSvg('');
-    setIsLoading(true);
-    
-    // Force re-render by incrementing attempt counter
-    renderAttemptRef.current++;
-  };
-
-  // Streaming state - show placeholder
-  if (isStreaming && !isValid) {
+  if (current.status === "loading") {
     return (
-      <div className="mermaid-container flex justify-center items-center p-6 bg-stone-50 rounded-xl border border-stone-200 min-h-[150px]">
-        <div className="text-stone-600 text-sm flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-sky-500 animate-pulse" />
-          Generating diagram...
-        </div>
+      <div className="flex min-h-40 items-center justify-center border border-n-2 bg-sheet text-n-6 text-sm">
+        {t("diagramRendering")}
       </div>
     );
   }
 
-  if (isLoading) {
+  if (current.status === "error") {
     return (
-      <div className="mermaid-container flex justify-center items-center p-6 bg-stone-50 rounded-xl border border-stone-200 min-h-[200px]">
-        <div className="text-stone-600 text-sm">Rendering diagram...</div>
-      </div>
-    );
-  }
-
-  if (isError) {
-    // Show degraded view with source code and retry option
-    return (
-      <div className="mermaid-container p-4 bg-amber-50 rounded-xl border border-amber-200">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2 text-amber-800 text-sm">
-            <AlertTriangle className="w-4 h-4" />
-            <span>Diagram render failed</span>
-          </div>
-          <div className="flex items-center gap-2">
+      <div className="border-ink border-l-2 bg-sheet p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-ink text-sm">{t("diagramFailed")}</p>
+          <div className="flex gap-2">
             <button
-              onClick={() => setShowSource(!showSource)}
-              className="flex items-center gap-1.5 px-2 py-1 text-xs text-stone-600 hover:text-stone-900 bg-white border border-stone-200 rounded-md transition-colors"
-              aria-label="Toggle source code"
+              type="button"
+              onClick={() => setShowSource((prev) => !prev)}
+              aria-expanded={showSource}
+              className={smallButtonClass}
             >
-              <Code2 className="w-3.5 h-3.5" />
-              {showSource ? 'Hide source' : 'View source'}
+              <Code2 aria-hidden className="h-3.5 w-3.5" />
+              {showSource ? t("diagramHideSource") : t("diagramShowSource")}
             </button>
-            <button
-              onClick={handleRetry}
-              className="flex items-center gap-1.5 px-2 py-1 text-xs text-sky-800 hover:text-sky-900 bg-sky-100 rounded-md transition-colors border border-sky-200"
-              aria-label="Retry rendering"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              Retry
-            </button>
+            {valid ? (
+              <button
+                type="button"
+                onClick={() => setAttempt((prev) => prev + 1)}
+                className={smallButtonClass}
+              >
+                <RefreshCw aria-hidden className="h-3.5 w-3.5" />
+                {t("retry")}
+              </button>
+            ) : null}
           </div>
         </div>
-        
-        {showSource && (
-          <div className="mt-2">
-            <pre className="p-3 bg-white rounded-lg text-xs text-stone-700 border border-stone-200 overflow-x-auto max-h-[200px] overflow-y-auto">
-              <code>{cleanedChart}</code>
+        {showSource ? (
+          <>
+            <pre className="mt-3 max-h-52 overflow-auto border border-n-2 bg-paper p-3 font-mono text-n-8 text-xs">
+              <code>{code}</code>
             </pre>
-            {errorMessage && (
-              <p className="mt-2 text-xs text-amber-800">
-                Error: {errorMessage}
-              </p>
-            )}
-          </div>
-        )}
+            <p className="mt-2 font-mono text-n-7 text-xs">{current.message}</p>
+          </>
+        ) : null}
       </div>
     );
-  }
-
-  if (!svg) {
-    return null;
   }
 
   return (
     <>
-      <div
-        ref={ref}
-        className="mermaid-container relative flex justify-center p-6 bg-stone-50 rounded-xl overflow-x-auto border border-stone-200 cursor-zoom-in group"
-        onClick={() => setIsZoomed(true)}
-        title="Click to enlarge"
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
-      <div className="flex justify-end mt-1">
+      <div className="relative border border-n-2 bg-sheet">
+        <div
+          className="flex justify-center overflow-x-auto p-6"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: SVG produced by mermaid with securityLevel "strict"
+          dangerouslySetInnerHTML={{ __html: current.svg }}
+        />
         <button
-          onClick={() => setIsZoomed(true)}
-          className="flex items-center gap-1 text-[11px] text-stone-400 hover:text-stone-600 transition-colors"
-          aria-label="Enlarge diagram"
+          type="button"
+          onClick={() => setZoomed(true)}
+          aria-label={t("diagramEnlarge")}
+          title={t("diagramEnlarge")}
+          className="absolute top-2 right-2 p-1.5 text-n-6 hover:text-ink"
         >
-          <ZoomIn className="w-3 h-3" />
-          <span>Enlarge</span>
+          <Maximize2 aria-hidden className="h-4 w-4" />
         </button>
       </div>
-      {isZoomed && (
-        <div
-          className="fixed inset-0 z-[9999] bg-black/75 flex items-center justify-center p-6 backdrop-blur-sm"
-          onClick={() => setIsZoomed(false)}
-        >
-          <div
-            className="relative max-w-[92vw] max-h-[88vh] overflow-auto bg-white rounded-2xl p-10 shadow-2xl [&_svg]:!max-width-none [&_svg]:!width-auto [&_svg]:!height-auto"
-            style={{ minWidth: '60vw' }}
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Reset SVG dimensions so it scales naturally in the modal */}
-            <style>{`
-              .mermaid-zoom-inner svg {
-                width: 100% !important;
-                height: auto !important;
-                max-width: 100% !important;
-              }
-            `}</style>
-            <div
-              className="mermaid-zoom-inner"
-              dangerouslySetInnerHTML={{ __html: svg }}
-            />
-          </div>
-          <button
-            className="absolute top-4 right-4 p-2 rounded-full bg-white/20 text-white hover:bg-white/30 transition-colors"
-            onClick={() => setIsZoomed(false)}
-            aria-label="Close enlarged diagram"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-      )}
+      {zoomed ? <ZoomedDiagram svg={current.svg} onClose={closeZoom} /> : null}
     </>
   );
 }

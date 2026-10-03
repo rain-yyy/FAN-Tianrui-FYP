@@ -23,7 +23,8 @@ export function isTaskInFlight(task: TaskStatusResponse): boolean {
  * The response is the single source of truth: nothing is inferred locally.
  * While the task is `pending`/`processing` it is re-fetched every
  * POLL_INTERVAL_MS; polling stops on any other status, on a request error,
- * or when the component unmounts / the task id changes.
+ * or when the component unmounts / the task id changes (the in-flight
+ * request is aborted).
  */
 export function useTaskStatus(taskId: string | undefined) {
   const [state, setState] = useState<TaskStatusState>({ kind: "loading" });
@@ -36,20 +37,19 @@ export function useTaskStatus(taskId: string | undefined) {
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     setState({ kind: "loading" });
 
     const load = async () => {
       try {
-        const task = await api.getTaskStatus(taskId);
-        if (cancelled) return;
+        const task = await api.getTaskStatus(taskId, controller.signal);
         setState({ kind: "task", task });
         if (isTaskInFlight(task)) {
           timer = setTimeout(load, POLL_INTERVAL_MS);
         }
       } catch (error) {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         const statusCode = (error as { statusCode?: number }).statusCode;
         setState(
           statusCode === 404
@@ -64,7 +64,7 @@ export function useTaskStatus(taskId: string | undefined) {
 
     void load();
     return () => {
-      cancelled = true;
+      controller.abort();
       if (timer) clearTimeout(timer);
     };
   }, [taskId, attempt]);

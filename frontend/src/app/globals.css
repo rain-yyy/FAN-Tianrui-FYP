@@ -71,7 +71,7 @@
 }
 
 /*
- * Legacy alias still used by unmigrated components (Auth, MessageItem).
+ * Legacy alias still used by the unmigrated login component (Auth.tsx).
  * Delete once nothing references it.
  */
 @theme inline {

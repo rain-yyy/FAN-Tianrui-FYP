@@ -21,6 +21,7 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import type { ChatMessage, ToolTrajectoryStep } from "@/lib/api";
 import { parseCitations } from "@/lib/citations";
+import { t } from "@/lib/i18n";
 import { getToolDescription } from "@/lib/toolDescriptions";
 import { cn } from "@/lib/utils";
 import CodeViewer from "./CodeViewer";
@@ -31,8 +32,9 @@ export interface DisplayMessage extends ChatMessage {
   timestamp: Date;
   sources?: string[];
   isError?: boolean;
+  /** The user stopped the stream; `content` is the partial answer. */
+  stopped?: boolean;
   tool_trajectory?: ToolTrajectoryStep[];
-  isNew?: boolean;
 }
 
 const toolIcons: Record<string, React.ReactNode> = {
@@ -44,48 +46,8 @@ const toolIcons: Record<string, React.ReactNode> = {
   web_search: <Globe className="w-3.5 h-3.5" />,
 };
 
-const StreamingMarkdown = ({
-  content,
-  isNew,
-}: {
-  content: string;
-  isNew?: boolean;
-}) => {
-  const [isStabilized, setIsStabilized] = useState(!isNew);
-
-  React.useEffect(() => {
-    if (!isNew) {
-      setIsStabilized(true);
-      return;
-    }
-
-    // For new messages, wait a short moment before enabling full markdown
-    // This prevents expensive re-renders during rapid content updates
-    const timer = setTimeout(() => {
-      setIsStabilized(true);
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, [isNew]);
-
-  // If content is still streaming or very new, render with simpler processing
-  if (!isStabilized && isNew) {
-    return (
-      <div className="whitespace-pre-wrap text-stone-800 text-[15px] leading-[1.7]">
-        {content}
-      </div>
-    );
-  }
-
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
-    >
-      {content}
-    </ReactMarkdown>
-  );
-};
+const REMARK_PLUGINS = [remarkGfm];
+const REHYPE_PLUGINS = [rehypeHighlight];
 
 const TrajectoryDisplay = ({
   trajectory,
@@ -220,13 +182,8 @@ export const MessageItem = React.memo(
           >
             {!isUser && (
               <div className="flex items-center gap-2 mb-1.5 ml-1">
-                <span className="text-[13px] font-medium tracking-wide text-teal-700">
-                  Agent
-                </span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-teal-100 text-teal-900 border border-teal-200 font-mono tracking-wider">
-                  AGENT
-                </span>
-                <span className="text-[11px] text-muted-foreground/40">
+                <span className="font-medium text-ink text-sm">Agent</span>
+                <span className="font-mono text-n-6 text-xs tabular-nums">
                   {message.timestamp.toLocaleTimeString([], {
                     hour: "2-digit",
                     minute: "2-digit",
@@ -245,12 +202,20 @@ export const MessageItem = React.memo(
               {isUser ? (
                 <div className="whitespace-pre-wrap">{message.content}</div>
               ) : (
-                <StreamingMarkdown
-                  content={message.content}
-                  isNew={message.isNew}
-                />
+                <ReactMarkdown
+                  remarkPlugins={REMARK_PLUGINS}
+                  rehypePlugins={REHYPE_PLUGINS}
+                >
+                  {message.content}
+                </ReactMarkdown>
               )}
             </div>
+
+            {message.isError || message.stopped ? (
+              <p className="border-ink border-l-2 pl-3 font-mono text-n-7 text-xs">
+                {message.isError ? t("chatTurnFailed") : t("chatStopped")}
+              </p>
+            ) : null}
 
             {!isUser &&
               message.tool_trajectory &&
@@ -261,9 +226,9 @@ export const MessageItem = React.memo(
             {!isUser &&
               (citations.files.length > 0 || citations.links.length > 0) && (
                 <div className="mt-5">
-                  <div className="text-[10px] text-stone-500 font-medium uppercase tracking-wider mb-2.5 flex items-center gap-2">
+                  <div className="mb-2.5 flex items-center gap-2 font-medium text-n-6 text-xs uppercase tracking-wider">
                     <span>References</span>
-                    <div className="h-[1px] flex-1 bg-gradient-to-r from-stone-200 to-transparent"></div>
+                    <div className="h-px flex-1 bg-n-2" />
                   </div>
                   <SourcesPanel
                     files={citations.files}

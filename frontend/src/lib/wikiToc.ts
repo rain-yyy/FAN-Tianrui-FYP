@@ -28,6 +28,8 @@ export interface WikiToc {
   byCode: Map<string, TocNode>;
   /** Depth-first reading order. */
   order: TocNode[];
+  /** Repo-relative path → every page that lists it, in reading order. */
+  byFile: Map<string, TocNode[]>;
 }
 
 const DIR_SLOTS = 7;
@@ -113,11 +115,17 @@ export function parseWikiToc(data: unknown): WikiToc {
   const byId = new Map<string, TocNode>();
   const byCode = new Map<string, TocNode>();
   const order: TocNode[] = [];
+  const byFile = new Map<string, TocNode[]>();
   const walk = (list: TocNode[]) => {
     for (const node of list) {
       byId.set(node.id, node);
       byCode.set(node.code, node);
       order.push(node);
+      for (const file of node.files) {
+        const pages = byFile.get(file);
+        if (pages) pages.push(node);
+        else byFile.set(file, [node]);
+      }
       walk(node.children);
     }
   };
@@ -126,5 +134,5 @@ export function parseWikiToc(data: unknown): WikiToc {
     data && typeof data === "object" && !Array.isArray(data)
       ? asString((data as { title?: unknown }).title)
       : null;
-  return { title: title ?? "", nodes, byId, byCode, order };
+  return { title: title ?? "", nodes, byId, byCode, order, byFile };
 }

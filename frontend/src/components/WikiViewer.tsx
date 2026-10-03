@@ -211,6 +211,7 @@ export default function WikiViewer({
   const [searchParams] = useSearchParams();
   const [tocCollapsed, setTocCollapsed] = useState(false);
   const [contentsOpen, setContentsOpen] = useState(false);
+  const [evidencePath, setEvidencePath] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const closeContents = useCallback(() => setContentsOpen(false), []);
 
@@ -239,9 +240,18 @@ export default function WikiViewer({
   const nodeId = node?.id;
   useEffect(() => {
     if (nodeId) scrollRef.current?.scrollTo({ top: 0 });
+    setEvidencePath(null);
   }, [nodeId]);
+  const evidence = evidencePath ? toc?.byFile.get(evidencePath) : undefined;
 
   const chatContext = node ? pageContext(node, chapter, page.data) : undefined;
+  const chatPage = useMemo(
+    () =>
+      node
+        ? { code: node.code, title: node.title, file: node.files[0] }
+        : undefined,
+    [node],
+  );
 
   if (structure.error) {
     return (
@@ -259,7 +269,7 @@ export default function WikiViewer({
       <aside
         className={cn(
           "hidden shrink-0 flex-col border-n-3 border-r bg-sheet md:flex",
-          tocCollapsed ? "w-16" : "w-64 lg:w-72",
+          tocCollapsed ? "w-16" : "w-56 2xl:w-72",
         )}
       >
         <div
@@ -300,13 +310,17 @@ export default function WikiViewer({
               nodes={toc.nodes}
               activeId={node.id}
               activeChapterId={node.chapterId}
+              evidence={evidence}
               compact={tocCollapsed}
             />
           ) : null}
         </nav>
       </aside>
 
-      <div ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="@container min-w-0 flex-1 overflow-y-auto"
+      >
         {node ? (
           <div className="sticky top-0 z-10 flex h-12 items-center border-n-3 border-b bg-paper px-4 md:hidden">
             <button
@@ -325,13 +339,15 @@ export default function WikiViewer({
           </div>
         ) : null}
 
-        {/* Second track is the margin-note column (filled in step 6). */}
-        <div className="mx-auto grid max-w-6xl px-5 py-10 md:px-10 lg:py-14 xl:grid-cols-[minmax(0,var(--container-measure))_14rem] xl:gap-x-12">
-          {node ? (
+        <div className="mx-auto max-w-6xl px-5 py-10 md:px-10 lg:py-14">
+          {node && toc ? (
             <WikiArticle
               node={node}
               chapter={chapter}
               body={page.data}
+              byFile={toc.byFile}
+              repoUrl={repoUrl}
+              onEvidence={setEvidencePath}
               state={
                 !pageUrl
                   ? "missing"
@@ -352,10 +368,12 @@ export default function WikiViewer({
 
       {repoUrl ? (
         <ChatInterface
+          // A different repo starts a fresh conversation.
+          key={repoUrl}
           userId={userId}
           repoUrl={repoUrl}
+          page={chatPage}
           currentPageContext={chatContext}
-          currentPageTitle={node?.title}
           initialChatId={initialChatId}
         />
       ) : null}

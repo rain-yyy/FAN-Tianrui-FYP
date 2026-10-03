@@ -11,13 +11,15 @@ interface WikiTocProps {
   nodes: TocNode[];
   activeId: string | null;
   activeChapterId: string | null;
+  /** Pages citing the hovered margin note: the "current evidence". */
+  evidence?: readonly TocNode[];
   /** Codes only: the collapsed desktop column. */
   compact?: boolean;
   onNavigate?: () => void;
 }
 
 /** `?d=<code>` on the current URL, keeping every other parameter. */
-function useCodeHref() {
+export function useCodeHref() {
   const [params] = useSearchParams();
   return (code: string) => {
     const next = new URLSearchParams(params);
@@ -29,12 +31,14 @@ function useCodeHref() {
 function TocRow({
   node,
   active,
+  evidence,
   compact,
   href,
   onNavigate,
 }: {
   node: TocNode;
   active: boolean;
+  evidence: boolean;
   compact: boolean;
   href: { search: string };
   onNavigate?: () => void;
@@ -49,6 +53,10 @@ function TocRow({
         "flex min-w-0 flex-1 items-baseline gap-2 py-1 pr-2 text-sm leading-snug",
         compact ? "justify-center pl-0" : "pl-2",
         active ? slotFill(node.slot) : "text-n-8 hover:bg-n-1 hover:text-ink",
+        evidence &&
+          (active
+            ? "outline-2 outline-evidence -outline-offset-2"
+            : "bg-evidence-tint text-ink shadow-[inset_2px_0_0_var(--color-evidence)]"),
       )}
     >
       {active ? null : (
@@ -68,11 +76,13 @@ function TocRow({
 function PageList({
   nodes,
   activeId,
+  evidenceIds,
   codeHref,
   onNavigate,
 }: {
   nodes: TocNode[];
   activeId: string | null;
+  evidenceIds: ReadonlySet<string>;
   codeHref: (code: string) => { search: string };
   onNavigate?: () => void;
 }) {
@@ -84,6 +94,7 @@ function PageList({
             <TocRow
               node={node}
               active={node.id === activeId}
+              evidence={evidenceIds.has(node.id)}
               compact={false}
               href={codeHref(node.code)}
               onNavigate={onNavigate}
@@ -93,6 +104,7 @@ function PageList({
             <PageList
               nodes={node.children}
               activeId={activeId}
+              evidenceIds={evidenceIds}
               codeHref={codeHref}
               onNavigate={onNavigate}
             />
@@ -103,14 +115,19 @@ function PageList({
   );
 }
 
+const NO_EVIDENCE: readonly TocNode[] = [];
+
 export const WikiToc = memo(function WikiToc({
   nodes,
   activeId,
   activeChapterId,
+  evidence = NO_EVIDENCE,
   compact = false,
   onNavigate,
 }: WikiTocProps) {
   const codeHref = useCodeHref();
+  const evidenceIds = new Set(evidence.map((node) => node.id));
+  const evidenceChapters = new Set(evidence.map((node) => node.chapterId));
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -152,6 +169,11 @@ export const WikiToc = memo(function WikiToc({
                   // Codes-only column: the chapter stands in for its pages.
                   (compact && activeChapterId === chapter.id)
                 }
+                evidence={
+                  evidenceIds.has(chapter.id) ||
+                  // Pages are hidden: mark the chapter that holds them.
+                  (!open && evidenceChapters.has(chapter.id))
+                }
                 compact={compact}
                 href={codeHref(chapter.code)}
                 onNavigate={onNavigate}
@@ -161,6 +183,7 @@ export const WikiToc = memo(function WikiToc({
               <PageList
                 nodes={chapter.children}
                 activeId={activeId}
+                evidenceIds={evidenceIds}
                 codeHref={codeHref}
                 onNavigate={onNavigate}
               />
