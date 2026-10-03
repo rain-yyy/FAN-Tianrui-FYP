@@ -29,3 +29,8 @@ frontend/.env.local
 
 # Generated per-repo vector store / code graph data
 /vector_store/
+
+# agent config
+/.agents/
+/.claude/skills/
+skills-lock.json
