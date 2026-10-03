@@ -65,7 +65,7 @@ export function TaskStatePanel({
   return (
     <section
       aria-labelledby="task-state-title"
-      className="mx-auto w-full max-w-measure py-16 md:py-24"
+      className="mx-auto w-full max-w-measure px-4 py-16 md:py-24"
     >
       <div className={cn(live ? "text-rail" : "text-ink")}>
         <StatusStamp status={stamp} />

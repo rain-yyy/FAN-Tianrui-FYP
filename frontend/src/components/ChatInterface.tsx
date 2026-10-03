@@ -59,7 +59,6 @@ interface ChatInterfaceProps {
   currentPageContext?: string;
   currentPageTitle?: string;
   initialChatId?: string;
-  onChatLoaded?: () => void;
 }
 
 export default function ChatInterface({
@@ -68,7 +67,6 @@ export default function ChatInterface({
   currentPageContext,
   currentPageTitle,
   initialChatId,
-  onChatLoaded,
 }: ChatInterfaceProps) {
   const [mode, setMode] = useState<"closed" | "open">("closed");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -166,7 +164,6 @@ export default function ChatInterface({
     loadChatHistory();
   }, [repoUrl, userId]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: open the deep-linked chat once per id (reworked in redesign step 7)
   useEffect(() => {
     if (!initialChatId) return;
     const loadAndOpen = async () => {
@@ -190,8 +187,6 @@ export default function ChatInterface({
         setMode("open");
       } catch (error) {
         console.error("Failed to load initial chat:", error);
-      } finally {
-        onChatLoaded?.();
       }
     };
     void loadAndOpen();

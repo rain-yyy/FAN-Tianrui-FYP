@@ -210,11 +210,18 @@ function Rail() {
 }
 
 export default function AppLayout() {
+  // The wiki is a full-bleed reading desk with its own scroll columns.
+  const fullBleed = useMatch("/app/wiki/*") !== null;
   return (
     <ShellProvider>
       <div className="flex h-dvh flex-col bg-paper md:flex-row">
         <Rail />
-        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-4 md:p-8">
+        <main
+          className={cn(
+            "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto",
+            !fullBleed && "p-4 md:p-8",
+          )}
+        >
           <Outlet />
         </main>
       </div>
