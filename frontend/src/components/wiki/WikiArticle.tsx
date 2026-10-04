@@ -40,7 +40,7 @@ const REHYPE_PLUGINS = [rehypeHighlight];
  * the TOC change it independently of the viewport.
  */
 const DESK_GRID =
-  "grid gap-y-8 @5xl:grid-cols-[minmax(0,var(--container-measure))_14rem] @5xl:gap-x-12";
+  "grid gap-y-6 @5xl:grid-cols-[minmax(0,1fr)_13rem] @5xl:gap-x-8";
 const MAIN_COL = "min-w-0 @5xl:col-start-1";
 const MARGIN_COL = "@5xl:col-start-2";
 
@@ -210,7 +210,7 @@ export const WikiArticle = memo(function WikiArticle({
 
   return (
     <article aria-busy={state === "loading"} className={DESK_GRID}>
-      <header className={cn(MAIN_COL, "border-line border-b pb-6")}>
+      <header className={cn(MAIN_COL, "border-line border-b pb-5")}>
         <p className="flex items-center gap-2 font-mono text-fg-muted text-xs tabular-nums">
           <span>{node.code}</span>
           {chapter ? (
@@ -268,7 +268,7 @@ export const WikiArticle = memo(function WikiArticle({
             // biome-ignore lint/suspicious/noArrayIndexKey: sections are static per page and headings may repeat
             <Fragment key={index}>
               <section className={cn(MAIN_COL, "scroll-mt-8")}>
-                <h2 className="mb-4 font-medium text-2xl text-fg tracking-tight">
+                <h2 className="mb-3 font-medium text-fg text-xl tracking-tight">
                   {section.heading}
                 </h2>
                 <Markdown text={section.body} mentions={placed.byMention} />

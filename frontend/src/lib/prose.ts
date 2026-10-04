@@ -13,7 +13,10 @@ const proseBase = cn(
 );
 
 /** Wiki page body. */
-export const readingProse = cn(proseBase, "text-base");
+export const readingProse = cn(
+  proseBase,
+  "text-base leading-[1.7] prose-p:my-3 prose-ul:my-3 prose-li:my-1",
+);
 
 /** Chat answers in the narrower docked panel. */
 export const answerProse = cn(

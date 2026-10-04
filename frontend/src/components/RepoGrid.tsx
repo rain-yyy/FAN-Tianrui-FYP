@@ -8,14 +8,14 @@ import {
   MessageSquare,
   Star,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "@/lib/api";
+import type { DashboardRepoEntry } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { prefetchRouteModule } from "@/router/prefetch";
 
-interface RepoData {
+export interface RepoData {
   owner: string;
   name: string;
   url: string;
@@ -24,24 +24,74 @@ interface RepoData {
   stars: number | null;
 }
 
+const trimmed = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value.trim() : null;
+
+/** Dashboard entries → rows; skips entries without a usable GitHub path. */
+export function parseRepos(entries: DashboardRepoEntry[]): RepoData[] {
+  const list: RepoData[] = [];
+  for (const entry of entries) {
+    if (!entry.repo_url || !entry.task_id) continue;
+    let parts: string[];
+    try {
+      parts = new URL(entry.repo_url).pathname.split("/").filter(Boolean);
+    } catch {
+      continue;
+    }
+    if (parts.length < 2) continue;
+    const stars = entry.stargazers_count;
+    list.push({
+      owner: parts[0],
+      name: parts[1],
+      url: entry.repo_url,
+      taskId: entry.task_id,
+      description:
+        trimmed(entry.github_short_description) ?? trimmed(entry.description),
+      stars: typeof stars === "number" && !Number.isNaN(stars) ? stars : null,
+    });
+  }
+  return list;
+}
+
+export const wikiHref = (repo: RepoData) =>
+  `/app/wiki/${repo.taskId}?repo=${encodeURIComponent(repo.url)}`;
+
 const formatStars = (stars: number) =>
   stars >= 1000 ? `${(stars / 1000).toFixed(1)}k` : String(stars);
 
-function RepoRow({ repo }: { repo: RepoData }) {
-  return (
-    <Link
-      to={`/app/wiki/${repo.taskId}?repo=${encodeURIComponent(repo.url)}`}
-      onMouseEnter={() => prefetchRouteModule("wiki")}
-      onFocus={() => prefetchRouteModule("wiki")}
-      className="flex items-center gap-4 rounded-2xl border border-line bg-panel px-5 py-4 transition-colors hover:border-accent-line"
-    >
+/** Owner avatar from GitHub; two letters of the name when it fails to load. */
+export function RepoAvatar({ owner, name }: { owner: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
       <span
         aria-hidden
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-raised font-mono text-fg-muted text-sm uppercase"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-raised font-mono text-fg-muted text-xs uppercase"
       >
-        {repo.name.slice(0, 2)}
+        {name.slice(0, 2)}
       </span>
-      <span className="min-w-0 sm:w-56 sm:shrink-0">
+    );
+  }
+  return (
+    // biome-ignore lint/performance/noImgElement: tiny external avatar, next/image would need a remote pattern
+    <img
+      src={`https://github.com/${encodeURIComponent(owner)}.png?size=64`}
+      alt=""
+      width={32}
+      height={32}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="h-8 w-8 shrink-0 rounded-lg bg-raised"
+    />
+  );
+}
+
+/** Avatar, name over owner, description and stars: shared by list and search. */
+export function RepoSummary({ repo }: { repo: RepoData }) {
+  return (
+    <>
+      <RepoAvatar owner={repo.owner} name={repo.name} />
+      <span className="min-w-0 sm:w-48 sm:shrink-0">
         <span className="block truncate font-medium text-fg">{repo.name}</span>
         <span className="block truncate text-fg-muted text-sm">
           {repo.owner}
@@ -56,7 +106,7 @@ function RepoRow({ repo }: { repo: RepoData }) {
           {formatStars(repo.stars)}
         </span>
       ) : null}
-    </Link>
+    </>
   );
 }
 
@@ -87,64 +137,13 @@ function FeatureCards() {
   );
 }
 
-export default function RepoGrid({ userId }: { userId: string }) {
-  const [repos, setRepos] = useState<RepoData[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const loadDashboardRepos = async () => {
-      try {
-        const response = await api.getDashboardRepos(userId);
-        const list: RepoData[] = [];
-
-        for (const entry of response.repos) {
-          if (!entry.repo_url || !entry.task_id) continue;
-          try {
-            const urlObj = new URL(entry.repo_url);
-            const parts = urlObj.pathname.split("/").filter(Boolean);
-            if (parts.length < 2) continue;
-
-            const g = entry.github_short_description;
-            const d = entry.description;
-            const description =
-              typeof g === "string" && g.trim()
-                ? g.trim()
-                : typeof d === "string" && d.trim()
-                  ? d.trim()
-                  : null;
-
-            const rawStars = entry.stargazers_count;
-            const stars =
-              typeof rawStars === "number" && !Number.isNaN(rawStars)
-                ? rawStars
-                : null;
-
-            list.push({
-              owner: parts[0],
-              name: parts[1],
-              url: entry.repo_url,
-              taskId: entry.task_id,
-              description,
-              stars,
-            });
-          } catch {
-            // ignore invalid urls
-          }
-        }
-
-        setRepos(list);
-      } catch (error) {
-        console.error("Failed to load dashboard repositories:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (userId) {
-      void loadDashboardRepos();
-    }
-  }, [userId]);
-
+export default function RepoGrid({
+  repos,
+  loading,
+}: {
+  repos: RepoData[];
+  loading: boolean;
+}) {
   if (loading) {
     return (
       <div className="relative flex justify-center py-12">
@@ -162,8 +161,15 @@ export default function RepoGrid({ userId }: { userId: string }) {
       </h2>
       <ul className="space-y-3">
         {repos.map((repo) => (
-          <li key={`${repo.owner}/${repo.name}`}>
-            <RepoRow repo={repo} />
+          <li key={repo.taskId}>
+            <Link
+              to={wikiHref(repo)}
+              onMouseEnter={() => prefetchRouteModule("wiki")}
+              onFocus={() => prefetchRouteModule("wiki")}
+              className="flex items-center gap-4 rounded-2xl border border-line bg-panel px-5 py-4 transition-colors hover:border-accent-line"
+            >
+              <RepoSummary repo={repo} />
+            </Link>
           </li>
         ))}
       </ul>

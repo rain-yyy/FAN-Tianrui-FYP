@@ -15,9 +15,11 @@ const STRINGS = {
 
   dashboardSubtitle:
     "Read any GitHub repository as a wiki, with every answer traced to a file and line.",
-  dashboardPlaceholder: "Paste a GitHub repository link",
-  dashboardGenerate: "Generate",
-  dashboardGenerateLabel: "Generate documentation",
+  dashboardPlaceholder: "Search your wikis or paste a GitHub link",
+  dashboardSearchLabel: "Search",
+  dashboardSearchEmpty:
+    "No generated wiki matches. Paste a GitHub link to generate one.",
+  dashboardGenerateFor: "Generate a wiki for {repo}",
   dashboardStartFailed:
     "Could not start the task. Check the link and that the API is online.",
   dashboardGenerating: "Reading the repository",

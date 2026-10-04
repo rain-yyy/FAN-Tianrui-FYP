@@ -1,15 +1,9 @@
 "use client";
 
-import { ArrowRight, Loader2 } from "lucide-react";
-import {
-  type FormEvent,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import RepoGrid from "@/components/RepoGrid";
+import RepoGrid, { parseRepos, type RepoData } from "@/components/RepoGrid";
+import RepoSearch from "@/components/RepoSearch";
 import {
   secondaryActionClass,
   TaskStatePanel,
@@ -31,6 +25,29 @@ export default function DashboardPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [health, setHealth] = useState<boolean | null>(null);
+  const [repos, setRepos] = useState<RepoData[]>([]);
+  const [reposLoading, setReposLoading] = useState(true);
+  const userId = user?.id;
+
+  // One request feeds both the search field and the repository list.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    api
+      .getDashboardRepos(userId)
+      .then((response) => {
+        if (!cancelled) setRepos(parseRepos(response.repos));
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to load dashboard repositories:", error);
+      })
+      .finally(() => {
+        if (!cancelled) setReposLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
   const activePollTaskIdRef = useRef<string | null>(null);
@@ -159,10 +176,9 @@ export default function DashboardPage() {
     };
   }, [pollStatus, clearTask]);
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!url.trim() || !user) return;
-    const normalizedInputUrl = url.trim();
+  const startTask = async (normalizedInputUrl: string) => {
+    if (!user) return;
+    setUrl(normalizedInputUrl);
     setIsSubmitting(true);
     setStatus(null);
     setSubmitError(null);
@@ -225,45 +241,21 @@ export default function DashboardPage() {
             />
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="mt-10">
-            <div
-              className={cn(
-                "mx-auto flex h-14 max-w-2xl items-center gap-2 rounded-full border border-line bg-panel/80 pr-2 pl-6 transition-colors",
-                "shadow-[0_0_48px_rgb(243_128_32/0.12)] focus-within:border-accent-line",
-              )}
-            >
-              <input
-                type="url"
-                required
-                placeholder={t("dashboardPlaceholder")}
-                aria-label={t("dashboardPlaceholder")}
-                className="min-w-0 flex-1 bg-transparent font-mono text-fg text-sm outline-none placeholder:text-fg-faint"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                disabled={isSubmitting}
-              />
-              <button
-                type="submit"
-                disabled={isSubmitting || !url.trim()}
-                aria-label={t("dashboardGenerateLabel")}
-                className="inline-flex h-10 items-center gap-2 rounded-full bg-accent-strong px-5 font-medium text-accent-fg text-sm transition-colors hover:bg-accent disabled:opacity-50"
-              >
-                {isSubmitting ? (
-                  <Loader2 aria-hidden className="h-4 w-4 animate-spin" />
-                ) : (
-                  <>
-                    {t("dashboardGenerate")}
-                    <ArrowRight aria-hidden className="h-4 w-4" />
-                  </>
-                )}
-              </button>
-            </div>
+          <>
+            <RepoSearch
+              repos={repos}
+              loading={reposLoading}
+              value={url}
+              onValueChange={setUrl}
+              onGenerate={(repoUrl) => void startTask(repoUrl)}
+              submitting={isSubmitting}
+            />
             {submitError || failedMessage ? (
               <p role="alert" className="mt-4 text-danger text-sm">
                 {submitError ?? failedMessage}
               </p>
             ) : null}
-          </form>
+          </>
         )}
 
         {health === null ? null : (
@@ -280,7 +272,7 @@ export default function DashboardPage() {
         )}
       </section>
 
-      {user ? <RepoGrid userId={user.id} /> : null}
+      {user ? <RepoGrid repos={repos} loading={reposLoading} /> : null}
     </div>
   );
 }

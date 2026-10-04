@@ -29,7 +29,8 @@ Dark-only, warm and quiet: a charcoal canvas, rounded panels with hairline borde
 
 `danger` is the only error colour. `processing` uses the accent. A status colour never stands alone: it always comes with its word.
 
-- **Fonts:** IBM Plex Sans (UI and reading text), JetBrains Mono (code, chapter codes, `tabular-nums` figures). Body text is at most `max-w-measure` (68ch) and nothing is smaller than 12px.
+- **Fonts:** IBM Plex Sans (UI and reading text), JetBrains Mono (code, chapter codes, `tabular-nums` figures). Wiki body text fills the article card (no measure cap) with a 1.7 line height; nothing is smaller than 12px.
+- **Width:** the top bar and the reading desk are centred at `max-w-desk` (125rem, 2000px), like codewiki.google. Inside it the TOC, article card and chat share the width 1 : 3 : 2 (flex ratios; TOC at least 13rem, chat at least 22rem, 30rem from `xl`); the article body is capped at 75rem.
 - **Radii:** panels `rounded-2xl`, rows and cards `rounded-xl`, buttons, inputs and chips `rounded-full`.
 - **Motion:** colour and border transitions only, 150–200ms. Nothing animates size or position.
 
@@ -37,7 +38,7 @@ Dark-only, warm and quiet: a charcoal canvas, rounded panels with hairline borde
 
 - **Top bar** (all `/app` pages): GitReader mark, a pill showing the current repo (or "Find or add a repository") that links home, History, "Copy link" and Chat (wiki only; Chat toggles the chat card), `?` help, account menu.
 - **Reading desk** (`/app/wiki/:taskId`): three columns that scroll independently. TOC list | article card (margin notes become a second column at `@5xl`) | chat card, collapsible to a strip. Below `md` the TOC is a full-screen dialog; below `lg` the chat is full screen.
-- **Home:** centred wordmark, subtitle, pill URL field with an orange wash, then the user's repos as rows (or four feature cards when there are none).
+- **Home:** centred wordmark, subtitle, pill search field with an orange wash, then the user's repos as rows (or four feature cards when there are none). Typing in the field drops down matching wikis as rows (owner avatar, name over owner, description, stars); a GitHub link with no wiki shows a "Generate a wiki for owner/name" row.
 - **History:** rows with the repo URL, date, a status pill and a delete button.
 - **Login:** centred, outside the shell, with the same wash along the bottom edge.
 
@@ -59,6 +60,6 @@ These are backend-bound and listed in `../Document/BACKEND_GAPS_FOR_FRONTEND.md`
 
 - Page files have no line numbers, so margin notes cannot point at a line.
 - Repo rows on the home page show no description or stars, because the dashboard endpoint returns none.
-- There is no repo search endpoint, so the top-bar pill only links home.
+- There is no repo search endpoint, so home search only covers wikis that already exist and the top-bar pill only links home.
 - No commit SHA is returned, so the TOC has no "Updated on / Commit" footer.
 - Some repos have no chat index.

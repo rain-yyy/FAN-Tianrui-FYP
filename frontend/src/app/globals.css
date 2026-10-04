@@ -10,14 +10,14 @@
 @theme {
   /* Canvas, panels, text */
   --color-bg: #0e0d0c;
-  --color-panel: #171615;
-  --color-raised: #201e1c;
+  --color-panel: #1b1a18;
+  --color-raised: #252321;
   --color-overlay: #272523;
-  --color-line: #302d2a;
-  --color-line-strong: #443f3a;
-  --color-fg: #f1eee9;
-  --color-fg-muted: #aaa49b;
-  --color-fg-faint: #8a847b;
+  --color-line: #3d3935;
+  --color-line-strong: #58524b;
+  --color-fg: #faf8f5;
+  --color-fg-muted: #c4beb5;
+  --color-fg-faint: #a39d93;
 
   /* Accent: plain for text and links, -strong for fills (with accent-fg) */
   --color-accent: #ff9d4d;
@@ -36,12 +36,25 @@
   --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", monospace;
 
-  /* Reading measure for body text */
-  --container-measure: 68ch;
+  /* Shell width: wide screens center the page instead of stretching it */
+  --container-desk: 125rem;
 }
 
 :root {
   color-scheme: dark;
+}
+
+/* Large desktop monitors: scale every rem-based size up so type and spacing
+   stay comfortable (Tailwind sizes are rem, so the whole UI follows). */
+@media (min-width: 1920px) {
+  html {
+    font-size: 18px;
+  }
+}
+@media (min-width: 2400px) {
+  html {
+    font-size: 20px;
+  }
 }
 
 body {

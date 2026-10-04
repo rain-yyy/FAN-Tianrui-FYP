@@ -510,7 +510,7 @@ export default function ChatInterface({
           setOpen(false);
         }
       }}
-      className="fixed inset-0 z-50 flex flex-col bg-panel lg:static lg:z-auto lg:w-[clamp(20rem,28vw,36rem)] lg:shrink-0 lg:overflow-hidden lg:rounded-2xl lg:border lg:border-line"
+      className="fixed inset-0 z-50 flex flex-col bg-panel lg:static lg:z-auto lg:min-w-[22rem] lg:flex-[2_1_0%] lg:overflow-hidden xl:min-w-[30rem] lg:rounded-2xl lg:border lg:border-line"
     >
       <header className="flex h-12 shrink-0 items-center gap-1 border-line border-b pr-2 pl-4">
         <h2 className="min-w-0 flex-1 truncate font-medium text-fg text-sm">

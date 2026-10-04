@@ -25,7 +25,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { prefetchRouteModule } from "@/router/prefetch";
 
 const iconButtonClass =
-  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line text-fg-muted transition-colors hover:border-line-strong hover:text-fg";
+  "inline-flex h-9 w-9 md:h-11 md:w-11 shrink-0 items-center justify-center rounded-full border border-line text-fg-muted transition-colors hover:border-line-strong hover:text-fg";
 
 function SearchPill() {
   const repo = useShellRepo();
@@ -39,7 +39,7 @@ function SearchPill() {
         to="/app/dashboard"
         onMouseEnter={() => prefetchRouteModule("dashboard")}
         onFocus={() => prefetchRouteModule("dashboard")}
-        className="flex h-10 w-full max-w-md items-center gap-3 rounded-full border border-line bg-panel px-4 text-sm transition-colors hover:border-accent"
+        className="flex h-10 w-full max-w-md items-center gap-3 rounded-full border border-line bg-panel px-4 text-sm md:h-12 md:max-w-xl md:px-5 md:text-base transition-colors hover:border-accent"
       >
         <span
           className={cn(
@@ -75,7 +75,7 @@ function CopyLinkButton() {
     <button
       type="button"
       onClick={copy}
-      className="inline-flex h-9 items-center gap-2 rounded-full border border-line px-3 text-fg-muted text-sm transition-colors hover:border-line-strong hover:text-fg"
+      className="inline-flex h-9 items-center gap-2 md:h-11 rounded-full border border-line px-3 md:px-4 text-fg-muted text-sm transition-colors hover:border-line-strong hover:text-fg"
     >
       {copied ? (
         <Check aria-hidden className="h-4 w-4 text-accent" />
@@ -98,7 +98,7 @@ function ChatButton() {
       onClick={() => chat.setOpen(!chat.open)}
       aria-pressed={chat.open}
       className={cn(
-        "inline-flex h-9 items-center gap-2 rounded-full border px-3 text-sm transition-colors",
+        "inline-flex h-9 items-center gap-2 md:h-11 rounded-full border px-3 text-sm md:px-4 transition-colors",
         chat.open
           ? "border-accent-line bg-accent-soft text-accent"
           : "border-accent-line text-accent hover:bg-accent-soft",
@@ -190,7 +190,7 @@ function UserMenu() {
 function TopBar({ onHelp }: { onHelp: () => void }) {
   const inWiki = useMatch("/app/wiki/*") !== null;
   return (
-    <header className="z-40 flex h-16 shrink-0 items-center gap-3 px-4 md:gap-4 md:px-6">
+    <header className="z-40 mx-auto flex h-16 w-full max-w-desk shrink-0 items-center gap-3 px-4 md:h-20 md:gap-5 md:px-10 min-[120rem]:h-24 min-[120rem]:px-14">
       <Link
         to="/app/dashboard"
         aria-label={t("shellHome")}
@@ -213,7 +213,7 @@ function TopBar({ onHelp }: { onHelp: () => void }) {
           onFocus={() => prefetchRouteModule("history")}
           className={({ isActive }) =>
             cn(
-              "inline-flex h-9 items-center gap-2 rounded-full border px-3 text-sm transition-colors",
+              "inline-flex h-9 items-center gap-2 md:h-11 rounded-full border px-3 text-sm md:px-4 transition-colors",
               isActive
                 ? "border-accent text-fg"
                 : "border-line text-fg-muted hover:border-line-strong hover:text-fg",

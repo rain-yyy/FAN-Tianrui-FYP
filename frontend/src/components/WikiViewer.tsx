@@ -269,11 +269,12 @@ export default function WikiViewer({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 gap-4 px-4 pb-4 md:px-6">
+    // TOC : article : chat share the width 1 : 3 : 2 (chat ratio in ChatInterface).
+    <div className="mx-auto flex min-h-0 w-full max-w-desk flex-1 gap-3 px-4 pb-4 md:gap-5 md:px-10 md:pb-8 min-[120rem]:gap-8 min-[120rem]:px-14 min-[120rem]:pb-10">
       <aside
         className={cn(
-          "hidden shrink-0 flex-col md:flex",
-          tocCollapsed ? "w-14" : "w-56 2xl:w-72",
+          "hidden flex-col md:flex",
+          tocCollapsed ? "w-14 shrink-0" : "min-w-52 flex-[1_1_0%]",
         )}
       >
         <div
@@ -323,7 +324,7 @@ export default function WikiViewer({
 
       <div
         ref={scrollRef}
-        className="@container min-w-0 flex-1 overflow-y-auto rounded-2xl border border-line bg-panel"
+        className="@container min-w-0 flex-[3_1_0%] overflow-y-auto rounded-2xl border border-line bg-panel"
       >
         {node ? (
           <div className="sticky top-0 z-10 flex h-12 items-center border-line border-b bg-panel px-4 md:hidden">
@@ -343,7 +344,7 @@ export default function WikiViewer({
           </div>
         ) : null}
 
-        <div className="mx-auto max-w-6xl px-5 py-8 md:px-10 lg:py-10">
+        <div className="mx-auto max-w-[75rem] px-5 py-6 md:px-10 md:py-10 min-[120rem]:px-14 min-[120rem]:py-14">
           {node && toc ? (
             <WikiArticle
               node={node}
