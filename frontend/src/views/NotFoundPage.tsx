@@ -1,22 +1,17 @@
-'use client';
+"use client";
 
-import { Compass } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from "react-router-dom";
+import { secondaryActionClass } from "@/components/wiki/TaskStatePanel";
+import { t } from "@/lib/i18n";
 
 export default function NotFoundPage() {
   return (
-    <div className="min-h-[70vh] flex items-center justify-center p-6">
-      <div className="max-w-lg w-full rounded-2xl border border-stone-200 bg-white p-8 text-center space-y-4 shadow-sm">
-        <div className="w-12 h-12 mx-auto rounded-xl bg-sky-50 border border-sky-200 flex items-center justify-center">
-          <Compass className="w-6 h-6 text-sky-700" />
-        </div>
-        <h1 className="text-3xl font-bold text-stone-900">404</h1>
-        <p className="text-stone-600">This page does not exist.</p>
-        <Link
-          to="/app/dashboard"
-          className="inline-flex text-sm px-3 py-1.5 rounded-lg border border-stone-200 bg-white text-stone-800 hover:bg-stone-50"
-        >
-          Back to Dashboard
+    <div className="flex min-h-[70vh] items-center justify-center p-6">
+      <div className="w-full max-w-md space-y-4 rounded-2xl border border-line bg-panel p-8 text-center">
+        <p className="font-mono text-5xl text-fg tabular-nums">404</p>
+        <p className="text-fg-muted">{t("notFoundDetail")}</p>
+        <Link to="/app/dashboard" className={secondaryActionClass}>
+          {t("backToDashboard")}
         </Link>
       </div>
     </div>

@@ -1,160 +1,267 @@
-'use client';
+"use client";
 
-import { History, Home, LogOut, FileCode2, User } from 'lucide-react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { useState, useRef, useEffect } from 'react';
-import { cn } from '@/lib/utils';
-import { useAuth } from '@/providers/AuthProvider';
-import { prefetchRouteModule } from '@/router/prefetch';
-import { t } from '@/lib/i18n';
+import {
+  Check,
+  CircleHelp,
+  History,
+  Link2,
+  LogOut,
+  MessageSquare,
+  Search,
+} from "lucide-react";
+import Image from "next/image";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Link, NavLink, Outlet, useMatch } from "react-router-dom";
+import { ShortcutHelp } from "@/components/wiki/ShortcutHelp";
+import { useShortcut } from "@/hooks/useShortcut";
+import {
+  ShellProvider,
+  useShellChat,
+  useShellRepo,
+} from "@/layouts/ShellContext";
+import { t } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/AuthProvider";
+import { prefetchRouteModule } from "@/router/prefetch";
 
-export default function AppLayout() {
-  const { user, signOut } = useAuth();
-  const identity = user?.email ?? user?.phone ?? user?.id ?? 'Unknown User';
-  const navigate = useNavigate();
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const profileRef = useRef<HTMLDivElement>(null);
+const iconButtonClass =
+  "inline-flex h-9 w-9 md:h-11 md:w-11 shrink-0 items-center justify-center rounded-full border border-line text-fg-muted transition-colors hover:border-line-strong hover:text-fg";
 
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
-        setIsProfileOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+function SearchPill() {
+  const repo = useShellRepo();
+  const onHome = useMatch("/app/dashboard") !== null;
+  // The home page carries its own large search field.
+  if (onHome) return <div className="flex-1" />;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--background)]">
-      <header className="h-16 border-b border-stone-200 bg-white/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between sticky top-0 z-40 shadow-sm shadow-stone-900/5">
-        <div className="flex items-center gap-6">
-          <button
-            onClick={() => navigate('/app/dashboard')}
-            className="flex items-center gap-3 hover:opacity-90 transition-opacity group"
-            aria-label="Go to Dashboard"
-          >
-            <div className="w-9 h-9 rounded-xl bg-sky-50 border border-sky-200/80 flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm">
-              {/* <FileCode2 className="w-5 h-5 text-sky-700" /> */}
-              <img src="/logo.png" alt="GitReader" className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-base font-semibold text-stone-900 tracking-tight">
-                GitReader
-              </p>
-            </div>
-          </button>
-
-          <div className="h-6 w-px bg-stone-200 hidden md:block" />
-
-          <nav className="hidden md:flex items-center gap-2">
-            <NavLink
-              to="/app/dashboard"
-              onMouseEnter={() => prefetchRouteModule('dashboard')}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200',
-                  isActive
-                    ? 'bg-sky-100 text-sky-900 border border-sky-200/80'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border border-transparent'
-                )
-              }
-            >
-              <Home className="w-4 h-4" />
-              {t('dashboard')}
-            </NavLink>
-            <NavLink
-              to="/app/history"
-              onMouseEnter={() => prefetchRouteModule('history')}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200',
-                  isActive
-                    ? 'bg-sky-100 text-sky-900 border border-sky-200/80'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border border-transparent'
-                )
-              }
-            >
-              <History className="w-4 h-4" />
-              {t('history')}
-            </NavLink>
-          </nav>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <div className="md:hidden flex items-center gap-1.5 mr-2">
-            <NavLink
-              to="/app/dashboard"
-              className={({ isActive }) =>
-                cn(
-                  'p-2 rounded-xl transition-all border',
-                  isActive
-                    ? 'bg-sky-100 text-sky-900 border-sky-200 shadow-sm'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border-transparent'
-                )
-              }
-            >
-              <Home className="w-5 h-5" />
-            </NavLink>
-            <NavLink
-              to="/app/history"
-              className={({ isActive }) =>
-                cn(
-                  'p-2 rounded-xl transition-all border',
-                  isActive
-                    ? 'bg-sky-100 text-sky-900 border-sky-200 shadow-sm'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100 border-transparent'
-                )
-              }
-            >
-              <History className="w-5 h-5" />
-            </NavLink>
-          </div>
-
-          <div className="relative" ref={profileRef}>
-            <button
-              onClick={() => setIsProfileOpen(!isProfileOpen)}
-              className="w-9 h-9 rounded-full bg-stone-100 border border-stone-200 flex items-center justify-center hover:ring-2 hover:ring-sky-200 hover:border-sky-300 transition-all focus:outline-none group shadow-sm"
-              aria-label="User menu"
-            >
-              <User className="w-5 h-5 text-stone-600 group-hover:text-sky-800 transition-colors" />
-            </button>
-
-            {isProfileOpen && (
-              <div className="absolute right-0 mt-3 w-64 rounded-2xl border border-stone-200 bg-white shadow-xl shadow-stone-900/10 overflow-hidden py-1 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="px-4 py-4 border-b border-stone-100 bg-stone-50/80">
-                  <p className="text-xs text-stone-500 font-medium mb-1">{t('signedInAs')}</p>
-                  <p className="text-sm font-semibold text-stone-900 truncate flex items-center gap-2" title={identity}>
-                    <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                    {identity}
-                  </p>
-                </div>
-                <div className="p-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsProfileOpen(false);
-                      void signOut();
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-rose-700 hover:text-rose-800 hover:bg-rose-50 rounded-xl transition-all font-medium group"
-                  >
-                    <LogOut className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-                    {t('signOut')}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 w-full max-w-[1600px] mx-auto p-4 md:p-8 flex flex-col relative">
-        <Outlet />
-      </main>
-
-      <footer className="h-10 border-t border-stone-200 bg-white/60 px-4 md:px-8 flex items-center justify-center text-xs text-stone-500">
-        Project Wiki Generator · Powered by AI
-      </footer>
+    <div className="flex min-w-0 flex-1 justify-center">
+      <Link
+        to="/app/dashboard"
+        onMouseEnter={() => prefetchRouteModule("dashboard")}
+        onFocus={() => prefetchRouteModule("dashboard")}
+        className="flex h-10 w-full max-w-md items-center gap-3 rounded-full border border-line bg-panel px-4 text-sm md:h-12 md:max-w-xl md:px-5 md:text-base transition-colors hover:border-accent"
+      >
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate",
+            repo ? "text-fg" : "text-fg-muted",
+          )}
+        >
+          {repo ? repo.fullName : t("shellFindRepo")}
+        </span>
+        <Search aria-hidden className="h-4 w-4 shrink-0 text-fg-muted" />
+      </Link>
     </div>
+  );
+}
+
+function CopyLinkButton() {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+    } catch {
+      return;
+    }
+    setCopied(true);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className="inline-flex h-9 items-center gap-2 md:h-11 rounded-full border border-line px-3 md:px-4 text-fg-muted text-sm transition-colors hover:border-line-strong hover:text-fg"
+    >
+      {copied ? (
+        <Check aria-hidden className="h-4 w-4 text-accent" />
+      ) : (
+        <Link2 aria-hidden className="h-4 w-4" />
+      )}
+      <span className="hidden sm:inline">
+        {copied ? t("shellLinkCopied") : t("shellCopyLink")}
+      </span>
+    </button>
+  );
+}
+
+function ChatButton() {
+  const chat = useShellChat();
+  if (!chat) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => chat.setOpen(!chat.open)}
+      aria-pressed={chat.open}
+      className={cn(
+        "inline-flex h-9 items-center gap-2 md:h-11 rounded-full border px-3 text-sm md:px-4 transition-colors",
+        chat.open
+          ? "border-accent-line bg-accent-soft text-accent"
+          : "border-accent-line text-accent hover:bg-accent-soft",
+      )}
+    >
+      <MessageSquare aria-hidden className="h-4 w-4" />
+      <span className="hidden sm:inline">{t("shellChat")}</span>
+    </button>
+  );
+}
+
+function UserMenu() {
+  const { user, signOut } = useAuth();
+  const identity = user?.email ?? user?.phone ?? user?.id ?? t("unknownUser");
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-label={t("userMenu")}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        title={identity}
+        className={cn(
+          iconButtonClass,
+          "font-mono text-sm uppercase",
+          open && "border-accent text-fg",
+        )}
+      >
+        {identity.slice(0, 1)}
+      </button>
+
+      {open ? (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label={t("userMenu")}
+          className="absolute top-full right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border border-line bg-panel text-fg"
+        >
+          <div className="border-line border-b px-4 py-3">
+            <p className="text-fg-muted text-xs">{t("signedInAs")}</p>
+            <p className="mt-0.5 truncate text-sm font-medium" title={identity}>
+              {identity}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              void signOut();
+            }}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-raised focus-visible:bg-raised"
+          >
+            <LogOut aria-hidden className="h-4 w-4 text-fg-muted" />
+            {t("signOut")}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TopBar({ onHelp }: { onHelp: () => void }) {
+  const inWiki = useMatch("/app/wiki/*") !== null;
+  return (
+    <header className="z-40 mx-auto flex h-16 w-full max-w-desk shrink-0 items-center gap-3 px-4 md:h-20 md:gap-5 md:px-10 min-[120rem]:h-24 min-[120rem]:px-14">
+      <Link
+        to="/app/dashboard"
+        aria-label={t("shellHome")}
+        onMouseEnter={() => prefetchRouteModule("dashboard")}
+        className="flex shrink-0 items-center gap-2.5"
+      >
+        <Image src="/logo.png" alt="" width={28} height={28} priority />
+        <span className="hidden font-medium text-lg tracking-tight sm:block">
+          GitReader
+        </span>
+      </Link>
+
+      <SearchPill />
+
+      <nav aria-label={t("shellNav")} className="flex items-center gap-2">
+        <NavLink
+          to="/app/history"
+          title={t("history")}
+          onMouseEnter={() => prefetchRouteModule("history")}
+          onFocus={() => prefetchRouteModule("history")}
+          className={({ isActive }) =>
+            cn(
+              "inline-flex h-9 items-center gap-2 md:h-11 rounded-full border px-3 text-sm md:px-4 transition-colors",
+              isActive
+                ? "border-accent text-fg"
+                : "border-line text-fg-muted hover:border-line-strong hover:text-fg",
+            )
+          }
+        >
+          <History aria-hidden className="h-4 w-4" />
+          <span className="hidden sm:inline">{t("history")}</span>
+        </NavLink>
+        {inWiki ? <CopyLinkButton /> : null}
+        <ChatButton />
+        <button
+          type="button"
+          onClick={onHelp}
+          aria-label={t("shortcutTitle")}
+          title={t("shortcutTitle")}
+          className={iconButtonClass}
+        >
+          <CircleHelp aria-hidden className="h-4 w-4" />
+        </button>
+        <UserMenu />
+      </nav>
+    </header>
+  );
+}
+
+export default function AppLayout() {
+  // The wiki is a full-bleed reading desk with its own scroll columns.
+  const fullBleed = useMatch("/app/wiki/*") !== null;
+  const [helpOpen, setHelpOpen] = useState(false);
+  const openHelp = useCallback(() => setHelpOpen(true), []);
+  const closeHelp = useCallback(() => setHelpOpen(false), []);
+  useShortcut("?", openHelp);
+
+  return (
+    <ShellProvider>
+      <div className="flex h-dvh flex-col bg-bg">
+        <TopBar onHelp={openHelp} />
+        <main
+          className={cn(
+            "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto",
+            !fullBleed && "px-4 pb-8 md:px-6",
+          )}
+        >
+          <Outlet />
+        </main>
+      </div>
+      {helpOpen ? <ShortcutHelp onClose={closeHelp} /> : null}
+    </ShellProvider>
   );
 }

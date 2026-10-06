@@ -1,8 +1,10 @@
-'use client';
+"use client";
 
-import dynamic from 'next/dynamic';
+import dynamic from "next/dynamic";
 
-const RouterApp = dynamic(() => import('../../router/RouterApp'), { ssr: false });
+const RouterApp = dynamic(() => import("../../router/RouterApp"), {
+  ssr: false,
+});
 
 export default function CatchAllPage() {
   return <RouterApp />;

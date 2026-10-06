@@ -1,65 +1,72 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-:root {
-  /* Bright paper + ink — sky primary, teal accent (no violet / magenta stack) */
-  --background: #fafaf9;
-  --foreground: #1c1917;
+/*
+ * GitReader design tokens: warm charcoal canvas, rounded panels, one ember
+ * orange accent. Panels are flat (hairline border, no drop shadow); the only
+ * glow is the faint orange wash behind the home hero and the search field.
+ * Text on an orange fill is always dark (`accent-fg`); white fails contrast.
+ */
+@theme {
+  /* Canvas, panels, text */
+  --color-bg: #0e0d0c;
+  --color-panel: #1b1a18;
+  --color-raised: #252321;
+  --color-overlay: #272523;
+  --color-line: #3d3935;
+  --color-line-strong: #58524b;
+  --color-fg: #faf8f5;
+  --color-fg-muted: #c4beb5;
+  --color-fg-faint: #a39d93;
 
-  --card: #ffffff;
-  --card-foreground: #1c1917;
+  /* Accent: plain for text and links, -strong for fills (with accent-fg) */
+  --color-accent: #ff9d4d;
+  --color-accent-strong: #f38020;
+  --color-accent-fg: #1a1006;
+  --color-accent-soft: rgb(255 157 77 / 0.13);
+  --color-accent-line: rgb(255 157 77 / 0.45);
 
-  --primary: #0284c7;
-  --primary-foreground: #ffffff;
+  /* Status */
+  --color-ok: #6fd39a;
+  --color-warn: #f2d155;
+  --color-danger: #ff7a85;
+  --color-info: #7cb7ff;
 
-  --secondary: #f5f5f4;
-  --secondary-foreground: #292524;
+  /* Type: one sans for UI and reading text, mono for code and codes */
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", monospace;
 
-  --muted: #f5f5f4;
-  --muted-foreground: #78716c;
-
-  --accent: #0d9488;
-  --accent-foreground: #ffffff;
-
-  --destructive: #dc2626;
-  --destructive-foreground: #ffffff;
-
-  --border: #e7e5e4;
-  --input: #e7e5e4;
-  --ring: #0284c7;
+  /* Shell width: wide screens center the page instead of stretching it */
+  --container-desk: 125rem;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+:root {
+  color-scheme: dark;
+}
 
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+/* Large desktop monitors: scale every rem-based size up so type and spacing
+   stay comfortable (Tailwind sizes are rem, so the whole UI follows). */
+@media (min-width: 1920px) {
+  html {
+    font-size: 18px;
+  }
+}
+@media (min-width: 2400px) {
+  html {
+    font-size: 20px;
+  }
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
-  background-image:
-    radial-gradient(circle at 18% 0%, rgba(14, 165, 233, 0.07), transparent 42%),
-    radial-gradient(circle at 88% 8%, rgba(13, 148, 136, 0.05), transparent 38%);
   min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--color-accent-soft);
+  color: var(--color-fg);
 }
 
 /* Remove default backtick pseudo-elements added by @tailwindcss/typography around inline <code> */
@@ -68,7 +75,7 @@ body {
   content: none;
 }
 
-/* Custom Scrollbar */
+/* Scrollbar: hairline thumb on the canvas */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -77,9 +84,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d6d3d1;
+  background: var(--color-line-strong);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #a8a29e;
+  background: var(--color-fg-faint);
 }

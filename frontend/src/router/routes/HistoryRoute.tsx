@@ -1,3 +1,3 @@
-'use client';
+"use client";
 
-export { default } from '@/views/HistoryPage';
+export { default } from "@/views/HistoryPage";

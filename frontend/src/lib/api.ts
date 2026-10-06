@@ -1,17 +1,20 @@
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').trim() || 'http://localhost:8000';
+const API_BASE_URL =
+  (process.env.NEXT_PUBLIC_API_URL ?? "").trim() || "http://localhost:8000";
 
 /**
  * Normalize repo URL for consistent comparison with backend-stored URLs.
  * Matches backend _normalize_repo_url behavior for common cases.
  */
 export const normalizeRepoUrl = (url: string): string => {
-  if (!url || typeof url !== 'string') return '';
+  if (!url || typeof url !== "string") return "";
   const trimmed = url.trim().toLowerCase();
-  if (!trimmed) return '';
-  const withoutGit = trimmed.replace(/\.git\/?$/i, '').replace(/\/+$/, '');
+  if (!trimmed) return "";
+  const withoutGit = trimmed.replace(/\.git\/?$/i, "").replace(/\/+$/, "");
   try {
-    const parsed = new URL(withoutGit.startsWith('http') ? withoutGit : `https://${withoutGit}`);
-    const pathParts = parsed.pathname.split('/').filter(Boolean);
+    const parsed = new URL(
+      withoutGit.startsWith("http") ? withoutGit : `https://${withoutGit}`,
+    );
+    const pathParts = parsed.pathname.split("/").filter(Boolean);
     if (pathParts.length >= 2) {
       return `${parsed.protocol}//${parsed.host}/${pathParts[0]}/${pathParts[1]}`;
     }
@@ -40,7 +43,7 @@ export interface GenResponse {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
 }
 
@@ -57,29 +60,33 @@ export interface ChatTurnRequest {
 export interface ToolTrajectoryStep {
   tool: string;
   arguments: Record<string, unknown>;
-  status: 'success' | 'error';
+  status: "success" | "error";
   summary: string;
   duration_ms: number | null;
 }
 
-export interface ChatTurnResponse {
-  chat_id: string;
-  repo_url: string;
-  answer: string;
-  sources: string[];
-  tool_trajectory: ToolTrajectoryStep[];
-  iterations: number;
-}
-
 export type ChatStreamEvent =
-  | { type: 'turn_start'; data: { chat_id: string; repo_url: string } }
-  | { type: 'iteration_start'; data: { iteration: number; max_iterations: number } }
-  | { type: 'tool_call_start'; data: { tool: string; arguments: Record<string, unknown>; iteration: number } }
-  | { type: 'tool_call_result'; data: { tool: string; status: 'success' | 'error'; summary: string } }
-  | { type: 'answer_token'; data: { delta: string } }
-  | { type: 'answer_done'; data: { answer: string; sources: string[] } }
-  | { type: 'complete'; data: { chat_id: string; repo_url: string } }
-  | { type: 'error'; data: { detail: string } };
+  | { type: "turn_start"; data: { chat_id: string; repo_url: string } }
+  | {
+      type: "iteration_start";
+      data: { iteration: number; max_iterations: number };
+    }
+  | {
+      type: "tool_call_start";
+      data: {
+        tool: string;
+        arguments: Record<string, unknown>;
+        iteration: number;
+      };
+    }
+  | {
+      type: "tool_call_result";
+      data: { tool: string; status: "success" | "error"; summary: string };
+    }
+  | { type: "answer_token"; data: { delta: string } }
+  | { type: "answer_done"; data: { answer: string; sources: string[] } }
+  | { type: "complete"; data: { chat_id: string; repo_url: string } }
+  | { type: "error"; data: { detail: string } };
 
 export interface ChatHistoryItem {
   id: string;
@@ -95,23 +102,10 @@ export interface ChatHistoryItem {
 export interface ChatHistoryMessage {
   id: string;
   chat_id: string;
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
   created_at: string;
   metadata?: Record<string, unknown>;
-}
-
-export interface AvailableRepo {
-  repo_url: string | null;
-  vector_store_path: string;
-  repo_hash?: string;
-  has_code_index: boolean;
-  has_text_index: boolean;
-}
-
-export interface AvailableReposResponse {
-  repos: AvailableRepo[];
-  count: number;
 }
 
 export interface TaskStatusResponse {
@@ -119,7 +113,13 @@ export interface TaskStatusResponse {
   user_id: string;
   task_id: string;
   repo_url: string;
-  status: 'pending' | 'processing' | 'completed' | 'cached' | 'failed';
+  status:
+    | "pending"
+    | "processing"
+    | "completed"
+    | "cached"
+    | "failed"
+    | "cancelled";
   progress: number;
   current_step: string;
   created_at: string;
@@ -143,11 +143,10 @@ export interface DashboardReposResponse {
   repos: DashboardRepoEntry[];
 }
 
-
 const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(init?.headers || {}),
     },
     ...init,
@@ -156,12 +155,14 @@ const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   if (!res.ok) {
     let detail = res.statusText;
     try {
-      const errorData = await res.json() as { detail?: string };
+      const errorData = (await res.json()) as { detail?: string };
       detail = errorData.detail || detail;
     } catch {
       // ignore json parsing error and use status text
     }
-    const err = new Error(detail || 'Request failed') as Error & { statusCode?: number };
+    const err = new Error(detail || "Request failed") as Error & {
+      statusCode?: number;
+    };
     err.statusCode = res.status;
     throw err;
   }
@@ -172,44 +173,59 @@ const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
 export const api = {
   checkHealth: async (): Promise<boolean> => {
     try {
-      const data = await requestJson<HealthResponse>('/health', { method: 'GET' });
-      return data.status === 'ok';
+      const data = await requestJson<HealthResponse>("/health", {
+        method: "GET",
+      });
+      return data.status === "ok";
     } catch {
       return false;
     }
   },
 
-  createTask: async (url_link: string, user_id: string): Promise<TaskResponse> => {
-    return requestJson<TaskResponse>('/generate', {
-      method: 'POST',
+  createTask: async (
+    url_link: string,
+    user_id: string,
+  ): Promise<TaskResponse> => {
+    return requestJson<TaskResponse>("/generate", {
+      method: "POST",
       body: JSON.stringify({ url_link, user_id }),
     });
   },
 
-  getTaskStatus: async (task_id: string): Promise<TaskStatusResponse> => {
+  getTaskStatus: async (
+    task_id: string,
+    signal?: AbortSignal,
+  ): Promise<TaskStatusResponse> => {
     return requestJson<TaskStatusResponse>(`/task/${task_id}`, {
-      method: 'POST',
+      method: "POST",
+      signal,
     });
   },
 
   getTasks: async (user_id: string): Promise<TaskStatusResponse[]> => {
-    return requestJson<TaskStatusResponse[]>('/tasks', {
-      method: 'POST',
+    return requestJson<TaskStatusResponse[]>("/tasks", {
+      method: "POST",
       body: JSON.stringify({ user_id }),
     });
   },
 
-  getDashboardRepos: async (user_id: string): Promise<DashboardReposResponse> => {
-    return requestJson<DashboardReposResponse>('/dashboard/repos', {
-      method: 'POST',
+  getDashboardRepos: async (
+    user_id: string,
+  ): Promise<DashboardReposResponse> => {
+    return requestJson<DashboardReposResponse>("/dashboard/repos", {
+      method: "POST",
       body: JSON.stringify({ user_id }),
     });
   },
 
   cancelTask: async (taskId: string): Promise<boolean> => {
     const url = `/task/${encodeURIComponent(taskId)}/cancel`;
-    const res = await fetch(`${API_BASE_URL}${url}`, { method: 'POST' });
-    let body: { success?: boolean; message?: string; detail?: string | unknown[] } = {};
+    const res = await fetch(`${API_BASE_URL}${url}`, { method: "POST" });
+    let body: {
+      success?: boolean;
+      message?: string;
+      detail?: string | unknown[];
+    } = {};
     try {
       body = (await res.json()) as typeof body;
     } catch {
@@ -218,14 +234,18 @@ export const api = {
     if (!res.ok) {
       const d = body.detail;
       const detail =
-        typeof d === 'string' ? d : Array.isArray(d) ? JSON.stringify(d) : res.statusText;
-      throw new Error(detail || 'Failed to cancel task');
+        typeof d === "string"
+          ? d
+          : Array.isArray(d)
+            ? JSON.stringify(d)
+            : res.statusText;
+      throw new Error(detail || "Failed to cancel task");
     }
     if (body.success === false) {
       throw new Error(
-        (typeof body.message === 'string' && body.message) ||
-          (typeof body.detail === 'string' ? body.detail : '') ||
-          'Failed to cancel task',
+        (typeof body.message === "string" && body.message) ||
+          (typeof body.detail === "string" ? body.detail : "") ||
+          "Failed to cancel task",
       );
     }
     return true;
@@ -233,126 +253,96 @@ export const api = {
 
   deleteTask: async (taskId: string, userId: string): Promise<boolean> => {
     const url = `/task/${encodeURIComponent(taskId)}?user_id=${encodeURIComponent(userId)}`;
-    const res = await fetch(`${API_BASE_URL}${url}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE_URL}${url}`, { method: "DELETE" });
     if (!res.ok) {
       let detail = res.statusText;
       try {
-        const errorData = await res.json() as { detail?: string };
+        const errorData = (await res.json()) as { detail?: string };
         detail = errorData.detail || detail;
       } catch {
         // ignore
       }
-      throw new Error(detail || 'Delete failed');
+      throw new Error(detail || "Delete failed");
     }
     return true;
   },
 
-  askQuestion: async (request: ChatTurnRequest): Promise<ChatTurnResponse> => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-
-      if (!res.ok) {
-        const status = res.status;
-        let detail = res.statusText;
-        try {
-          const errorData = await res.json();
-          detail = errorData.detail || detail;
-        } catch {
-          // ignore
-        }
-
-        if (status === 404) {
-          throw new Error('No vector index for this repo. Generate documentation first, then try chat again.');
-        } else if (status === 400) {
-          throw new Error(`Invalid request: ${detail}`);
-        } else {
-          throw new Error(`Chat request failed: ${detail}`);
-        }
-      }
-      return res.json();
-    } catch (error) {
-      console.error('Ask question failed:', error);
-      throw error;
-    }
-  },
-
-  getAvailableRepos: async (): Promise<AvailableReposResponse> => {
-    const data = await requestJson<{ repos?: AvailableRepo[] }>('/chat/repos', { method: 'GET' });
-    const repos = data.repos ?? [];
-    return { repos, count: repos.length };
-  },
-
   getChatHistory: async (userId: string): Promise<ChatHistoryItem[]> => {
     try {
-      const data = await requestJson<{ history: ChatHistoryItem[] }>(`/chat/history?user_id=${encodeURIComponent(userId)}`, { method: 'GET' });
+      const data = await requestJson<{ history: ChatHistoryItem[] }>(
+        `/chat/history?user_id=${encodeURIComponent(userId)}`,
+        { method: "GET" },
+      );
       const raw = data.history || [];
       return raw.map((item) => ({
         ...item,
         chat_id: item.chat_id ?? item.id,
       }));
     } catch (error) {
-      console.error('[api] getChatHistory failed:', error);
+      console.error("[api] getChatHistory failed:", error);
       return [];
     }
   },
 
   getChatMessages: async (chatId: string): Promise<ChatHistoryMessage[]> => {
     try {
-      const data = await requestJson<{ messages: ChatHistoryMessage[] }>(`/chat/messages/${encodeURIComponent(chatId)}`, { method: 'GET' });
+      const data = await requestJson<{ messages: ChatHistoryMessage[] }>(
+        `/chat/messages/${encodeURIComponent(chatId)}`,
+        { method: "GET" },
+      );
       return data.messages || [];
     } catch (error) {
-      console.error('[api] getChatMessages failed:', error);
+      console.error("[api] getChatMessages failed:", error);
       return [];
     }
   },
 
-  deleteChatHistory: async (chatId: string, userId: string): Promise<boolean> => {
+  deleteChatHistory: async (
+    chatId: string,
+    userId: string,
+  ): Promise<boolean> => {
     const url = `/chat/history/${encodeURIComponent(chatId)}?user_id=${encodeURIComponent(userId)}`;
-    const res = await fetch(`${API_BASE_URL}${url}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE_URL}${url}`, { method: "DELETE" });
     if (!res.ok) {
       let detail = res.statusText;
       try {
-        const errorData = await res.json() as { detail?: string };
+        const errorData = (await res.json()) as { detail?: string };
         detail = errorData.detail || detail;
       } catch {
         // ignore
       }
-      throw new Error(detail || 'Delete failed');
+      throw new Error(detail || "Delete failed");
     }
     return true;
   },
 
-  getFileContent: async (repoUrl: string, filePath: string): Promise<string> => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/file/content`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_url: repoUrl, file_path: filePath }),
-      });
-
-      if (!res.ok) {
-         throw new Error(`Failed to fetch file: ${res.statusText}`);
-      }
-      const data = await res.json();
-      return data.content;
-    } catch (error) {
-      console.error('Failed to get file content:', error);
-      throw error;
+  /** Repo-relative path → file text. Rejects with the backend's `detail`. */
+  getFileContent: async (
+    repoUrl: string,
+    filePath: string,
+    signal?: AbortSignal,
+  ): Promise<string> => {
+    const data = await requestJson<{ content?: unknown }>("/file/content", {
+      method: "POST",
+      body: JSON.stringify({ repo_url: repoUrl, file_path: filePath }),
+      signal,
+    });
+    if (typeof data.content !== "string") {
+      throw new Error("The file response had no content.");
     }
+    return data.content;
   },
 
   // Unified agent-first chat streaming API (single event vocabulary, single node loop)
   askQuestionStream: async function* (
-    request: ChatTurnRequest
+    request: ChatTurnRequest,
+    signal?: AbortSignal,
   ): AsyncGenerator<ChatStreamEvent, void, unknown> {
     const res = await fetch(`${API_BASE_URL}/chat/stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
+      signal,
     });
 
     if (!res.ok) {
@@ -361,17 +351,20 @@ export const api = {
 
     const reader = res.body?.getReader();
     if (!reader) {
-      throw new Error('No response body');
+      throw new Error("No response body");
     }
+    // Ends a pending read() on abort, whatever the body implementation does.
+    const cancelRead = () => void reader.cancel().catch(() => {});
+    signal?.addEventListener("abort", cancelRead, { once: true });
 
     const decoder = new TextDecoder();
-    let buffer = '';
-    let currentEventType: ChatStreamEvent['type'] = 'turn_start';
+    let buffer = "";
+    let currentEventType: ChatStreamEvent["type"] = "turn_start";
     let currentDataLines: string[] = [];
 
     const emitCurrentEvent = (): ChatStreamEvent | null => {
       if (currentDataLines.length === 0) return null;
-      const rawData = currentDataLines.join('\n').trim();
+      const rawData = currentDataLines.join("\n").trim();
       currentDataLines = [];
       if (!rawData) return null;
       try {
@@ -379,46 +372,49 @@ export const api = {
         return { type: currentEventType, data } as ChatStreamEvent;
       } catch {
         return {
-          type: 'error',
-          data: { detail: 'Invalid SSE data payload' },
+          type: "error",
+          data: { detail: "Invalid SSE data payload" },
         };
       }
     };
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed === '') {
-          const event = emitCurrentEvent();
-          if (event) {
-            yield event;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed === "") {
+            const event = emitCurrentEvent();
+            if (event) {
+              yield event;
+            }
+            continue;
           }
-          continue;
-        }
 
-        if (trimmed.startsWith('event:')) {
-          const rawType = trimmed.slice(6).trim() as ChatStreamEvent['type'];
-          currentEventType = rawType || 'turn_start';
-          continue;
-        }
+          if (trimmed.startsWith("event:")) {
+            const rawType = trimmed.slice(6).trim() as ChatStreamEvent["type"];
+            currentEventType = rawType || "turn_start";
+            continue;
+          }
 
-        if (trimmed.startsWith('data:')) {
-          currentDataLines.push(trimmed.slice(5).trim());
+          if (trimmed.startsWith("data:")) {
+            currentDataLines.push(trimmed.slice(5).trim());
+          }
         }
       }
-    }
 
-    const tailEvent = emitCurrentEvent();
-    if (tailEvent) {
-      yield tailEvent;
+      const tailEvent = emitCurrentEvent();
+      if (tailEvent) {
+        yield tailEvent;
+      }
+    } finally {
+      signal?.removeEventListener("abort", cancelRead);
     }
   },
-
 };

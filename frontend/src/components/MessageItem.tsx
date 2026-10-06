@@ -1,239 +1,309 @@
-'use client';
+"use client";
 
-import React, { useMemo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
-import { motion } from 'framer-motion';
-import {
-  Sparkles,
-  Bot,
-  ChevronDown,
-  ChevronUp,
-  Search,
-  GitBranch,
-  FileCode,
-  Map,
-  CheckCircle2,
-  XCircle,
-  TextSearch,
-  Globe,
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { ChatMessage, ToolTrajectoryStep } from '@/lib/api';
-import { getToolDescription } from '@/lib/toolDescriptions';
-import CodeViewer from './CodeViewer';
-import SourcesPanel, { parseSource, ParsedSource } from './SourcesPanel';
+import { ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
+import dynamic from "next/dynamic";
+import { memo, useMemo, useState } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import { Link } from "react-router-dom";
+import rehypeHighlight from "rehype-highlight";
+import remarkGfm from "remark-gfm";
+import Mermaid from "@/components/Mermaid";
+import { useCodeHref } from "@/components/wiki/WikiToc";
+import { type AnswerNote, buildAnswerNotes } from "@/lib/answerNotes";
+import type { ChatMessage, ToolTrajectoryStep } from "@/lib/api";
+import { formatFileCitation } from "@/lib/citations";
+import { t } from "@/lib/i18n";
+import { answerProse } from "@/lib/prose";
+import { getToolDescription, toolLabel } from "@/lib/toolDescriptions";
+import type { TocNode } from "@/lib/wikiToc";
+
+const CodeViewer = dynamic(() => import("@/components/CodeViewer"), {
+  ssr: false,
+});
 
 export interface DisplayMessage extends ChatMessage {
   id: string;
   timestamp: Date;
   sources?: string[];
   isError?: boolean;
+  /** The user stopped the stream; `content` is the partial answer. */
+  stopped?: boolean;
   tool_trajectory?: ToolTrajectoryStep[];
-  isNew?: boolean;
 }
 
-const toolIcons: Record<string, React.ReactNode> = {
-  'rag_search': <Search className="w-3.5 h-3.5" />,
-  'code_graph': <GitBranch className="w-3.5 h-3.5" />,
-  'file_read': <FileCode className="w-3.5 h-3.5" />,
-  'repo_map': <Map className="w-3.5 h-3.5" />,
-  'grep_search': <TextSearch className="w-3.5 h-3.5" />,
-  'web_search': <Globe className="w-3.5 h-3.5" />,
-};
+const REMARK_PLUGINS = [remarkGfm];
+const REHYPE_PLUGINS = [rehypeHighlight];
 
-const StreamingMarkdown = ({ content, isNew }: { content: string, isNew?: boolean }) => {
-  const [isStabilized, setIsStabilized] = useState(!isNew);
+const timeFormat = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  minute: "2-digit",
+});
 
-  React.useEffect(() => {
-    if (!isNew) {
-      setIsStabilized(true);
-      return;
-    }
-    
-    // For new messages, wait a short moment before enabling full markdown
-    // This prevents expensive re-renders during rapid content updates
-    const timer = setTimeout(() => {
-      setIsStabilized(true);
-    }, 100);
-    
-    return () => clearTimeout(timer);
-  }, [isNew]);
+interface HastNode {
+  type?: string;
+  value?: string;
+  properties?: { className?: unknown };
+  children?: HastNode[];
+}
 
-  // If content is still streaming or very new, render with simpler processing
-  if (!isStabilized && isNew) {
+const hastText = (node: HastNode | undefined): string =>
+  node?.type === "text"
+    ? (node.value ?? "")
+    : (node?.children ?? []).map(hastText).join("");
+
+/** The tool calls behind an answer, collapsed to one line by default. */
+function Trace({ steps }: { steps: ToolTrajectoryStep[] }) {
+  const [open, setOpen] = useState(false);
+  const failed = steps.filter((s) => s.status !== "success").length;
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 font-mono text-fg-muted text-xs hover:text-fg"
+      >
+        <Chevron aria-hidden className="h-3 w-3" />
+        {steps.length === 1
+          ? t("chatTraceOne")
+          : t("chatTraceMany", { n: steps.length })}
+        {failed > 0 ? `, ${t("chatTraceFailed", { n: failed })}` : null}
+      </button>
+      {open ? (
+        <ol className="mt-1.5 space-y-1 border-line border-l pl-3">
+          {steps.map((step, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: steps have no id and never reorder
+            <li key={index} className="flex gap-2 text-xs leading-snug">
+              <span className="w-12 shrink-0 font-mono text-fg-muted">
+                {toolLabel(step.tool)}
+              </span>
+              <span className="min-w-0 flex-1 text-fg">
+                {getToolDescription(step.tool, step.arguments)}
+              </span>
+              {step.status === "success" ? null : (
+                <span className="shrink-0 font-mono text-fg">
+                  {t("chatStepFailed")}
+                </span>
+              )}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </div>
+  );
+}
+
+interface NotesProps {
+  notes: AnswerNote[];
+  filePages?: Map<string, TocNode[]>;
+  onOpen: (fileIndex: number) => void;
+  onEvidence?: (path: string | null) => void;
+}
+
+/** Numbered evidence under the answer: file:lines, tool, wiki chapter. */
+function AnswerNotesList({ notes, filePages, onOpen, onEvidence }: NotesProps) {
+  const codeHref = useCodeHref();
+  return (
+    <ol
+      aria-label={t("chatNotes")}
+      className="mt-4 space-y-1.5 border-line border-t pt-3"
+    >
+      {notes.map((note) => {
+        if (note.kind === "web") {
+          return (
+            <li key={`web:${note.link.url}`} className="flex gap-2 text-xs">
+              <span className="w-4 shrink-0 text-right font-mono text-fg-muted tabular-nums">
+                {note.number}
+              </span>
+              <a
+                href={note.link.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-w-0 items-center gap-1 text-fg underline-offset-2 hover:text-fg hover:underline"
+              >
+                <span className="truncate">{note.link.url}</span>
+                <ExternalLink aria-hidden className="h-3 w-3 shrink-0" />
+              </a>
+            </li>
+          );
+        }
+        const { file } = note;
+        const label = formatFileCitation(file);
+        const pages = filePages?.get(file.path) ?? [];
+        return (
+          <li key={label} className="text-xs leading-snug">
+            <div className="flex gap-2">
+              <span className="w-4 shrink-0 text-right font-mono text-fg-muted tabular-nums">
+                {note.number}
+              </span>
+              <button
+                type="button"
+                onClick={() => onOpen(note.fileIndex)}
+                onMouseEnter={() => onEvidence?.(file.path)}
+                onMouseLeave={() => onEvidence?.(null)}
+                onFocus={() => onEvidence?.(file.path)}
+                onBlur={() => onEvidence?.(null)}
+                title={t("wikiOpenSource", { path: label })}
+                className="min-w-0 flex-1 break-words text-left font-mono text-fg hover:bg-accent-soft focus-visible:bg-accent-soft"
+              >
+                {label}
+              </button>
+              {note.tool ? (
+                <span className="shrink-0 font-mono text-fg-muted">
+                  {toolLabel(note.tool)}
+                </span>
+              ) : null}
+            </div>
+            {pages.length > 0 ? (
+              <p className="mt-0.5 flex flex-wrap gap-x-2 pl-6">
+                {pages.slice(0, 3).map((page) => (
+                  <Link
+                    key={page.id}
+                    to={codeHref(page.code)}
+                    title={page.title}
+                    className="inline-flex items-center gap-1 font-mono text-fg-muted tabular-nums hover:text-fg"
+                  >
+                    {page.code}
+                  </Link>
+                ))}
+              </p>
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+interface MessageItemProps {
+  message: DisplayMessage;
+  repoUrl: string;
+  /** Repo-relative path → wiki pages listing it (`toc.byFile`). */
+  filePages?: Map<string, TocNode[]>;
+  /** Hovered note path, highlighted in the wiki TOC. */
+  onEvidence?: (path: string | null) => void;
+}
+
+export const MessageItem = memo(function MessageItem({
+  message,
+  repoUrl,
+  filePages,
+  onEvidence,
+}: MessageItemProps) {
+  const [inspected, setInspected] = useState<number | null>(null);
+  const isUser = message.role === "user";
+  const notes = useMemo(
+    () =>
+      isUser
+        ? null
+        : buildAnswerNotes(
+            message.content,
+            message.sources,
+            message.tool_trajectory,
+          ),
+    [isUser, message.content, message.sources, message.tool_trajectory],
+  );
+
+  const components = useMemo<Components>(
+    () => ({
+      // Inline file paths open the Code Inspector, marked with the note number.
+      code({ className, children, node: _node, ...rest }) {
+        const text = String(children ?? "");
+        const note =
+          !className && !text.includes("\n")
+            ? notes?.byMention.get(text.trim())
+            : undefined;
+        if (!note) {
+          return (
+            <code className={className} {...rest}>
+              {children}
+            </code>
+          );
+        }
+        return (
+          <button
+            type="button"
+            onClick={() => setInspected(note.fileIndex)}
+            title={t("wikiOpenSource", { path: formatFileCitation(note.file) })}
+            className="font-mono text-[0.875em] text-accent underline decoration-line-strong underline-offset-2 hover:decoration-accent"
+          >
+            {children}
+            <sup className="ml-0.5 text-[0.75em] text-fg-muted tabular-nums">
+              {note.number}
+            </sup>
+          </button>
+        );
+      },
+      // ```mermaid blocks render as diagrams.
+      pre({ node, children, ...rest }) {
+        const code = (node as HastNode | undefined)?.children?.[0];
+        const classes = code?.properties?.className;
+        if (Array.isArray(classes) && classes.includes("language-mermaid")) {
+          return <Mermaid chart={hastText(code)} />;
+        }
+        return <pre {...rest}>{children}</pre>;
+      },
+    }),
+    [notes],
+  );
+
+  if (isUser) {
     return (
-      <div className="whitespace-pre-wrap text-stone-800 text-[15px] leading-[1.7]">
-        {content}
+      <div className="mb-5 border-accent-line border-l-2 pl-3">
+        <p className="whitespace-pre-wrap font-medium text-fg text-sm leading-relaxed">
+          {message.content}
+        </p>
       </div>
     );
   }
 
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
-    >
-      {content}
-    </ReactMarkdown>
-  );
-};
+    <article className="mb-8">
+      <p className="mb-1 flex items-center gap-2 font-mono text-fg-muted text-xs tabular-nums">
+        <span>{t("chatAnswer")}</span>
+        <span>{timeFormat.format(message.timestamp)}</span>
+      </p>
 
-const TrajectoryDisplay = ({ trajectory }: { trajectory: ToolTrajectoryStep[] }) => {
-  const [expanded, setExpanded] = useState(false);
-
-  if (!trajectory || trajectory.length === 0) return null;
-
-  const successCount = trajectory.filter(s => s.status === 'success').length;
-
-  return (
-    <div className="mt-4 border border-stone-200 rounded-xl overflow-hidden bg-stone-50">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full px-4 py-3 flex items-center justify-between text-sm text-stone-600 hover:text-stone-900 hover:bg-stone-100 transition-colors"
-        aria-expanded={expanded}
-        tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && setExpanded(!expanded)}
-      >
-        <div className="flex items-center gap-2">
-          <Bot className="w-4 h-4 text-teal-700" />
-          <span>Exploration</span>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-teal-100 text-teal-900 border border-teal-200">
-            {successCount} steps
-          </span>
+      {message.content ? (
+        <div className={answerProse}>
+          <ReactMarkdown
+            remarkPlugins={REMARK_PLUGINS}
+            rehypePlugins={REHYPE_PLUGINS}
+            components={components}
+          >
+            {message.content}
+          </ReactMarkdown>
         </div>
-        {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-      </button>
+      ) : null}
 
-      {expanded && (
-        <div className="px-4 pb-4 space-y-2">
-          {trajectory.map((step, idx) => (
-            <div
-              key={idx}
-              className={cn(
-                "flex items-center gap-3 p-3 rounded-lg transition-colors",
-                step.status === 'success'
-                  ? "bg-white"
-                  : "bg-rose-50"
-              )}
-            >
-              <div className={cn(
-                "w-7 h-7 rounded-lg flex items-center justify-center shrink-0",
-                step.status === 'success' ? "bg-teal-100 text-teal-900" : "bg-rose-100 text-rose-800"
-              )}>
-                {toolIcons[step.tool] || <Sparkles className="w-3.5 h-3.5" />}
-              </div>
-              <div className="flex-1 min-w-0 flex items-center justify-between">
-                <span className="text-sm text-stone-700">
-                  {getToolDescription(step.tool, step.arguments)}
-                </span>
-                {step.status === 'success' ? (
-                  <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
-                ) : (
-                  <XCircle className="w-4 h-4 text-red-400 shrink-0" />
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+      {message.isError || message.stopped ? (
+        <p className="mt-2 border-line-strong border-l-2 pl-3 font-mono text-fg-muted text-xs">
+          {message.isError ? t("chatTurnFailed") : t("chatStopped")}
+        </p>
+      ) : null}
 
-
-export interface MessageItemProps {
-  message: DisplayMessage;
-  repoUrl: string;
-}
-
-export const MessageItem = React.memo(({ message, repoUrl }: MessageItemProps) => {
-  const isUser = message.role === 'user';
-  const [isCodeViewerOpen, setIsCodeViewerOpen] = useState(false);
-  const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
-  const parsedSources = useMemo(() => (message.sources || []).map(parseSource), [message.sources]);
-
-  const handleSourceClick = (source: ParsedSource, index: number) => {
-    setSelectedSourceIndex(index);
-    setIsCodeViewerOpen(true);
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: "easeOut" }}
-      className="mb-8"
-    >
-      {/* Code Viewer Modal: mounted only while open, so its internal state always starts correct */}
-      {isCodeViewerOpen && (
-        <CodeViewer
-          onClose={() => setIsCodeViewerOpen(false)}
-          sources={parsedSources}
-          initialSourceIndex={selectedSourceIndex}
-          repoUrl={repoUrl}
+      {notes && notes.notes.length > 0 ? (
+        <AnswerNotesList
+          notes={notes.notes}
+          filePages={filePages}
+          onOpen={setInspected}
+          onEvidence={onEvidence}
         />
-      )}
+      ) : null}
 
-      <div className={cn("flex gap-4 group", isUser ? "flex-row-reverse" : "flex-row")}>
-      {!isUser && (
-        <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-1 shadow-sm bg-teal-50 ring-1 ring-teal-200">
-          <Bot className="w-4 h-4 text-teal-700" />
-        </div>
-      )}
-      
-      <div className={cn(
-        "flex-1 min-w-0 space-y-1.5", 
-        isUser ? "flex flex-col items-end" : "text-left"
-      )}>
-        {!isUser && (
-          <div className="flex items-center gap-2 mb-1.5 ml-1">
-            <span className="text-[13px] font-medium tracking-wide text-teal-700">
-              Agent
-            </span>
-            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-teal-100 text-teal-900 border border-teal-200 font-mono tracking-wider">
-              AGENT
-            </span>
-            <span className="text-[11px] text-muted-foreground/40">
-              {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </div>
-        )}
+      {message.tool_trajectory?.length ? (
+        <Trace steps={message.tool_trajectory} />
+      ) : null}
 
-        <div className={cn(
-          isUser 
-            ? "bg-sky-600 text-white px-5 py-3.5 rounded-3xl rounded-tr-md max-w-[85%] text-[15px] leading-relaxed shadow-sm"
-            : "prose prose-stone prose-sm max-w-none prose-p:text-stone-700 prose-p:leading-[1.7] prose-p:text-[15px] prose-pre:bg-stone-100 prose-pre:border prose-pre:border-stone-200 prose-pre:rounded-xl prose-pre:shadow-sm prose-code:text-sky-800 prose-code:bg-sky-50 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:font-medium prose-headings:text-stone-900 prose-headings:font-semibold prose-a:text-sky-700 hover:prose-a:text-sky-800 prose-a:no-underline prose-ul:my-2 prose-li:my-0.5"
-        )}>
-          {isUser ? (
-            <div className="whitespace-pre-wrap">{message.content}</div>
-          ) : (
-            <StreamingMarkdown content={message.content} isNew={message.isNew} />
-          )}
-        </div>
-        
-        {!isUser && message.tool_trajectory && message.tool_trajectory.length > 0 && (
-          <TrajectoryDisplay trajectory={message.tool_trajectory} />
-        )}
-
-        {!isUser && message.sources && message.sources.length > 0 && (
-          <div className="mt-5">
-            <div className="text-[10px] text-stone-500 font-medium uppercase tracking-wider mb-2.5 flex items-center gap-2">
-              <span>References</span>
-              <div className="h-[1px] flex-1 bg-gradient-to-r from-stone-200 to-transparent"></div>
-            </div>
-            <SourcesPanel 
-              sources={message.sources} 
-              onSourceClick={handleSourceClick}
-              compact={true}
-            />
-          </div>
-        )}
-      </div>
-    </div>
-    </motion.div>
+      {inspected !== null && notes ? (
+        <CodeViewer
+          sources={notes.files}
+          initialSourceIndex={inspected}
+          repoUrl={repoUrl}
+          onClose={() => setInspected(null)}
+        />
+      ) : null}
+    </article>
   );
 });
-
-MessageItem.displayName = 'MessageItem';

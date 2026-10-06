@@ -1,266 +1,387 @@
-'use client';
+"use client";
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  ArrowUp, 
-  Loader2, 
-  X,
-  Bot,
+import {
+  ArrowUp,
   History,
   MessageSquare,
+  PanelRightClose,
   Plus,
-  Trash2
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { api, normalizeRepoUrl, ChatHistoryItem, ToolTrajectoryStep } from '@/lib/api';
-import { useChatStream } from '@/hooks/useChatStream';
-import { MessageItem, DisplayMessage } from './MessageItem';
-import SourcesPanel, { parseSource } from './SourcesPanel';
-import CodeViewer from './CodeViewer';
-import { LiveStepFlow } from './LiveStepFlow';
-import { t } from '@/lib/i18n';
-import { useAuth } from '@/providers/AuthProvider';
+  RotateCw,
+  Square,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { LiveStepFlow } from "@/components/LiveStepFlow";
+import { type DisplayMessage, MessageItem } from "@/components/MessageItem";
+import { ChatStreamStopped, useChatStream } from "@/hooks/useChatStream";
+import { useShortcut } from "@/hooks/useShortcut";
+import { repoFullName, useRegisterShellChat } from "@/layouts/ShellContext";
+import {
+  api,
+  type ChatHistoryItem,
+  type ChatHistoryMessage,
+  normalizeRepoUrl,
+  type ToolTrajectoryStep,
+} from "@/lib/api";
+import { t } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import type { TocNode } from "@/lib/wikiToc";
 
 /**
- * Replicates backend _generate_chat_preview_sync to create a session title
- * locally, avoiding an extra getChatHistory() API call after every message.
+ * Mirrors the backend's _generate_chat_preview_sync so a new session gets a
+ * title locally, without refetching the history list after every message.
  */
-const generateChatPreview = (question: string): string => {
+function chatPreview(question: string): string {
   let q = question.trim();
-  for (const prefix of ['[Current page context:', 'User question:', 'Question:']) {
-    if (q.startsWith(prefix)) {
-      q = q.slice(prefix.length).trim();
-      break;
-    }
-  }
-  for (const delimiter of ['？', '?', '。', '\n', '，', ',']) {
+  for (const delimiter of ["？", "?", "。", "\n", "，", ","]) {
     if (q.includes(delimiter)) {
       q = q.split(delimiter)[0].trim();
       break;
     }
   }
-  if (q.length <= 40) return q || 'New chat';
+  if (q.length <= 40) return q || t("chatDefault");
   const truncated = q.slice(0, 40);
-  const lastSpace = truncated.lastIndexOf(' ');
-  return ((lastSpace > 20 ? truncated.slice(0, lastSpace) : truncated).trim()) + '...';
-};
+  const lastSpace = truncated.lastIndexOf(" ");
+  return `${(lastSpace > 20 ? truncated.slice(0, lastSpace) : truncated).trim()}…`;
+}
+
+function toDisplayMessage(msg: ChatHistoryMessage): DisplayMessage {
+  const meta = msg.metadata ?? {};
+  return {
+    id: msg.id,
+    role: msg.role,
+    content: msg.content,
+    timestamp: new Date(msg.created_at),
+    sources: (meta.sources as string[] | undefined) ?? [],
+    tool_trajectory: (meta.tool_trajectory as ToolTrajectoryStep[]) ?? [],
+  };
+}
+
+let idSeq = 0;
+const localId = () => `local_${Date.now()}_${++idSeq}`;
+
+const DOCK_KEY = "gitreader_chat_dock";
+const DESKTOP_QUERY = "(min-width: 1024px)";
+
+/** Docked on desktop unless the reader collapsed it last time. */
+function initialOpen(): boolean {
+  try {
+    if (!window.matchMedia(DESKTOP_QUERY).matches) return false;
+    return localStorage.getItem(DOCK_KEY) !== "collapsed";
+  } catch {
+    return true;
+  }
+}
+
+function rememberOpen(open: boolean) {
+  try {
+    if (window.matchMedia(DESKTOP_QUERY).matches) {
+      localStorage.setItem(DOCK_KEY, open ? "open" : "collapsed");
+    }
+  } catch {
+    // Preference only; nothing to do without storage.
+  }
+}
+
+interface ChatPage {
+  code: string;
+  title: string;
+  /** First file listed for the page, used in an example question. */
+  file?: string;
+}
 
 interface ChatInterfaceProps {
   userId: string;
   repoUrl: string;
+  page?: ChatPage;
   currentPageContext?: string;
-  currentPageTitle?: string;
   initialChatId?: string;
-  onChatLoaded?: () => void;
+  /** `toc.byFile`, so answer notes can name the wiki chapters of a file. */
+  filePages?: Map<string, TocNode[]>;
+  onEvidence?: (path: string | null) => void;
 }
 
-export default function ChatInterface({ 
+const iconButtonClass =
+  "inline-flex h-8 w-8 items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-raised hover:text-fg aria-pressed:bg-accent-soft aria-pressed:text-accent";
+
+function HistoryList({
   userId,
-  repoUrl, 
-  currentPageContext,
-  currentPageTitle,
-  initialChatId,
-  onChatLoaded,
-}: ChatInterfaceProps) {
-  const [mode, setMode] = useState<'closed' | 'open'>('closed');
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
-  const [currentRepoUrl, setCurrentRepoUrl] = useState(repoUrl);
+  repoUrl,
+  items,
+  loading,
+  activeChatId,
+  onOpen,
+  onDeleted,
+}: {
+  userId: string;
+  repoUrl: string;
+  items: ChatHistoryItem[];
+  loading: boolean;
+  activeChatId?: string;
+  onOpen: (item: ChatHistoryItem) => void;
+  onDeleted: (chatId: string) => void;
+}) {
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setCurrentRepoUrl(repoUrl);
-  }, [repoUrl]);
-  const [inputValue, setInputValue] = useState('');
-  const { isStreaming, liveSteps, streamingAnswer, sendMessage } = useChatStream();
-  const [chatId, setChatId] = useState<string | undefined>(undefined);
-  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [isChatLoading, setIsChatLoading] = useState(false);
-  const [showHistorySidebar, setShowHistorySidebar] = useState(true);
-  const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
-
-  // Code Viewer state removed (moved to MessageItem)
-
-  // Resizable state
-  const [sidebarWidth, setSidebarWidth] = useState(760);
-  const [isResizing, setIsResizing] = useState(false);
-
-  useEffect(() => {
-    const savedWidth = localStorage.getItem('chat_sidebar_width');
-    const maxWidth = Math.floor(window.innerWidth * 0.9);
-    const minWidth = Math.floor(window.innerWidth * 0.5);
-    if (savedWidth) {
-      setSidebarWidth(Math.min(Math.max(parseInt(savedWidth, 10), minWidth), maxWidth));
+  const remove = async (chatId: string) => {
+    setBusy(chatId);
+    setError(null);
+    try {
+      await api.deleteChatHistory(chatId, userId);
+      onDeleted(chatId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+      setConfirming(null);
     }
-  }, []);
+  };
 
-  const startResizing = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsResizing(true);
-  }, []);
+  if (loading) {
+    return <p className="p-4 text-fg-muted text-sm">{t("loadingChat")}</p>;
+  }
+  if (items.length === 0) {
+    return (
+      <div className="p-4 text-sm">
+        <p className="text-fg">{t("noChatHistory")}</p>
+        <p className="mt-1 text-fg-muted">{t("startChatHint")}</p>
+      </div>
+    );
+  }
 
-  const stopResizing = useCallback(() => {
-    setIsResizing(false);
-    localStorage.setItem('chat_sidebar_width', sidebarWidth.toString());
-  }, [sidebarWidth]);
+  const dateFormat = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
-  const resize = useCallback(
-    (mouseMoveEvent: MouseEvent) => {
-      if (isResizing) {
-        const newWidth = window.innerWidth - mouseMoveEvent.clientX;
-        const maxWidth = Math.floor(window.innerWidth * 0.9);
-        const minWidth = Math.floor(window.innerWidth * 0.5);
-        if (newWidth >= minWidth && newWidth <= maxWidth) {
-          setSidebarWidth(newWidth);
-        }
-      }
-    },
-    [isResizing]
+  return (
+    <div>
+      <p className="px-4 pt-3 pb-1 font-mono text-fg-muted text-xs">
+        {repoFullName(repoUrl)}
+      </p>
+      {error ? (
+        <p role="alert" className="mx-4 my-2 font-mono text-fg text-xs">
+          {t("deleteFailed")}: {error}
+        </p>
+      ) : null}
+      <ul className="py-1">
+        {items.map((item) => {
+          const chatId = item.chat_id ?? item.id;
+          const active = chatId === activeChatId;
+          return (
+            <li
+              key={chatId}
+              className={cn(
+                "group flex items-stretch",
+                active ? "bg-raised" : "hover:bg-raised",
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => onOpen(item)}
+                aria-current={active ? "true" : undefined}
+                className="min-w-0 flex-1 px-4 py-2 text-left"
+              >
+                <span className="block truncate text-fg text-sm">
+                  {item.title || `${t("chatDefault")} ${chatId.slice(0, 8)}`}
+                </span>
+                <span className="block font-mono text-fg-muted text-xs tabular-nums">
+                  {dateFormat.format(new Date(item.created_at))}
+                </span>
+              </button>
+              {confirming === chatId ? (
+                <button
+                  type="button"
+                  onClick={() => remove(chatId)}
+                  disabled={busy === chatId}
+                  className="shrink-0 px-3 font-medium text-fg text-xs underline underline-offset-2"
+                >
+                  {busy === chatId ? t("chatDeleting") : t("chatConfirmDelete")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirming(chatId)}
+                  aria-label={t("chatDelete")}
+                  title={t("chatDelete")}
+                  className="shrink-0 px-3 text-fg-muted hover:text-fg [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
+                >
+                  <Trash2 aria-hidden className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
+}
 
+function EmptyState({
+  page,
+  onAsk,
+}: {
+  page?: ChatPage;
+  onAsk: (question: string) => void;
+}) {
+  const examples = page
+    ? [
+        t("chatExampleHow", { title: page.title }),
+        t("chatExampleFiles", { title: page.title }),
+        ...(page.file ? [t("chatExampleFile", { file: page.file })] : []),
+      ]
+    : [];
+  return (
+    <div className="px-4 py-6">
+      <p className="font-medium text-fg text-xl leading-snug tracking-tight">
+        {t("chatEmptyTitle")}
+      </p>
+      <p className="mt-2 text-fg-muted text-sm leading-relaxed">
+        {t("chatEmptyDetail")}
+      </p>
+      {examples.length > 0 ? (
+        <>
+          <p className="mt-6 flex items-center gap-2 font-mono text-fg-muted text-xs">
+            <span>{t("chatExamplesFor")}</span>
+            <span className="text-fg-muted">{page?.code}</span>
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {examples.map((question) => (
+              <li key={question}>
+                <button
+                  type="button"
+                  onClick={() => onAsk(question)}
+                  className="w-full rounded-xl border border-line bg-raised px-3 py-2.5 text-left text-fg text-sm leading-snug transition-colors hover:border-accent-line"
+                >
+                  {question}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+export default function ChatInterface({
+  userId,
+  repoUrl,
+  page,
+  currentPageContext,
+  initialChatId,
+  filePages,
+  onEvidence,
+}: ChatInterfaceProps) {
+  const [open, setOpenState] = useState(initialOpen);
+  const [view, setView] = useState<"chat" | "history">("chat");
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [chatId, setChatId] = useState<string | undefined>();
+  const [input, setInput] = useState("");
+  const [loadingChat, setLoadingChat] = useState(false);
+  const [history, setHistory] = useState<ChatHistoryItem[] | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const { isStreaming, liveSteps, streamingAnswer, sendMessage, stop } =
+    useChatStream();
+
+  const setOpen = useCallback((next: boolean) => {
+    setOpenState(next);
+    rememberOpen(next);
+  }, []);
+  useRegisterShellChat(open, setOpen);
+
+  // `/` opens the panel and puts the cursor in the question box. The focus
+  // happens in an effect because the box may not be mounted yet.
+  const [focusRequest, setFocusRequest] = useState(0);
+  const askShortcut = useCallback(() => {
+    setOpenState(true);
+    setView("chat");
+    setFocusRequest((n) => n + 1);
+  }, []);
+  useShortcut("/", askShortcut);
   useEffect(() => {
-    if (isResizing) {
-      window.addEventListener("mousemove", resize);
-      window.addEventListener("mouseup", stopResizing);
-    }
-    return () => {
-      window.removeEventListener("mousemove", resize);
-      window.removeEventListener("mouseup", stopResizing);
-    };
-  }, [isResizing, resize, stopResizing]);
-  
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fullViewInputRef = useRef<HTMLTextAreaElement>(null);
+    if (focusRequest > 0) inputRef.current?.focus();
+  }, [focusRequest]);
 
-  const scrollToBottom = useCallback(() => {
-    if (mode === 'open') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [mode]);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, mode, scrollToBottom]);
-
-  useEffect(() => {
-    if (mode === 'open' && fullViewInputRef.current) {
-      fullViewInputRef.current.focus();
-    }
-  }, [mode]);
-
-  useEffect(() => {
-    setChatId(undefined);
+  const showChat = async (id: string) => {
+    setView("chat");
+    setLoadingChat(true);
     setMessages([]);
-    loadChatHistory();
-  }, [repoUrl, userId]);
+    try {
+      const loaded = await api.getChatMessages(id);
+      setMessages(loaded.map(toDisplayMessage));
+      setChatId(id);
+    } finally {
+      setLoadingChat(false);
+    }
+  };
 
+  // Deep link: /app/wiki/:taskId?chatId=… opens that conversation.
   useEffect(() => {
     if (!initialChatId) return;
-    const loadAndOpen = async () => {
-      try {
-        const chatMessages = await api.getChatMessages(initialChatId);
-        const displayMessages: DisplayMessage[] = chatMessages.map(msg => {
-          const meta = msg.metadata || {};
-          return {
-            id: msg.id,
-            role: msg.role,
-            content: msg.content,
-            timestamp: new Date(msg.created_at),
-            sources: (meta.sources as string[]) || [],
-            tool_trajectory: (meta.tool_trajectory as ToolTrajectoryStep[]) || [],
-          };
-        });
-        setMessages(displayMessages);
+    let cancelled = false;
+    setOpenState(true);
+    setLoadingChat(true);
+    api
+      .getChatMessages(initialChatId)
+      .then((loaded) => {
+        if (cancelled) return;
+        setMessages(loaded.map(toDisplayMessage));
         setChatId(initialChatId);
-
-        setMode('open');
-      } catch (error) {
-        console.error('Failed to load initial chat:', error);
-      } finally {
-        onChatLoaded?.();
-      }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingChat(false);
+      });
+    return () => {
+      cancelled = true;
     };
-    void loadAndOpen();
   }, [initialChatId]);
 
-  const loadChatHistory = useCallback(async () => {
-    if (!userId) return;
-    setIsLoadingHistory(true);
-    try {
-      const history = await api.getChatHistory(userId);
-      const normalizedRepo = normalizeRepoUrl(repoUrl);
-      const repoHistory = history.filter(
-        h => normalizeRepoUrl(h.repo_url) === normalizedRepo
-      );
-      setChatHistory(repoHistory);
-    } catch (error) {
-      console.error('Failed to load chat history:', error);
-    } finally {
-      setIsLoadingHistory(false);
-    }
-  }, [userId, repoUrl]);
+  // The history list loads the first time it is shown.
+  const historyRequested = view === "history";
+  const historyLoaded = history !== null;
+  useEffect(() => {
+    if (!historyRequested || historyLoaded) return;
+    let cancelled = false;
+    api.getChatHistory(userId).then((all) => {
+      if (cancelled) return;
+      const repo = normalizeRepoUrl(repoUrl);
+      setHistory(all.filter((h) => normalizeRepoUrl(h.repo_url) === repo));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [historyRequested, historyLoaded, userId, repoUrl]);
 
-  const handleLoadChat = async (historyItem: ChatHistoryItem) => {
-    const effectiveChatId = historyItem.chat_id ?? historyItem.id;
-    setIsChatLoading(true);
-    setMessages([]);
-    setCurrentRepoUrl(historyItem.repo_url);
-    try {
-      const chatMessages = await api.getChatMessages(effectiveChatId);
-      const displayMessages: DisplayMessage[] = chatMessages.map(msg => {
-        const meta = msg.metadata || {};
-        return {
-          id: msg.id,
-          role: msg.role,
-          content: msg.content,
-          timestamp: new Date(msg.created_at),
-          sources: (meta.sources as string[]) || [],
-          tool_trajectory: (meta.tool_trajectory as ToolTrajectoryStep[]) || [],
-        };
-      });
-      setMessages(displayMessages);
-      setChatId(effectiveChatId);
-      
-      if (mode === 'closed') {
-        setMode('open');
-      }
-    } catch (error) {
-      console.error('Failed to load chat messages:', error);
-    } finally {
-      setIsChatLoading(false);
-    }
-  };
-
-  const handleNewChat = () => {
+  const newChat = () => {
+    if (isStreaming) stop();
     setChatId(undefined);
     setMessages([]);
-    if (fullViewInputRef.current) {
-      fullViewInputRef.current.focus();
-    }
+    setView("chat");
+    inputRef.current?.focus();
   };
 
-  const generateId = () => `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-  const handleSendMessage = async () => {
-    const question = inputValue.trim();
+  /** Runs one turn. `retry` re-asks without adding the question again. */
+  const ask = async (question: string, { retry = false } = {}) => {
     if (!question || isStreaming) return;
-
-    if (mode === 'closed') {
-      setMode('open');
+    setView("chat");
+    if (!retry) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: localId(),
+          role: "user",
+          content: question,
+          timestamp: new Date(),
+        },
+      ]);
     }
-
-    setInputValue('');
-
-    if (fullViewInputRef.current) fullViewInputRef.current.style.height = 'auto';
-
-    const userMessage: DisplayMessage = {
-      id: generateId(),
-      role: 'user',
-      content: question,
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, userMessage]);
-
+    const startedNew = !chatId;
     try {
       const result = await sendMessage({
         user_id: userId,
@@ -269,336 +390,277 @@ export default function ChatInterface({
         chat_id: chatId,
         current_page_context: currentPageContext,
       });
-
-      const isNewSession = !chatId;
       setChatId(result.chatId);
-
-      // Optimistically add the new session to the history sidebar without
-      // refetching the full list — the server already persisted it.
-      if (isNewSession) {
-        const title = generateChatPreview(question);
-        setChatHistory(prev => [{
-          id: result.chatId,
-          chat_id: result.chatId,
-          user_id: userId,
-          repo_url: repoUrl,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          title,
-        } as ChatHistoryItem, ...prev]);
+      if (startedNew) {
+        const now = new Date().toISOString();
+        setHistory((prev) =>
+          prev
+            ? [
+                {
+                  id: result.chatId,
+                  chat_id: result.chatId,
+                  user_id: userId,
+                  repo_url: repoUrl,
+                  created_at: now,
+                  updated_at: now,
+                  title: chatPreview(question),
+                },
+                ...prev,
+              ]
+            : prev,
+        );
       }
-
-      const assistantMessage: DisplayMessage = {
-        id: generateId(),
-        role: 'assistant',
-        content: result.answer,
-        timestamp: new Date(),
-        sources: result.sources,
-        tool_trajectory: result.trajectory,
-        isNew: false, // Don't use typewriter effect since we already streamed
-      };
-      setMessages(prev => [...prev, assistantMessage]);
-
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: localId(),
+          role: "assistant",
+          content: result.answer,
+          timestamp: new Date(),
+          sources: result.sources,
+          tool_trajectory: result.trajectory,
+        },
+      ]);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to send message';
-
-      const errorDisplayMessage: DisplayMessage = {
-        id: generateId(),
-        role: 'assistant',
-        content: errorMessage,
-        timestamp: new Date(),
-        isError: true,
-      };
-      setMessages(prev => [...prev, errorDisplayMessage]);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInputValue(e.target.value);
-    e.target.style.height = 'auto';
-    e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
-  };
-
-  const handleDeleteChat = async (historyItem: ChatHistoryItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!userId || !window.confirm(t('deleteConfirmDialog'))) return;
-
-    const effectiveChatId = historyItem.chat_id ?? historyItem.id;
-    setDeletingChatId(effectiveChatId);
-    
-    try {
-      await api.deleteChatHistory(effectiveChatId, userId);
-      setChatHistory(prev => prev.filter(item => (item.chat_id ?? item.id) !== effectiveChatId));
-      if (chatId === effectiveChatId) {
-        handleNewChat();
+      if (err instanceof ChatStreamStopped) {
+        if (err.chatId) setChatId(err.chatId);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: localId(),
+            role: "assistant",
+            content: err.partialAnswer,
+            timestamp: new Date(),
+            tool_trajectory: err.trajectory,
+            stopped: true,
+          },
+        ]);
+        return;
       }
-    } catch (error) {
-      console.error('Failed to delete chat:', error);
-      alert(t('deleteConfirm'));
-    } finally {
-      setDeletingChatId(null);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: localId(),
+          role: "assistant",
+          content: err instanceof Error ? err.message : String(err),
+          timestamp: new Date(),
+          isError: true,
+        },
+      ]);
     }
   };
 
-  const repoName = repoUrl.split('/').slice(-2).join('/');
+  const submit = () => {
+    const question = input.trim();
+    if (!question || isStreaming) return;
+    setInput("");
+    void ask(question);
+  };
+
+  const last = messages[messages.length - 1];
+  const retryQuestion =
+    last?.isError && !isStreaming
+      ? messages.findLast((m) => m.role === "user")?.content
+      : undefined;
+  const retry = () => {
+    if (!retryQuestion) return;
+    setMessages((prev) => prev.slice(0, -1));
+    void ask(retryQuestion, { retry: true });
+  };
+
+  if (!open) {
+    return (
+      <>
+        <div className="hidden w-12 shrink-0 flex-col items-center rounded-2xl border border-line bg-panel py-2 lg:flex">
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-label={t("chatOpen")}
+            title={t("chatOpenHint")}
+            className="flex flex-col items-center gap-2 px-2 py-3 text-fg-muted hover:bg-raised hover:text-fg"
+          >
+            <MessageSquare aria-hidden className="h-4 w-4" />
+            <span className="text-xs [writing-mode:vertical-rl]">
+              {t("chatAsk")}
+            </span>
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="fixed right-4 bottom-4 z-40 inline-flex h-10 items-center gap-2 rounded-full bg-accent-strong px-4 font-medium text-accent-fg text-sm lg:hidden"
+        >
+          <MessageSquare aria-hidden className="h-4 w-4" />
+          {t("chatAsk")}
+        </button>
+      </>
+    );
+  }
 
   return (
-    <>
-      <AnimatePresence>
-        {mode === 'closed' && (
-          <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.8, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="fixed bottom-8 right-8 z-40"
-          >
+    <aside
+      aria-label={t("chatPanel")}
+      // Full screen below lg: Esc returns to the page.
+      onKeyDown={(event) => {
+        if (
+          event.key === "Escape" &&
+          !window.matchMedia(DESKTOP_QUERY).matches
+        ) {
+          event.stopPropagation();
+          setOpen(false);
+        }
+      }}
+      className="fixed inset-0 z-50 flex flex-col bg-panel lg:static lg:z-auto lg:min-w-[22rem] lg:flex-[2_1_0%] lg:overflow-hidden xl:min-w-[30rem] lg:rounded-2xl lg:border lg:border-line"
+    >
+      <header className="flex h-12 shrink-0 items-center gap-1 border-line border-b pr-2 pl-4">
+        <h2 className="min-w-0 flex-1 truncate font-medium text-fg text-sm">
+          {t("chatAsk")}
+          {page ? (
+            <span className="ml-2 font-mono text-fg-muted text-xs">
+              {page.code}
+            </span>
+          ) : null}
+        </h2>
+        <button
+          type="button"
+          onClick={newChat}
+          aria-label={t("chatNew")}
+          title={t("chatNew")}
+          className={iconButtonClass}
+        >
+          <Plus aria-hidden className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setView(view === "history" ? "chat" : "history")}
+          aria-pressed={view === "history"}
+          aria-label={t("chatHistory")}
+          title={t("chatHistory")}
+          className={iconButtonClass}
+        >
+          <History aria-hidden className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          aria-label={t("chatCollapse")}
+          title={t("chatCollapse")}
+          className={iconButtonClass}
+        >
+          <PanelRightClose aria-hidden className="hidden h-4 w-4 lg:block" />
+          <X aria-hidden className="h-4 w-4 lg:hidden" />
+        </button>
+      </header>
+
+      {view === "history" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <HistoryList
+            userId={userId}
+            repoUrl={repoUrl}
+            items={history ?? []}
+            loading={history === null}
+            activeChatId={chatId}
+            onOpen={(item) => void showChat(item.chat_id ?? item.id)}
+            onDeleted={(id) => {
+              setHistory(
+                (prev) => prev?.filter((h) => h.chat_id !== id) ?? null,
+              );
+              if (id === chatId) newChat();
+            }}
+          />
+        </div>
+      ) : (
+        // column-reverse keeps the view pinned to the newest message while
+        // the answer streams, without scroll effects.
+        <div className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto">
+          <div className="grow px-4 py-4">
+            {loadingChat ? (
+              <p className="text-fg-muted text-sm">{t("loadingChat")}</p>
+            ) : messages.length === 0 && !isStreaming ? (
+              <EmptyState page={page} onAsk={(q) => void ask(q)} />
+            ) : (
+              messages.map((message) => (
+                <MessageItem
+                  key={message.id}
+                  message={message}
+                  repoUrl={repoUrl}
+                  filePages={filePages}
+                  onEvidence={onEvidence}
+                />
+              ))
+            )}
+
+            {isStreaming ? (
+              <LiveStepFlow
+                steps={liveSteps}
+                streamingAnswer={streamingAnswer}
+              />
+            ) : null}
+
+            {retryQuestion ? (
+              <button
+                type="button"
+                onClick={retry}
+                className="mb-4 inline-flex items-center gap-2 rounded-full border border-line px-3 py-1.5 text-fg text-sm hover:border-line-strong"
+              >
+                <RotateCw aria-hidden className="h-3.5 w-3.5" />
+                {t("retry")}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+        className="shrink-0 p-3"
+      >
+        <div className="flex items-end gap-2 rounded-3xl border border-line bg-raised pl-2 focus-within:border-accent-line">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                submit();
+              }
+            }}
+            rows={2}
+            placeholder={
+              page
+                ? t("chatPlaceholderPage", { code: page.code })
+                : t("chatPlaceholder")
+            }
+            aria-label={t("chatInputLabel")}
+            className="field-sizing-content max-h-40 min-h-[3.25rem] flex-1 resize-none bg-transparent px-3 py-2.5 text-fg text-sm leading-relaxed outline-none placeholder:text-fg-faint"
+          />
+          {isStreaming ? (
             <button
-              onClick={() => setMode('open')}
-              className="inline-flex items-center gap-2.5 rounded-full border border-sky-200 bg-white px-5 py-3.5 text-base font-medium text-sky-900 shadow-lg shadow-stone-900/10 hover:bg-sky-50 hover:scale-105 hover:border-sky-300 transition-all duration-300"
-              aria-label="Open chat sidebar"
+              type="button"
+              onClick={stop}
+              aria-label={t("chatStop")}
+              title={t("chatStop")}
+              className="m-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fg text-bg"
             >
-              <MessageSquare className="w-5 h-5" />
-              Chat
+              <Square aria-hidden className="h-3 w-3 fill-current" />
             </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {mode === 'open' && (
-          <motion.div
-            initial={{ x: '100%' }}
-            animate={{ x: 0 }}
-            exit={{ x: '100%' }}
-            transition={{ duration: 0.2 }}
-            className="fixed top-0 right-0 bottom-0 z-50 bg-white border-l border-stone-200 flex flex-col shadow-[-12px_0_40px_rgba(0,0,0,0.08)]"
-            style={{ width: sidebarWidth }}
-          >
-            {/* Drag Handle */}
-            <div
-              className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-sky-300 z-[60] transition-colors"
-              onMouseDown={startResizing}
-            />
-
-            <header className="h-14 border-b border-stone-200 flex items-center justify-between px-4 bg-stone-50/90">
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={() => setShowHistorySidebar((prev) => !prev)}
-                  className="inline-flex items-center gap-2 text-sm text-stone-600 hover:text-stone-900 transition-colors"
-                  aria-label="Toggle history sidebar"
-                >
-                  <History className="w-4 h-4" />
-                  <span className="font-mono">{repoName}</span>
-                </button>
-                {currentPageTitle && (
-                  <>
-                    <span className="text-stone-300">/</span>
-                    <span className="text-sm text-stone-800 truncate max-w-[200px]">{currentPageTitle}</span>
-                  </>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={() => setMode('closed')}
-                  className="p-2 text-stone-500 hover:text-stone-900 transition-colors"
-                  aria-label="Close chat"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </header>
-
-            <div className="flex-1 flex overflow-hidden">
-              {/* Chat history sidebar */}
-              <aside className={cn(
-                "w-64 border-r border-stone-200 bg-stone-50 flex-col transition-all duration-300",
-                showHistorySidebar ? "hidden sm:flex" : "hidden"
-              )}>
-                <div className="p-3 border-b border-stone-200 flex items-center justify-between">
-                  <h3 className="text-sm font-medium text-stone-800 flex items-center gap-2">
-                    <History className="w-4 h-4 text-sky-600" />
-                    {t('chatHistory')}
-                  </h3>
-                  <button
-                    onClick={handleNewChat}
-                    className="p-1.5 rounded-lg bg-sky-100 text-sky-800 hover:bg-sky-200 active:scale-95 transition-all border border-sky-200/80"
-                    aria-label="New chat"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
-                  {isLoadingHistory ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="w-5 h-5 text-stone-400 animate-spin" />
-                    </div>
-                  ) : chatHistory.length === 0 ? (
-                    <div className="text-center py-8">
-                      <MessageSquare className="w-8 h-8 text-stone-400 mx-auto mb-2" />
-                      <p className="text-xs text-stone-600">{t('noChatHistory')}</p>
-                      <p className="text-xs text-stone-500 mt-1">{t('startChatHint')}</p>
-                    </div>
-                  ) : (
-                    chatHistory.map((item) => {
-                      const effectiveChatId = item.chat_id ?? item.id;
-                      return (
-                      <div
-                        key={item.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => handleLoadChat(item)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleLoadChat(item)}
-                        className={cn(
-                          "w-full text-left p-2.5 rounded-lg transition-all group cursor-pointer",
-                          chatId === effectiveChatId
-                            ? "bg-sky-100 border border-sky-200"
-                            : "hover:bg-stone-100 border border-transparent"
-                        )}
-                        aria-label={`Load chat ${item.title || effectiveChatId.slice(0, 8)}`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <MessageSquare className={cn(
-                            "w-4 h-4 shrink-0",
-                            chatId === effectiveChatId ? "text-sky-700" : "text-stone-500 group-hover:text-stone-600"
-                          )} />
-                          <span className={cn(
-                            "text-sm truncate flex-1",
-                            chatId === effectiveChatId ? "text-stone-900" : "text-stone-600 group-hover:text-stone-800"
-                          )}>
-                            {item.title || `${t('chatDefault')} ${effectiveChatId.slice(0, 8)}`}
-                          </span>
-                          
-                          {/* Delete Button */}
-                          <button
-                            onClick={(e) => handleDeleteChat(item, e)}
-                            className="p-1 rounded text-stone-500 hover:text-rose-700 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-all"
-                            disabled={deletingChatId === effectiveChatId}
-                          >
-                            {deletingChatId === effectiveChatId ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <Trash2 className="w-3 h-3" />
-                            )}
-                          </button>
-                        </div>
-                        <div className="mt-1 text-[10px] text-stone-500 ml-6">
-                          {new Date(item.created_at).toLocaleDateString('en-US', { 
-                            month: 'short', 
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </div>
-                      </div>
-                    );
-                    })
-                  )}
-                </div>
-              </aside>
-
-              {/* Main chat area */}
-              <div className="flex-1 flex flex-col min-w-0 relative bg-white">
-                <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 custom-scrollbar scroll-smooth">
-                  {isChatLoading && (
-                    <div className="flex flex-col items-center justify-center h-full text-center">
-                      <Loader2 className="w-8 h-8 text-sky-600 animate-spin mb-4" />
-                      <p className="text-sm text-stone-600">{t('loadingChat')}</p>
-                    </div>
-                  )}
-                  {messages.length === 0 && !isStreaming && !isChatLoading && (
-                    <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                      <div className="w-16 h-16 rounded-3xl bg-teal-50 border border-teal-100 flex items-center justify-center mb-6 shadow-sm">
-                        <Bot className="w-8 h-8 text-teal-700" />
-                      </div>
-                      <h2 className="text-2xl font-semibold text-stone-900 mb-3">
-                        {t('agentDeepAnalysis')}
-                      </h2>
-                      <p className="text-[15px] text-stone-600 max-w-md leading-relaxed">
-                        {t('agentDesc')}
-                      </p>
-                    </div>
-                  )}
-                  <div className="space-y-2">
-                    {messages.map((message) => (
-                      <div key={message.id} className="max-w-3xl mx-auto px-2 md:px-0">
-                        <MessageItem message={message} repoUrl={currentRepoUrl} />
-                      </div>
-                    ))}
-                  </div>
-                  
-                  {isStreaming && (
-                    <div className="max-w-3xl mx-auto px-2 md:px-0 mt-4">
-                      <div className="ml-2 md:ml-12 p-4 rounded-xl bg-stone-50 border border-stone-200">
-                        <LiveStepFlow
-                          steps={liveSteps}
-                          isAgent={true}
-                          currentPhase={t('agentWorking')}
-                          streamingAnswer={streamingAnswer}
-                        />
-                        {liveSteps.length === 0 && (
-                          <div className="flex items-center gap-3 text-sm text-teal-700">
-                            <Bot className="w-4 h-4 animate-pulse" />
-                            <span className="font-medium tracking-wide">{t('agentWorking')}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  <div ref={messagesEndRef} className="h-4" />
-                </div>
-
-                <div className="p-4 md:p-6 bg-gradient-to-t from-stone-50 via-white to-transparent shrink-0 border-t border-stone-100">
-                  <div className="max-w-3xl mx-auto relative space-y-3">
-                    <div className="relative bg-white border border-stone-200 rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-sky-200 focus-within:border-sky-300 transition-all shadow-sm">
-                      <textarea
-                        ref={fullViewInputRef}
-                        value={inputValue}
-                        onChange={handleInputChange}
-                        onKeyDown={handleKeyDown}
-                        placeholder="Ask Agent to analyze the codebase..."
-                        className="w-full bg-transparent border-none outline-none text-[15px] text-stone-900 placeholder:text-stone-400 resize-none px-4 py-3.5 max-h-[200px] leading-relaxed"
-                        rows={1}
-                        disabled={isStreaming}
-                        aria-label="Follow-up question"
-                      />
-                      <div className="flex items-center justify-between px-3 pb-3">
-                        <div className="flex items-center gap-1.5">
-                          <Bot className="w-3.5 h-3.5 text-teal-600" />
-                          <span className="text-[11px] font-medium text-teal-700">Agent</span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={handleSendMessage}
-                            disabled={!inputValue.trim() || isStreaming}
-                            className={cn(
-                              "p-2 rounded-xl transition-all shadow-sm",
-                              inputValue.trim() && !isStreaming
-                                ? "bg-teal-600 text-white hover:bg-teal-500"
-                                : "bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200"
-                            )}
-                            aria-label="Send message"
-                          >
-                            <ArrowUp className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              aria-label={t("chatSend")}
+              title={t("chatSend")}
+              className="m-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-strong text-accent-fg disabled:bg-overlay disabled:text-fg-muted"
+            >
+              <ArrowUp aria-hidden className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </form>
+    </aside>
   );
 }

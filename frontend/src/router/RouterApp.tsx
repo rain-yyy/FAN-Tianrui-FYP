@@ -1,34 +1,60 @@
-'use client';
+"use client";
 
-import { Suspense, lazy, useMemo } from 'react';
+import { lazy, Suspense, useMemo } from "react";
 import {
+  createBrowserRouter,
   Navigate,
   Outlet,
   RouterProvider,
-  createBrowserRouter,
   useLocation,
-} from 'react-router-dom';
-import AppLayout from '@/layouts/AppLayout';
-import RootLayoutView from '@/layouts/RootLayoutView';
-import { AuthProvider } from '@/providers/AuthProvider';
-import { useAuth } from '@/providers/AuthProvider';
-import { AuthGuard, GlobalRouteGuard, RoutePermissionGuard } from '@/router/guards';
-import RouteErrorPage from '@/views/RouteErrorPage';
-import NotFoundPage from '@/views/NotFoundPage';
+} from "react-router-dom";
+import AppLayout from "@/layouts/AppLayout";
+import RootLayoutView from "@/layouts/RootLayoutView";
+import { AuthProvider, useAuth } from "@/providers/AuthProvider";
+import {
+  AuthGuard,
+  GlobalRouteGuard,
+  RoutePermissionGuard,
+} from "@/router/guards";
+import NotFoundPage from "@/views/NotFoundPage";
+import RouteErrorPage from "@/views/RouteErrorPage";
 
-const LoginRoute = lazy(() => import(/* webpackChunkName: "route-login" */ '@/router/routes/LoginRoute'));
+const LoginRoute = lazy(
+  () =>
+    import(/* webpackChunkName: "route-login" */ "@/router/routes/LoginRoute"),
+);
 const AuthCallbackRoute = lazy(
-  () => import(/* webpackChunkName: "route-auth-callback" */ '@/router/routes/AuthCallbackRoute')
+  () =>
+    import(
+      /* webpackChunkName: "route-auth-callback" */ "@/router/routes/AuthCallbackRoute"
+    ),
 );
 const DashboardRoute = lazy(
-  () => import(/* webpackChunkName: "route-dashboard" */ '@/router/routes/DashboardRoute')
+  () =>
+    import(
+      /* webpackChunkName: "route-dashboard" */ "@/router/routes/DashboardRoute"
+    ),
 );
-const HistoryRoute = lazy(() => import(/* webpackChunkName: "route-history" */ '@/router/routes/HistoryRoute'));
-const WikiRoute = lazy(() => import(/* webpackChunkName: "route-wiki" */ '@/router/routes/WikiRoute'));
+const HistoryRoute = lazy(
+  () =>
+    import(
+      /* webpackChunkName: "route-history" */ "@/router/routes/HistoryRoute"
+    ),
+);
+const WikiRoute = lazy(
+  () =>
+    import(/* webpackChunkName: "route-wiki" */ "@/router/routes/WikiRoute"),
+);
 
 function SuspenseOutlet() {
   return (
-    <Suspense fallback={<div className="min-h-[40vh] flex items-center justify-center">Loading route...</div>}>
+    <Suspense
+      fallback={
+        <div className="min-h-[40vh] flex items-center justify-center">
+          Loading route...
+        </div>
+      }
+    >
       <Outlet />
     </Suspense>
   );
@@ -37,15 +63,15 @@ function SuspenseOutlet() {
 function RestoreLastPath() {
   const location = useLocation();
   const { user } = useAuth();
-  const tracked = localStorage.getItem('wiki_route_tracking');
-  if (location.pathname !== '/' || !tracked) {
+  const tracked = localStorage.getItem("wiki_route_tracking");
+  if (location.pathname !== "/" || !tracked) {
     return <Navigate to="/app/dashboard" replace />;
   }
 
   try {
     const payload = JSON.parse(tracked) as { path?: string };
-    if (payload.path?.startsWith('/')) {
-      if (user && payload.path.startsWith('/login')) {
+    if (payload.path?.startsWith("/") && payload.path !== "/") {
+      if (user && payload.path.startsWith("/login")) {
         return <Navigate to="/app/dashboard" replace />;
       }
       return <Navigate to={payload.path} replace />;
@@ -62,7 +88,7 @@ export default function RouterApp() {
     () =>
       createBrowserRouter([
         {
-          path: '/',
+          path: "/",
           element: <RootLayoutView />,
           errorElement: <RouteErrorPage />,
           children: [
@@ -76,47 +102,59 @@ export default function RouterApp() {
                 {
                   element: <SuspenseOutlet />,
                   children: [
-                    { path: 'login', element: <LoginRoute /> },
-                    { path: 'auth/callback', element: <AuthCallbackRoute /> },
+                    { path: "login", element: <LoginRoute /> },
+                    { path: "auth/callback", element: <AuthCallbackRoute /> },
                   ],
                 },
                 {
                   element: <AuthGuard />,
                   children: [
-                    { path: 'dashboard', element: <Navigate to="/app/dashboard" replace /> },
                     {
-                      path: 'app',
+                      path: "dashboard",
+                      element: <Navigate to="/app/dashboard" replace />,
+                    },
+                    {
+                      path: "app",
                       element: <AppLayout />,
                       children: [
-                        { index: true, element: <Navigate to="/app/dashboard" replace /> },
+                        {
+                          index: true,
+                          element: <Navigate to="/app/dashboard" replace />,
+                        },
                         {
                           element: <SuspenseOutlet />,
-                          children: [{ path: 'dashboard', element: <DashboardRoute /> }],
+                          children: [
+                            { path: "dashboard", element: <DashboardRoute /> },
+                          ],
                         },
                         {
                           element: <RoutePermissionGuard requiredRole="user" />,
                           children: [
                             {
                               element: <SuspenseOutlet />,
-                              children: [{ path: 'history', element: <HistoryRoute /> }],
+                              children: [
+                                { path: "history", element: <HistoryRoute /> },
+                              ],
                             },
                           ],
                         },
                         {
                           element: <SuspenseOutlet />,
-                          children: [{ path: 'wiki/:taskId', element: <WikiRoute /> }],
+                          children: [
+                            { path: "wiki/:taskId", element: <WikiRoute /> },
+                          ],
                         },
                       ],
                     },
                   ],
                 },
-                { path: '*', element: <NotFoundPage /> },
+                { path: "*", element: <NotFoundPage /> },
               ],
             },
           ],
         },
       ]),
-    []
+    [],
   );
 
   return (
