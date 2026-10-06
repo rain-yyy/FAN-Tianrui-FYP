@@ -1,37 +1,40 @@
-# OS files
+# ── OS / editor ──────────────────────────────
 .DS_Store
 Thumbs.db
+.idea/
 
-# Environments
+# ── Secrets / env (repo root, docker/, frontend/) ──
 .env
+.env*.local
 
-# Python
-**/__pycache__/
-.venv/
-**/.venv/
-
-# RepoMapper artifacts
-.repomap.tags.cache.v*
-
-# 仓库根持久化目录（vector_stores、repos 等）
+# ── Runtime data (repo root) ─────────────────
+# Cloned repos, vector stores, code graphs written by the backend
 /data/
 
-# Debug artifact from ingestion code graph builder
-/docker/code_graph.json
+# ── Backend (docker/) ────────────────────────
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage*
+*.log
 
+# ── Frontend (frontend/) ─────────────────────
 frontend/node_modules/
 frontend/.next/
-frontend/tsconfig.tsbuildinfo
-.vercel
-.env*.local
-frontend/.env.local
+frontend/next-env.d.ts
+*.tsbuildinfo
 
-# Generated per-repo vector store / code graph data
-/vector_store/
+# ── Deploy tooling ───────────────────────────
+.vercel/
 
-# cache
-docker/.pytest_cache/
-docker/.ruff_cache/
+# ── Local AI tooling / skills (not committed) ─
+.agents/
+.claude/
+frontend/.impeccable/
+frontend/PRODUCT.md
+frontend/DESIGN.md
+frontend/example/
 
-# todo
+# ── Personal ─────────────────────────────────
 todo.txt
